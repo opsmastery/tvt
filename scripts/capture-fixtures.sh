@@ -38,7 +38,8 @@ fi
 echo "Loki ($LOKI)"
 get "$LOKI/loki/api/v1/rules" "$OUT/loki/rules.yaml"
 get "$LOKI/loki/api/v1/index/volume" "$OUT/loki/volume_by_stream.json" -G \
-  --data-urlencode 'query={app=~".+"}' --data-urlencode 'since=24h'
+  --data-urlencode 'query={app=~".+"}' --data-urlencode 'since=24h' --data-urlencode 'aggregateBy=series' \
+  --data-urlencode 'targetLabels=app,component,level'
 get "$LOKI/loki/api/v1/labels" "$OUT/loki/labels.json"
 
 echo "Grafana ($GRAFANA)"
