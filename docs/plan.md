@@ -25,6 +25,22 @@ Assumptions:
 | SQLite driver | Pure-Go `modernc.org/sqlite` | Keeps a single static binary with no CGO | Sprint 1 |
 | Pricing anchor | Defer to Phase 2. Ask partners about willingness to pay in the meantime. | Doesn't block the MVP | Phase 2 |
 
+## Prior art: zeroreads (reviewed Nov 9)
+
+[zeroreads](https://github.com/Bisman-Singh/zeroreads) (Apache 2.0, v0.1.2, Oct 2026) proves, one log-line template at a time, that no query reads a set of Loki or OpenSearch lines. It then writes pipeline config to cut them. It's logs-only, treats every stored dashboard as a reader whether anyone views it or not, and doesn't rank by cost. The full comparison is in [zeroreads vs. tvt](https://claude.ai/artifact/7CHyVw2724T9u1PQSbfSGv).
+
+Decisions:
+
+1. **Lead with what zeroreads doesn't do:** metrics and cardinality, dashboard-view evidence, ranking by cost and value with a PR gated by `check`, and history across scans.
+2. **Don't build line-level log removal** (ADR 0006). For findings like the lab's `/healthz` success lines, the report names the stream, its dominant unread pattern (Loki patterns API) and the estimated savings, and points to zeroreads for the proven cut.
+3. **Grafana-managed alert and recording rules become hard keeps in Sprint 2.** Without them, a metric used only by a Grafana alert would rank as unused, which breaks the promise behind `check`.
+4. **Borrow its evidence discipline:** exact or assumed references, a marker query that proves the query log is live, evidence gaps that block proposals until acknowledged, least-lossy actions first, parser coverage on a public dashboard corpus, and signed releases.
+5. **LogQL parser:** at the start of Sprint 2, check whether copying zeroreads' parser (Apache 2.0, about 1,300 lines, no dependencies, attribution in NOTICE) beats writing ADR 0005's extractor from scratch.
+6. **Go version:** move from 1.26 to the newest supported release (zeroreads builds with 1.27), per ADR 0004.
+7. **Open question:** integrate with zeroreads (emit its rules for line-level candidates) or just link to it.
+
+> The live plan (claude.ai Docs) also has Phase 0 results for Loki, Mimir and spikes 3–4, Sprint 2 additions and an updated checklist that this export predates. Re-export it to bring this file fully up to date.
+
 ## Phase 0: pre-work (Nov 9 – Nov 30)
 
 The aim is to start December with no open questions on the critical path. Partners also need query logging switched on now, because the January scan needs 30 days of history.
@@ -161,7 +177,7 @@ Most of the engineering risk is concentrated in these five problems. Budget time
 | Partner security review holds up read-only access | Start the paperwork in Phase 0. Lean on the facts that it's a single binary run on their side and that reports stay local. |
 | Building alone while job-hunting | Each sprint ends with something that works. Keep the cut list above handy. |
 | OSS Grafana exposes no view data | Resolved: use Grafana router logs for dashboard loads. Where those aren't available, treat every dashboard as referenced, which is safer but finds fewer savings, and say so in the report. |
-| The Loki parser's dependencies bloat the binary | Vendor only the LogQL syntax subset |
+| The Loki parser's dependencies bloat the binary | Resolved by ADR 0005: no Loki code (AGPL). Own extractor, or zeroreads' Apache-2.0 parser with NOTICE attribution |
 | Label-drop edge cases cause a bad recommendation | `check` fails closed. Recommend routing to cold storage over deletion. Label drops ship behind a flag until partner precision is proven. |
 
 ## Immediate next steps
