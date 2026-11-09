@@ -1,6 +1,6 @@
 # 0003. `tvt check` runs offline against a committed protection manifest
 
-Date: 2026-11-08 · Status: proposed (finalize before Sprint 4)
+Date: 2026-11-08 · Status: proposed (finalize before Sprint 4) · Amended by ADR 0007: one manifest per pipeline repo
 
 ## Context
 
