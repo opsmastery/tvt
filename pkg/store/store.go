@@ -245,6 +245,53 @@ func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 	return out, rows.Err()
 }
 
+// Sources returns the coverage of each evidence source in scan scanID,
+// ordered by source.
+func (s *Store) Sources(ctx context.Context, scanID int64) ([]graph.SourceCoverage, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT source, configured, coverage, window_start FROM scan_sources WHERE scan_id = ? ORDER BY source`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.SourceCoverage
+	for rows.Next() {
+		var src graph.SourceCoverage
+		var configured int
+		var start int64
+		if err := rows.Scan(&src.Source, &configured, &src.Coverage, &start); err != nil {
+			return nil, err
+		}
+		src.Configured, src.WindowStart = configured == 1, fromMillis(start)
+		out = append(out, src)
+	}
+	return out, rows.Err()
+}
+
+// Loads returns the dashboard loads recorded in scan scanID, ordered by
+// org, dashboard, login and kind.
+func (s *Store) Loads(ctx context.Context, scanID int64) ([]graph.DashboardLoad, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT org_id, dashboard_uid, login, browser, loads, last_at FROM dashboard_loads WHERE scan_id = ?
+		 ORDER BY org_id, dashboard_uid, login, browser`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.DashboardLoad
+	for rows.Next() {
+		var l graph.DashboardLoad
+		var browser int
+		var last int64
+		if err := rows.Scan(&l.OrgID, &l.DashboardUID, &l.Login, &browser, &l.Loads, &last); err != nil {
+			return nil, err
+		}
+		l.Browser, l.LastAt = browser == 1, fromMillis(last)
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 // Scan is an open scan: a transaction that writes one complete graph.
 // Call Finish to commit it or Abort to discard it; deferring Abort right
 // after BeginScan is safe, since Abort after Finish does nothing.
@@ -258,6 +305,8 @@ type Scan struct {
 	cons    *sql.Stmt
 	ref     *sql.Stmt
 	cost    *sql.Stmt
+	source  *sql.Stmt
+	load    *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -325,6 +374,10 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 				observed_at = excluded.observed_at, active_series = excluded.active_series,
 				bytes_per_day = excluded.bytes_per_day, spans_per_day = excluded.spans_per_day,
 				monthly_cost = excluded.monthly_cost`},
+		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start)
+			VALUES (?, ?, ?, ?, ?)`},
+		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`},
 	} {
 		if *p.dst, err = tx.PrepareContext(ctx, p.sql); err != nil {
 			return fail(err)
@@ -402,6 +455,35 @@ func (sc *Scan) PutCost(ctx context.Context, c graph.Cost) error {
 	return wrap("cost", c.SignalID, err)
 }
 
+// PutSource records one usage-evidence source's coverage. Each source is
+// put once per scan.
+func (sc *Scan) PutSource(ctx context.Context, src graph.SourceCoverage) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if src.Source == "" || src.WindowStart.IsZero() {
+		return errors.New("store: source: Source and WindowStart are required")
+	}
+	if src.Coverage < 0 || src.Coverage > 1 {
+		return fmt.Errorf("store: source %q: coverage %v outside 0..1", src.Source, src.Coverage)
+	}
+	_, err := sc.source.ExecContext(ctx, sc.ID, src.Source, boolInt(src.Configured), src.Coverage, millis(src.WindowStart))
+	return wrap("source", src.Source, err)
+}
+
+// PutLoad records aggregated dashboard loads. Each (org, dashboard, login,
+// browser) is put once per scan; the caller aggregates.
+func (sc *Scan) PutLoad(ctx context.Context, l graph.DashboardLoad) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if l.DashboardUID == "" || l.LastAt.IsZero() || l.Loads < 1 {
+		return fmt.Errorf("store: load of %q: DashboardUID, LastAt and Loads are required", l.DashboardUID)
+	}
+	_, err := sc.load.ExecContext(ctx, sc.ID, l.OrgID, l.DashboardUID, l.Login, boolInt(l.Browser), l.Loads, millis(l.LastAt))
+	return wrap("load", l.DashboardUID, err)
+}
+
 // Finish commits the scan with its log coverage (0..1). A reference or cost
 // pointing at a signal or consumer that doesn't exist fails the commit and
 // discards the scan.
@@ -446,6 +528,13 @@ func wrap(what, id string, err error) error {
 }
 
 func millis(t time.Time) int64 { return t.UnixMilli() }
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
 
 func nullMillis(t time.Time) any {
 	if t.IsZero() {
