@@ -23,7 +23,7 @@ get() { # url outfile [curl args...]
 }
 
 echo "Prometheus ($PROM)"
-get "$PROM/api/v1/status/tsdb?limit=1000" "$OUT/prometheus/tsdb.json"
+get "$PROM/api/v1/status/tsdb?limit=100000" "$OUT/prometheus/tsdb.json"
 get "$PROM/api/v1/rules"                  "$OUT/prometheus/rules.json"
 get "$PROM/api/v1/label/__name__/values"  "$OUT/prometheus/metric_names.json"
 get "$PROM/api/v1/status/buildinfo"       "$OUT/prometheus/buildinfo.json"
