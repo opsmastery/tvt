@@ -30,6 +30,14 @@ type DashboardSource interface {
 	Dashboards(ctx context.Context) ([]Dashboard, error)
 }
 
+// ViewSource reports dashboard loads, for Grafana editions without usage
+// insights (OSS: the router log's GET /api/dashboards/uid/:uid lines).
+type ViewSource interface {
+	DashboardViews(ctx context.Context, since time.Time) ([]DashboardView, error)
+	// Coverage reports how complete the log is for the window, 0..1.
+	Coverage(ctx context.Context, since time.Time) (float64, error)
+}
+
 // QueryLogSource returns queries observed since a point in time
 // (Prometheus query log, Mimir/Loki query-frontend logs, agent audit logs).
 type QueryLogSource interface {
@@ -95,6 +103,9 @@ type Panel struct {
 }
 
 // PanelQuery is one query (target) in a panel.
+//
+// DatasourceUID "$name" means a datasource template variable: the query can
+// run against any datasource of DatasourceType, so it references all of them.
 type PanelQuery struct {
 	DatasourceUID  string
 	DatasourceType string // "prometheus", "loki", ...
@@ -109,6 +120,18 @@ type Variable struct {
 	DatasourceType string
 }
 
+// DashboardView is one load of a dashboard's JSON.
+type DashboardView struct {
+	DashboardUID string
+	OrgID        int64 // dashboard UIDs are only unique within an organization
+	User         string
+	At           time.Time
+	// Browser is true when the load came from the dashboard page in a
+	// browser (Referer is the dashboard URL). False means an API client:
+	// a script, a provisioning tool, or a browser with referrers disabled.
+	Browser bool
+}
+
 // LoggedQuery is one query seen in a query log.
 type LoggedQuery struct {
 	Source       string // backend the log came from
@@ -116,6 +139,7 @@ type LoggedQuery struct {
 	Language     string // "promql", "logql", "traceql"
 	At           time.Time
 	Actor        string // user, service account or agent, when known
+	Client       string // client IP or user agent, when the log records one
 	DashboardUID string // when the request carried dashboard attribution
 	PanelID      int
 }
