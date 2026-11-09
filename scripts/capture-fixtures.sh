@@ -45,6 +45,10 @@ get "$LOKI/loki/api/v1/labels" "$OUT/loki/labels.json"
 echo "Grafana ($GRAFANA)"
 get "$GRAFANA/api/search?type=dash-db" "$OUT/grafana/search.json" -u "$GRAFANA_AUTH"
 get "$GRAFANA/api/datasources"         "$OUT/grafana/datasources.json" -u "$GRAFANA_AUTH"
+# Grafana-managed alert and recording rules (Sprint 2 hard keeps): the
+# Prometheus-compatible ruler view and the provisioning view.
+get "$GRAFANA/api/prometheus/grafana/api/v1/rules" "$OUT/grafana/ruler_rules.json" -u "$GRAFANA_AUTH"
+get "$GRAFANA/api/v1/provisioning/alert-rules"     "$OUT/grafana/provisioning_alert_rules.json" -u "$GRAFANA_AUTH"
 for uid in shop-overview legacy-queue; do
   get "$GRAFANA/api/dashboards/uid/$uid" "$OUT/grafana/dashboard_$uid.json" -u "$GRAFANA_AUTH"
 done
