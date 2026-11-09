@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -211,25 +212,74 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		return err
 	}
 
-	st, err := store.Open(ctx, o.DB)
+	id, err := save(ctx, o.DB, start, o.Window, g)
 	if err != nil {
-		return err
-	}
-	defer st.Close()
-	sc, err := st.BeginScan(ctx, start, o.Window)
-	if err != nil {
-		return err
-	}
-	defer sc.Abort() // no-op after Finish
-	if err := write(ctx, sc, g); err != nil {
-		return err
-	}
-	if err := sc.Finish(ctx, g.LogCoverage); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "scan %d written to %s: %d signals, %d consumers, %d dashboard loads, log coverage %s\n",
-		sc.ID, o.DB, len(g.Signals), len(g.Consumers), len(g.Loads), percent(g.LogCoverage))
+		id, o.DB, len(g.Signals), len(g.Consumers), loads(g), percent(g.LogCoverage))
 	return nil
+}
+
+// scanBeforeWrite runs after the store is open; tests use it to fail a scan
+// mid-write.
+var scanBeforeWrite = func() error { return nil }
+
+// save writes g as one scan and returns its ID. Open initializes a new
+// database's schema in its own transaction, so if save created the file and
+// the scan doesn't commit, it removes the file again: a failed scan never
+// leaves a database behind. An existing database keeps its previous scans.
+func save(ctx context.Context, path string, start time.Time, windowDays int, g scan.Output) (id int64, err error) {
+	_, statErr := os.Stat(path)
+	created := errors.Is(statErr, fs.ErrNotExist)
+	st, err := store.Open(ctx, path)
+	if err != nil {
+		if created {
+			removeDB(path)
+		}
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if cerr := st.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+		if created && !committed {
+			removeDB(path)
+		}
+	}()
+	if err := scanBeforeWrite(); err != nil {
+		return 0, err
+	}
+	sc, err := st.BeginScan(ctx, start, windowDays)
+	if err != nil {
+		return 0, err
+	}
+	defer sc.Abort() // no-op after Finish
+	if err := write(ctx, sc, g); err != nil {
+		return 0, err
+	}
+	if err := sc.Finish(ctx, g.LogCoverage); err != nil {
+		return 0, err
+	}
+	committed = true
+	return sc.ID, nil
+}
+
+// removeDB deletes a SQLite database and its sidecar files.
+func removeDB(path string) {
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		os.Remove(path + suffix)
+	}
+}
+
+// loads is the number of dashboard loads; each graph row aggregates several.
+func loads(g scan.Output) int64 {
+	var n int64
+	for _, l := range g.Loads {
+		n += l.Loads
+	}
+	return n
 }
 
 func write(ctx context.Context, sc *store.Scan, g scan.Output) error {

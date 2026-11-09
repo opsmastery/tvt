@@ -120,7 +120,7 @@ func TestScanLab(t *testing.T) {
 		t.Fatalf("scan: %v\n%s", err, out.String())
 	}
 	t.Log("\n" + out.String())
-	for _, want := range []string{"prom ", "5 rules", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written"} {
+	for _, want := range []string{"prom ", "5 rules", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "19 dashboard loads (19 in a browser)", ", 19 dashboard loads,"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -305,6 +305,43 @@ func TestScanAborts(t *testing.T) {
 				t.Errorf("database created after a failed scan: %v", err)
 			}
 		})
+	}
+}
+
+// A scan that fails after the store is open removes a database it created
+// and leaves an existing one with its previous scans.
+func TestScanFailsMidWrite(t *testing.T) {
+	setNow(t)
+	l := newLab(t, nil)
+	old := scanBeforeWrite
+	t.Cleanup(func() { scanBeforeWrite = old })
+	fail := func() error { return context.Canceled }
+
+	dir := t.TempDir()
+	db := filepath.Join(dir, "tvt.db")
+	scanBeforeWrite = fail
+	if err := runScan(context.Background(), labOptions(l, db), env, &bytes.Buffer{}); err == nil {
+		t.Fatal("scan succeeded")
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "*")); len(left) != 0 {
+		t.Errorf("files left behind: %v", left)
+	}
+
+	scanBeforeWrite = old
+	if err := runScan(context.Background(), labOptions(l, db), env, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	scanBeforeWrite = fail
+	if err := runScan(context.Background(), labOptions(l, db), env, &bytes.Buffer{}); err == nil {
+		t.Fatal("scan succeeded")
+	}
+	st, err := store.Open(context.Background(), db)
+	if err != nil {
+		t.Fatalf("existing database gone: %v", err)
+	}
+	defer st.Close()
+	if scans, err := st.Scans(context.Background()); err != nil || len(scans) != 1 {
+		t.Errorf("scans = %v, %v; want the one from before", scans, err)
 	}
 }
 

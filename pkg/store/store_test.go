@@ -61,7 +61,7 @@ func TestRoundTrip(t *testing.T) {
 		Name: "Shop Overview / Cart operations by type", Expr: "sum by (op) (rate(shop_cart_operations_total[$__rate_interval]))",
 		LastViewed: t0.Add(-time.Hour)}
 	ref := graph.Reference{SignalID: sig.ID, ConsumerID: con.ID, LastSeen: t0.Add(-30 * time.Minute), Actor: "admin"}
-	cost := graph.Cost{SignalID: sig.ID, ActiveSeries: 5091, MonthlyCost: 12.5}
+	cost := graph.Cost{SignalID: sig.ID, ActiveSeries: 5091, DistinctValues: 2000, MonthlyCost: 12.5}
 
 	id := scan(t, s, t0, func(sc *Scan) {
 		// References first: foreign keys are checked at commit.

@@ -82,6 +82,9 @@ func TestBuild(t *testing.T) {
 	if len(out.Costs) != 3 || out.Costs[0].ActiveSeries != 5091 || !out.Costs[0].ObservedAt.Equal(start) {
 		t.Errorf("costs = %+v", out.Costs)
 	}
+	if c := out.Costs[2]; c.SignalID != "prom:label:shop_cart_operations_total:user_id" || c.DistinctValues != 2000 {
+		t.Errorf("label cost = %+v, want 2000 distinct values", c)
+	}
 
 	c := consumers(out)
 	alert := c["rule:prometheus:/etc/prometheus/rules/shop.yml/shop-alerts/ShopPaymentQueueBacklog"]
@@ -161,6 +164,31 @@ func TestBuildUniqueIDs(t *testing.T) {
 	}
 	if _, ok := c["panel:1:shop-overview:4:0#2"]; !ok {
 		t.Error("repeated panel lost")
+	}
+}
+
+// A collected name that looks like a generated suffix must not collide.
+func TestIDSetReservesSuffixes(t *testing.T) {
+	ids := newIDSet()
+	var got []string
+	for _, id := range []string{"a", "a", "a#2", "a", "a#3", "b"} {
+		got = append(got, ids.unique(id))
+	}
+	want := []string{"a", "a#2", "a#2#2", "a#3", "a#3#2", "b"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	in := labInputs()
+	r := in.Rules[0]
+	in.Rules = []collect.Rule{r, r, r}
+	in.Rules[2].Name += "#2" // HighLatency, HighLatency, HighLatency#2
+	out, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := consumers(out); len(c) != len(out.Consumers) {
+		t.Errorf("duplicate consumer IDs: %d unique of %d", len(c), len(out.Consumers))
 	}
 }
 

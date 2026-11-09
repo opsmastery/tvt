@@ -12,7 +12,8 @@
 //	var:<org>:<dashboard uid>:<variable name>
 //
 // Two consumers that would share an ID (duplicate alert names in one group,
-// repeated panel IDs) get "#2", "#3"… in the order they were collected.
+// repeated panel IDs) get "#2", "#3"… in the order they were collected,
+// skipping any ID already taken.
 package scan
 
 import (
@@ -87,10 +88,10 @@ func Build(in Inputs) (Output, error) {
 		}
 		id := in.MetricsSource + ":label:" + l.Metric + ":" + l.Label
 		out.Signals = append(out.Signals, graph.Signal{ID: id, Kind: graph.KindLabel, Name: l.Label, Parent: l.Metric, Source: in.MetricsSource})
-		out.Costs = append(out.Costs, graph.Cost{SignalID: id, ActiveSeries: l.ActiveSeries, ObservedAt: in.Start})
+		out.Costs = append(out.Costs, graph.Cost{SignalID: id, ActiveSeries: l.ActiveSeries, DistinctValues: l.Values, ObservedAt: in.Start})
 	}
 
-	ids := idSet{}
+	ids := newIDSet()
 
 	// Rules.
 	for _, r := range in.Rules {
@@ -203,13 +204,24 @@ func Build(in Inputs) (Output, error) {
 	return out, nil
 }
 
-// idSet hands out unique IDs, suffixing repeats with #2, #3, …
-type idSet map[string]int
+// idSet hands out unique IDs, suffixing repeats with #2, #3, … Every ID
+// handed out is reserved, so a collected name that already looks like a
+// suffix ("HighLatency#2") can't collide with a generated one.
+type idSet struct {
+	used map[string]bool
+	next map[string]int // next suffix to try for a base ID
+}
 
-func (s idSet) unique(id string) string {
-	s[id]++
-	if n := s[id]; n > 1 {
-		return id + "#" + strconv.Itoa(n)
+func newIDSet() *idSet {
+	return &idSet{used: map[string]bool{}, next: map[string]int{}}
+}
+
+func (s *idSet) unique(id string) string {
+	cand := id
+	for n := max(s.next[id], 2); s.used[cand]; n++ {
+		cand = id + "#" + strconv.Itoa(n)
+		s.next[id] = n + 1
 	}
-	return id
+	s.used[cand] = true
+	return cand
 }

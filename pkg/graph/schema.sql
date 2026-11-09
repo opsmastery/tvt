@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS costs (
     scan_id       INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
     observed_at   INTEGER NOT NULL,
     active_series INTEGER NOT NULL DEFAULT 0,
+    distinct_values INTEGER NOT NULL DEFAULT 0, -- labels only
     bytes_per_day INTEGER NOT NULL DEFAULT 0,
     spans_per_day INTEGER NOT NULL DEFAULT 0,
     monthly_cost  REAL NOT NULL DEFAULT 0,

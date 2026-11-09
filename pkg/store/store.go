@@ -226,7 +226,7 @@ func (s *Store) References(ctx context.Context, scanID int64) ([]graph.Reference
 // Costs returns the costs observed in scan scanID, ordered by signal.
 func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT signal_id, scan_id, observed_at, active_series, bytes_per_day, spans_per_day, monthly_cost
+		`SELECT signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost
 		 FROM costs WHERE scan_id = ? ORDER BY signal_id`, scanID)
 	if err != nil {
 		return nil, err
@@ -236,7 +236,7 @@ func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 	for rows.Next() {
 		var c graph.Cost
 		var observed int64
-		if err := rows.Scan(&c.SignalID, &c.ScanID, &observed, &c.ActiveSeries, &c.BytesPerDay, &c.SpansPerDay, &c.MonthlyCost); err != nil {
+		if err := rows.Scan(&c.SignalID, &c.ScanID, &observed, &c.ActiveSeries, &c.DistinctValues, &c.BytesPerDay, &c.SpansPerDay, &c.MonthlyCost); err != nil {
 			return nil, err
 		}
 		c.ObservedAt = fromMillis(observed)
@@ -368,10 +368,11 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 					WHEN excluded.last_seen IS NULL THEN refs.last_seen
 					ELSE max(refs.last_seen, excluded.last_seen) END,
 				last_scan = excluded.last_scan`},
-		{&sc.cost, `INSERT INTO costs (signal_id, scan_id, observed_at, active_series, bytes_per_day, spans_per_day, monthly_cost)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+		{&sc.cost, `INSERT INTO costs (signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (signal_id, scan_id) DO UPDATE SET
 				observed_at = excluded.observed_at, active_series = excluded.active_series,
+				distinct_values = excluded.distinct_values,
 				bytes_per_day = excluded.bytes_per_day, spans_per_day = excluded.spans_per_day,
 				monthly_cost = excluded.monthly_cost`},
 		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start)
@@ -451,7 +452,7 @@ func (sc *Scan) PutCost(ctx context.Context, c graph.Cost) error {
 		observed = sc.started
 	}
 	_, err := sc.cost.ExecContext(ctx, c.SignalID, sc.ID, millis(observed),
-		c.ActiveSeries, c.BytesPerDay, c.SpansPerDay, c.MonthlyCost)
+		c.ActiveSeries, c.DistinctValues, c.BytesPerDay, c.SpansPerDay, c.MonthlyCost)
 	return wrap("cost", c.SignalID, err)
 }
 
