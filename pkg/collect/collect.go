@@ -116,6 +116,7 @@ type LoggedQuery struct {
 	Language     string // "promql", "logql", "traceql"
 	At           time.Time
 	Actor        string // user, service account or agent, when known
+	Client       string // client IP or user agent, when the log records one
 	DashboardUID string // when the request carried dashboard attribution
 	PanelID      int
 }
