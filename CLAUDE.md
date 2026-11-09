@@ -3,6 +3,7 @@
 A Go CLI that finds telemetry (metrics, labels, log streams, span attributes) that costs money but nobody uses, and opens PRs that drop, downsample or reroute it. A `tvt check` CI gate blocks any change that would break an alert, SLO or viewed dashboard.
 
 - Product spec: `../Spec Telemetry Value Tracker.md`
+- Development plan (phases, sprints, spike results): `docs/plan.md`
 - Architecture: `docs/architecture.md`. Decisions: `docs/adr/`
 - Test lab: `../tvt-lab` (Podman Grafana stack; `ground-truth.yaml` there is the expected output)
 
