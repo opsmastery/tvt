@@ -71,7 +71,7 @@ func (q *QueryLog) now() time.Time {
 func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.LoggedQuery, error) {
 	var out []collect.LoggedQuery
 	err := q.scan(ctx, since, func(l *queryLogLine) {
-		if l.RuleGroup != nil || l.Params.Query == "" {
+		if l.RuleGroup != nil {
 			return
 		}
 		lq := collect.LoggedQuery{
@@ -96,9 +96,10 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 // contain at least one log entry. Gaps (Prometheus down, logging off, host
 // asleep, a missing rotated file) lower it.
 //
-// When the log has no rule evaluations there is no heartbeat, and an empty
-// bucket may only mean nobody queried. Coverage then falls back to the share
-// of the window after the first entry, assuming no gaps.
+// When the window has no rule evaluations there is no heartbeat, and an
+// empty bucket may only mean nobody queried. Coverage then falls back to the
+// share of the window after the log's first entry, assuming no gaps; a log
+// that starts before the window covers all of it.
 func (q *QueryLog) Coverage(ctx context.Context, since time.Time) (float64, error) {
 	now := q.now()
 	if !since.Before(now) {
@@ -112,7 +113,8 @@ func (q *QueryLog) Coverage(ctx context.Context, since time.Time) (float64, erro
 	seen := make([]bool, n)
 	var first time.Time
 	heartbeat := false
-	err := q.scan(ctx, since, func(l *queryLogLine) {
+	// Read entries before the window too: they show where the log starts.
+	err := q.scan(ctx, time.Time{}, func(l *queryLogLine) {
 		at := l.at()
 		if at.After(now) {
 			return
@@ -120,10 +122,13 @@ func (q *QueryLog) Coverage(ctx context.Context, since time.Time) (float64, erro
 		if first.IsZero() || at.Before(first) {
 			first = at
 		}
+		if at.Before(since) {
+			return
+		}
 		if l.RuleGroup != nil {
 			heartbeat = true
 		}
-		if i := int(at.Sub(since) / bucket); i >= 0 && i < n {
+		if i := int(at.Sub(since) / bucket); i < n {
 			seen[i] = true
 		}
 	})
@@ -134,6 +139,9 @@ func (q *QueryLog) Coverage(ctx context.Context, since time.Time) (float64, erro
 		return 0, nil
 	}
 	if !heartbeat {
+		if !first.After(since) {
+			return 1, nil
+		}
 		return float64(now.Sub(first)) / float64(now.Sub(since)), nil
 	}
 	covered := 0
@@ -161,8 +169,10 @@ func (q *QueryLog) scan(ctx context.Context, since time.Time, fn func(*queryLogL
 		var lines, parsed int
 		err := logfile.ScanFile(ctx, path, func(raw []byte) {
 			lines++
+			// A timestamp alone would let any JSON log pass; a query log
+			// entry always carries the query text.
 			var l queryLogLine
-			if json.Unmarshal(raw, &l) != nil || l.at().IsZero() {
+			if json.Unmarshal(raw, &l) != nil || l.at().IsZero() || l.Params.Query == "" {
 				return
 			}
 			parsed++

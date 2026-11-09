@@ -119,10 +119,15 @@ func TestQueriesRotatedGzipAndPartialLine(t *testing.T) {
 func TestQueryLogErrors(t *testing.T) {
 	dir := t.TempDir()
 	notLog := writeFile(t, dir, "access.log", "GET / 200\nGET /x 404\n")
+	// JSON with timestamps but no query: an application log, not a query log.
+	appLog := writeFile(t, dir, "app.log",
+		`{"time":"2026-11-09T10:00:00Z","level":"INFO","msg":"started"}`+"\n"+
+			`{"time":"2026-11-09T10:00:01Z","level":"INFO","msg":"listening"}`+"\n")
 	cases := map[string]*QueryLog{
 		"no paths":     {},
 		"missing file": {Paths: []string{filepath.Join(dir, "nope.log")}},
 		"not a log":    {Paths: []string{notLog}},
+		"app log":      {Paths: []string{appLog}},
 	}
 	for name, ql := range cases {
 		if _, err := ql.Queries(context.Background(), time.Time{}); err == nil {
@@ -172,6 +177,43 @@ func TestCoverageWithoutHeartbeat(t *testing.T) {
 	}
 	if math.Abs(got-0.2) > 0.001 {
 		t.Errorf("coverage = %.3f, want 0.2 (6 of 30 days)", got)
+	}
+}
+
+func TestCoverageLogPredatesWindowWithoutHeartbeat(t *testing.T) {
+	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-30 * 24 * time.Hour)
+	// No rules; the log started 40 days ago and has one recent query.
+	p := writeFile(t, t.TempDir(), "query.log",
+		apiLine(now.Add(-40*24*time.Hour), "a")+"\n"+apiLine(now.Add(-time.Hour), "b")+"\n")
+	ql := &QueryLog{Paths: []string{p}, Now: func() time.Time { return now }}
+	got, err := ql.Coverage(context.Background(), since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 1 {
+		t.Errorf("coverage = %.3f, want 1 (log starts before the window)", got)
+	}
+}
+
+func TestCoverageHeartbeatStartsMidWindow(t *testing.T) {
+	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-10 * time.Hour)
+	// Old API lines before the window must not count as heartbeat buckets;
+	// rule evaluations only cover the last 5 hours.
+	var b strings.Builder
+	b.WriteString(apiLine(since.Add(-24*time.Hour), "old") + "\n")
+	for at := now.Add(-5 * time.Hour); at.Before(now); at = at.Add(30 * time.Second) {
+		b.WriteString(ruleLine(at) + "\n")
+	}
+	p := writeFile(t, t.TempDir(), "query.log", b.String())
+	ql := &QueryLog{Paths: []string{p}, Now: func() time.Time { return now }}
+	got, err := ql.Coverage(context.Background(), since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(got-0.5) > 0.02 {
+		t.Errorf("coverage = %.3f, want ~0.50", got)
 	}
 }
 
