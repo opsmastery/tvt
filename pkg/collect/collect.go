@@ -30,6 +30,14 @@ type DashboardSource interface {
 	Dashboards(ctx context.Context) ([]Dashboard, error)
 }
 
+// ViewSource reports dashboard loads, for Grafana editions without usage
+// insights (OSS: the router log's GET /api/dashboards/uid/:uid lines).
+type ViewSource interface {
+	DashboardViews(ctx context.Context, since time.Time) ([]DashboardView, error)
+	// Coverage reports how complete the log is for the window, 0..1.
+	Coverage(ctx context.Context, since time.Time) (float64, error)
+}
+
 // QueryLogSource returns queries observed since a point in time
 // (Prometheus query log, Mimir/Loki query-frontend logs, agent audit logs).
 type QueryLogSource interface {
@@ -107,6 +115,17 @@ type Variable struct {
 	Query          string
 	DatasourceUID  string
 	DatasourceType string
+}
+
+// DashboardView is one load of a dashboard's JSON.
+type DashboardView struct {
+	DashboardUID string
+	User         string
+	At           time.Time
+	// Browser is true when the load came from the dashboard page in a
+	// browser (Referer is the dashboard URL). False means an API client:
+	// a script, a provisioning tool, or a browser with referrers disabled.
+	Browser bool
 }
 
 // LoggedQuery is one query seen in a query log.

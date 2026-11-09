@@ -48,7 +48,7 @@ Phase 0 spike findings:
 
 Sprint 1 (Dec 1-12, started early):
 1. Done Nov 9: Prometheus collector in `pkg/collect/prometheus`. TSDB status raises `limit` until per-metric counts sum to `headStats.numSeries`. Series are decoded as a stream and a truncated result is an error. Rules reject unknown types. The query log reads globs and `.gz` files, and rule-evaluation lines act as a coverage heartbeat. It never runs PromQL, because Prometheus can't tell tvt's queries apart from real usage. It also works for Mimir via `BaseURL=.../prometheus`, `Source="mimir"`.
-2. Grafana collector (search, dashboard JSON, router-log views).
+2. Done Nov 9: Grafana collector in `pkg/collect/grafana`. Dashboards come from search, dashboard JSON and library panels. Datasources resolve from the legacy name string, `null` (the default), `-- Mixed --` with per-query overrides, datasource variables and built-ins. A dashboard tvt can't read is an error. `RouterLog` implements `collect.ViewSource`; `DashboardView.Browser` (Referer is `/d/<uid>`) separates people from API clients, and `ExcludeUsers` takes tvt's own login (`Client.Login`). Shared helpers: `internal/logfile` (globs, `.gz`) and `internal/logfmt`.
 3. SQLite store.
 
 Run `scripts/capture-fixtures.sh` against the lab first and build against those fixtures.

@@ -58,6 +58,15 @@ One `msg="query stats"` line per query from `component=query-frontend`, with `pa
 - Rule evaluations don't pass through the query-frontend in Mimir's default (internal) ruler mode, so nothing needs excluding.
 - With the remote ruler (`ruler.query_frontend.address`), every rule evaluation *does* appear as a `query stats` line: `path=/prometheus/api/v1/query` (instant), `user_agent=mimir/2.16.0`, no Grafana headers, and `param_time` one minute behind wall time (the ruler's evaluation delay). There is no rule-group field. Exclude on the `mimir/` user-agent prefix (verified Nov 9 in a throwaway single-binary Mimir).
 
+## Grafana router log
+
+With `GF_SERVER_ROUTER_LOGGING=true`, every request writes a `msg="Request Completed"` logfmt line: `uname`, `t`, `method`, `path`, `status`, `referer`, `handler`. A dashboard load is `handler=/api/dashboards/uid/:uid`, `method=GET`, `status=200`.
+
+- **tvt's own scan looks like a view.** Fetching dashboard JSON is the same request a browser makes. Two filters separate them: a browser load carries `referer=…/d/<uid>/…` and an API client sends none, and tvt excludes its own login (`GET /api/user` returns the service account's login, e.g. `sa-1-tvt`). Verified Nov 9 against the lab.
+- **Retention.** Grafana logs to the console by default, which is lost when the container is recreated. File logging keeps only 7 days by default. Partners need `[log] mode = console file` with `[log.file] max_days` of at least 30, or the log shipped somewhere (Loki). The lab uses `GF_LOG_MODE="console file"`, `GF_PATHS_LOGS=/var/lib/grafana/logs` (on the data volume) and `GF_LOG_FILE_MAX_DAYS=45`.
+- No steady heartbeat: a quiet night logs nothing, so coverage is the share of the window after the first line.
+- One organization per scan for now. The line has `orgId`, and dashboard UIDs are only unique within an org.
+
 ## Overhead (measured Nov 9)
 
 The cost of query logging is disk and log volume, not query latency.
