@@ -318,3 +318,40 @@ func TestOpenEmptyPath(t *testing.T) {
 		t.Error("empty path accepted")
 	}
 }
+
+func TestSourcesAndLoads(t *testing.T) {
+	s, _ := open(t)
+	since := t0.Add(-30 * 24 * time.Hour)
+	srcs := []graph.SourceCoverage{
+		{Source: "grafana router log", Configured: true, Coverage: 0.4, WindowStart: since},
+		{Source: "prometheus query log", Configured: false, Coverage: 0, WindowStart: since},
+	}
+	loads := []graph.DashboardLoad{
+		{OrgID: 1, DashboardUID: "shop-overview", Login: "admin", Browser: false, Loads: 2, LastAt: t0.Add(-2 * time.Hour)},
+		{OrgID: 1, DashboardUID: "shop-overview", Login: "admin", Browser: true, Loads: 12, LastAt: t0},
+	}
+	id := scan(t, s, t0, func(sc *Scan) {
+		for _, src := range srcs {
+			must(t, sc.PutSource(ctx, src))
+		}
+		for _, l := range loads {
+			must(t, sc.PutLoad(ctx, l))
+		}
+		if err := sc.PutSource(ctx, graph.SourceCoverage{Source: "x", Coverage: 2, WindowStart: since}); err == nil {
+			t.Error("coverage 2 accepted")
+		}
+		if err := sc.PutLoad(ctx, graph.DashboardLoad{DashboardUID: "x", LastAt: t0}); err == nil {
+			t.Error("zero loads accepted")
+		}
+	})
+	gotSrcs, err := s.Sources(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(gotSrcs, srcs) {
+		t.Errorf("sources\n got  %+v\n want %+v", gotSrcs, srcs)
+	}
+	gotLoads, err := s.Loads(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(gotLoads, loads) {
+		t.Errorf("loads\n got  %+v\n want %+v", gotLoads, loads)
+	}
+}

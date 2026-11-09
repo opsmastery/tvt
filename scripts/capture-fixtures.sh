@@ -52,5 +52,13 @@ if (cd "$LAB_DIR" && podman compose logs --no-log-prefix grafana 2>/dev/null) \
      | grep 'msg="Request Completed"' | tail -n 500 > "$OUT/grafana/router.log"; then
   echo "  ok  $OUT/grafana/router.log"
 fi
+# The persistent file log (GF_PATHS_LOGS on the grafana-data volume) is what
+# `tvt scan --grafana-log` reads. Check it for secrets before committing.
+if (cd "$LAB_DIR" && podman compose exec -T grafana cat /var/lib/grafana/logs/grafana.log 2>/dev/null) \
+     > "$OUT/grafana/grafana.log"; then
+  echo "  ok  $OUT/grafana/grafana.log"
+else
+  echo "  FAIL grafana.log (is LAB_DIR=$LAB_DIR right?)" >&2
+fi
 
 echo "Done. Review $OUT before committing."

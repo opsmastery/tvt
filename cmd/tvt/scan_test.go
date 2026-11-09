@@ -1,0 +1,334 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/store"
+)
+
+const lab = "../../testdata/lab"
+
+// scanTime is just after the last line of testdata/lab/grafana/grafana.log.
+var scanTime = time.Date(2026, 11, 9, 16, 0, 0, 0, time.UTC)
+
+// fixtureServer serves files from testdata/lab by URL path. A handler in
+// override takes precedence.
+func fixtureServer(t *testing.T, files map[string]string, override map[string]http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h, ok := override[r.URL.Path]; ok {
+			h(w, r)
+			return
+		}
+		name, ok := files[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		b, err := os.ReadFile(filepath.Join(lab, name))
+		if err != nil {
+			t.Errorf("fixture %s: %v", name, err)
+		}
+		w.Write(b)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// syntheticSeries answers /api/v1/series with two series per metric that
+// differ in one label, so label cardinality is predictable.
+func syntheticSeries(w http.ResponseWriter, r *http.Request) {
+	m := r.URL.Query().Get("match[]")
+	fmt.Fprintf(w, `{"status":"success","data":[{"__name__":%[1]q,"job":"shop","flag":"a"},{"__name__":%[1]q,"job":"shop","flag":"b"}]}`, m)
+}
+
+type labServers struct {
+	prom, grafana *httptest.Server
+}
+
+func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
+	t.Helper()
+	if promOverride == nil {
+		promOverride = map[string]http.HandlerFunc{}
+	}
+	if _, ok := promOverride["/api/v1/series"]; !ok {
+		promOverride["/api/v1/series"] = syntheticSeries
+	}
+	prom := fixtureServer(t, map[string]string{
+		"/api/v1/status/tsdb": "prometheus/tsdb.json",
+		"/api/v1/rules":       "prometheus/rules.json",
+	}, promOverride)
+	graf := fixtureServer(t, map[string]string{
+		"/api/search":                       "grafana/search.json",
+		"/api/datasources":                  "grafana/datasources.json",
+		"/api/dashboards/uid/shop-overview": "grafana/dashboard_shop-overview.json",
+		"/api/dashboards/uid/legacy-queue":  "grafana/dashboard_legacy-queue.json",
+	}, map[string]http.HandlerFunc{
+		"/api/user": func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer test-grafana-token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprint(w, `{"message":"Unauthorized"}`)
+				return
+			}
+			fmt.Fprint(w, `{"login":"sa-1-tvt"}`)
+		},
+		"/api/org": func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"id":1,"name":"Main Org."}`) },
+	})
+	return labServers{prom, graf}
+}
+
+func labOptions(l labServers, db string) scanOptions {
+	return scanOptions{
+		Grafana:       l.grafana.URL,
+		Prom:          l.prom.URL,
+		DB:            db,
+		Window:        30,
+		LabelTop:      2,
+		GrafanaLogs:   stringList{filepath.Join(lab, "grafana/grafana.log")},
+		PromQueryLogs: stringList{filepath.Join(lab, "prometheus/query.log")},
+	}
+}
+
+func env(name string) string {
+	return map[string]string{"TVT_GRAFANA_TOKEN": "test-grafana-token"}[name]
+}
+
+func setNow(t *testing.T) {
+	t.Helper()
+	old := scanNow
+	scanNow = func() time.Time { return scanTime }
+	t.Cleanup(func() { scanNow = old })
+}
+
+func TestScanLab(t *testing.T) {
+	setNow(t)
+	l := newLab(t, nil)
+	db := filepath.Join(t.TempDir(), "tvt.db")
+	var out bytes.Buffer
+	if err := runScan(context.Background(), labOptions(l, db), env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	t.Log("\n" + out.String())
+	for _, want := range []string{"prom ", "5 rules", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q", want)
+		}
+	}
+
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	info, err := st.LatestScan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Every metric in the TSDB status is a signal, the ground truth's included.
+	var tsdb struct {
+		Data struct {
+			SeriesCountByMetricName []struct {
+				Name string `json:"name"`
+			} `json:"seriesCountByMetricName"`
+		} `json:"data"`
+	}
+	readJSON(t, "prometheus/tsdb.json", &tsdb)
+	sigs, err := st.Signals(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]graph.Signal{}
+	for _, s := range sigs {
+		ids[s.ID] = s
+	}
+	for _, m := range tsdb.Data.SeriesCountByMetricName {
+		if _, ok := ids["prom:metric:"+m.Name]; !ok {
+			t.Errorf("metric %s is not a signal", m.Name)
+		}
+	}
+	for _, m := range []string{"shop_http_requests_total", "shop_payment_queue_depth", "shop_legacy_queue_depth", "shop_cart_operations_total"} {
+		if _, ok := ids["prom:metric:"+m]; !ok {
+			t.Errorf("ground-truth metric %s is not a signal", m)
+		}
+	}
+	// --label-top 2: the two largest metrics, flag and job each.
+	if s, ok := ids["prom:label:shop_feature_flag_evaluations_total:flag"]; !ok || s.Kind != graph.KindLabel {
+		t.Errorf("label signal missing: %+v", s)
+	}
+	var labels int
+	for _, s := range sigs {
+		if s.Kind == graph.KindLabel {
+			labels++
+		}
+	}
+	if labels != 4 {
+		t.Errorf("%d label signals, want 4", labels)
+	}
+
+	// Rules are consumers; Shop Overview is viewed, Legacy Queue isn't.
+	cons, err := st.Consumers(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules, shop, legacy int
+	for _, c := range cons {
+		switch {
+		case c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule:
+			rules++
+		case strings.HasPrefix(c.ID, "panel:1:shop-overview:") || strings.HasPrefix(c.ID, "var:1:shop-overview:"):
+			shop++
+			if c.LastViewed.IsZero() {
+				t.Errorf("Shop Overview consumer %s has no last_viewed", c.ID)
+			}
+		case strings.HasPrefix(c.ID, "panel:1:legacy-queue:"):
+			legacy++
+			if !c.LastViewed.IsZero() {
+				t.Errorf("Legacy Queue consumer %s viewed at %v; it must stay unviewed", c.ID, c.LastViewed)
+			}
+		}
+	}
+	if rules != 5 || shop == 0 || legacy == 0 {
+		t.Errorf("rules=%d shop=%d legacy=%d", rules, shop, legacy)
+	}
+
+	// tvt's own fetches (sa-1-tvt) are not loads.
+	loads, err := st.Loads(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loads) == 0 {
+		t.Error("no dashboard loads")
+	}
+	for _, ld := range loads {
+		if ld.Login == "sa-1-tvt" || ld.DashboardUID == "legacy-queue" {
+			t.Errorf("load %+v should have been excluded", ld)
+		}
+	}
+
+	// Both log sources are configured, and each covers part of the window.
+	srcs, err := st.Sources(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(srcs) != 2 {
+		t.Fatalf("sources = %+v", srcs)
+	}
+	for _, s := range srcs {
+		if !s.Configured || s.Coverage <= 0 || s.Coverage >= 1 {
+			t.Errorf("source %+v", s)
+		}
+	}
+	if info.LogCoverage <= 0 || info.LogCoverage >= 1 {
+		t.Errorf("log coverage = %v", info.LogCoverage)
+	}
+
+	// A second scan is a new scan, not a duplicate.
+	out.Reset()
+	if err := runScan(ctx, labOptions(l, db), env, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "scan 2 written") {
+		t.Errorf("second scan: %s", out.String())
+	}
+}
+
+func TestScanWithoutLogs(t *testing.T) {
+	setNow(t)
+	l := newLab(t, nil)
+	o := labOptions(l, filepath.Join(t.TempDir(), "tvt.db"))
+	o.GrafanaLogs, o.PromQueryLogs, o.Loki = nil, nil, "http://loki:3100"
+	var out bytes.Buffer
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"not configured (--grafana-log)", "not configured (--prom-query-log)", "not collected yet", "log coverage 0%"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// A failed or interrupted scan never creates or touches the database.
+func TestScanAborts(t *testing.T) {
+	setNow(t)
+	failRules := map[string]http.HandlerFunc{"/api/v1/rules": func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"status":"error","errorType":"internal","error":"boom"}`)
+	}}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	cases := []struct {
+		name    string
+		prom    map[string]http.HandlerFunc
+		ctx     context.Context
+		env     func(string) string
+		logs    stringList
+		wantErr string
+	}{
+		{"rules fail", failRules, context.Background(), env, nil, "boom"},
+		{"no grafana token", nil, context.Background(), func(string) string { return "" }, nil, "TVT_GRAFANA_TOKEN is not set"},
+		{"not a grafana log", nil, context.Background(), env, stringList{filepath.Join(lab, "prometheus/query.log")}, "no line parsed as a Grafana log entry"},
+		{"missing log", nil, context.Background(), env, stringList{filepath.Join(lab, "grafana/nope.log")}, "grafana router log"},
+		{"interrupted", nil, cancelled, env, nil, "context canceled"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			l := newLab(t, tc.prom)
+			db := filepath.Join(t.TempDir(), "tvt.db")
+			o := labOptions(l, db)
+			if tc.logs != nil {
+				o.GrafanaLogs = tc.logs
+			}
+			var out bytes.Buffer
+			err := runScan(tc.ctx, o, tc.env, &out)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want %q", err, tc.wantErr)
+			}
+			if strings.Contains(err.Error(), "test-grafana-token") {
+				t.Error("error leaks the token")
+			}
+			if _, err := os.Stat(db); !os.IsNotExist(err) {
+				t.Errorf("database created after a failed scan: %v", err)
+			}
+		})
+	}
+}
+
+func TestMimirAPI(t *testing.T) {
+	for in, want := range map[string]string{
+		"http://mimir:9009":            "http://mimir:9009/prometheus",
+		"http://mimir:9009/":           "http://mimir:9009/prometheus",
+		"http://mimir:9009/prometheus": "http://mimir:9009/prometheus",
+		"http://gw/mimir/prometheus/":  "http://gw/mimir/prometheus/",
+		"https://gw/tenant-a":          "https://gw/tenant-a/prometheus",
+	} {
+		if got := mimirAPI(in); got != want {
+			t.Errorf("mimirAPI(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func readJSON(t *testing.T, name string, v any) {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(lab, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, v); err != nil {
+		t.Fatal(err)
+	}
+}

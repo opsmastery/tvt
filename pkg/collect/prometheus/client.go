@@ -59,6 +59,10 @@ var (
 // from it would be too low.
 var ErrTruncated = errors.New("prometheus: result truncated")
 
+// ErrNotFound means the server doesn't serve the endpoint (HTTP 404), e.g.
+// Mimir, which has no /api/v1/status/tsdb.
+var ErrNotFound = errors.New("endpoint not found")
+
 // New returns a client for baseURL with default settings.
 func New(baseURL, token string) *Client {
 	return &Client{BaseURL: baseURL, Token: token}
@@ -120,6 +124,9 @@ func (c *Client) get(ctx context.Context, path string, q url.Values) (io.ReadClo
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("prometheus: %s: HTTP 404: %w", path, ErrNotFound)
+		}
 		var e apiError
 		if json.Unmarshal(body, &e) == nil && e.Error != "" {
 			return nil, fmt.Errorf("prometheus: %s: HTTP %d: %s: %s", path, resp.StatusCode, e.ErrorType, e.Error)
