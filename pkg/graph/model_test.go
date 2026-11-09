@@ -6,7 +6,7 @@ import (
 )
 
 func TestSchemaEmbedded(t *testing.T) {
-	for _, table := range []string{"signals", "consumers", "refs", "costs", "scans"} {
+	for _, table := range []string{"meta", "scans", "signals", "consumers", "refs", "costs"} {
 		if !strings.Contains(Schema, "CREATE TABLE IF NOT EXISTS "+table) {
 			t.Errorf("schema missing table %q", table)
 		}

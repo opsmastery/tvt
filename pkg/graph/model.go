@@ -8,7 +8,8 @@ import (
 	"time"
 )
 
-// Schema is the SQLite DDL for the usage graph store.
+// Schema is the DDL for the usage graph store (pkg/store). It lives here so
+// the model and its storage stay in step; this package does no I/O.
 //
 //go:embed schema.sql
 var Schema string
@@ -62,6 +63,7 @@ type Consumer struct {
 	ID         string
 	Kind       ConsumerKind
 	Name       string    // rule name, "dashboard / panel", query source
+	Expr       string    // the query or rule expression, shown as evidence
 	Team       string    // owning team, when known
 	LastViewed time.Time // dashboards only; zero if unknown
 }
@@ -78,6 +80,7 @@ type Reference struct {
 // Cost is the observed volume of a signal and what it costs per month.
 type Cost struct {
 	SignalID     string
+	ScanID       int64   // the scan that observed it; set by the store
 	ActiveSeries int64   // metrics and labels
 	BytesPerDay  int64   // log streams
 	SpansPerDay  int64   // span attributes
