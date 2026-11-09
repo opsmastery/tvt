@@ -84,12 +84,15 @@ type Reference struct {
 // Cost is the observed volume of a signal and what it costs per month.
 type Cost struct {
 	SignalID     string
-	ScanID       int64   // the scan that observed it; set by the store
-	ActiveSeries int64   // metrics and labels
-	BytesPerDay  int64   // log streams
-	SpansPerDay  int64   // span attributes
-	MonthlyCost  float64 // in the price card's currency
-	ObservedAt   time.Time
+	ScanID       int64 // the scan that observed it; set by the store
+	ActiveSeries int64 // metrics and labels
+	// DistinctValues is a label's number of distinct values: what dropping
+	// it collapses. Zero for other kinds.
+	DistinctValues int64
+	BytesPerDay    int64   // log streams
+	SpansPerDay    int64   // span attributes
+	MonthlyCost    float64 // in the price card's currency
+	ObservedAt     time.Time
 }
 
 // DashboardLoad aggregates loads of one dashboard by one login in a scan's
