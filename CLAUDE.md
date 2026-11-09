@@ -17,7 +17,7 @@ make race      # tests with -race
 
 ## Conventions
 
-- Go 1.24. Module: `github.com/Opsmastery-Summit/tvt`. Single static binary (`CGO_ENABLED=0`).
+- Go 1.26 (ADR 0004: track a supported Go release). Module: `github.com/Opsmastery-Summit/tvt`. Single static binary (`CGO_ENABLED=0`).
 - Standard library first (ADR 0004). Expected dependencies: Prometheus `promql/parser`, Loki LogQL syntax (or a vendored subset), `modernc.org/sqlite`, a YAML library, and GitHub/GitLab clients.
 - Read-only against every backend. Credentials come only from env vars (`TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `TVT_LOKI_TOKEN`, `GITHUB_TOKEN`), never flags, and are never logged.
 - Collectors implement the interfaces in `pkg/collect` and are tested against recorded fixtures in `testdata/`, never a live stack.
@@ -49,6 +49,9 @@ Phase 0 spike findings:
 Sprint 1 (Dec 1-12, started early):
 1. Done Nov 9: Prometheus collector in `pkg/collect/prometheus`. TSDB status raises `limit` until per-metric counts sum to `headStats.numSeries`. Series are decoded as a stream and a truncated result is an error. Rules reject unknown types. The query log reads globs and `.gz` files, and rule-evaluation lines act as a coverage heartbeat. It never runs PromQL, because Prometheus can't tell tvt's queries apart from real usage. It also works for Mimir via `BaseURL=.../prometheus`, `Source="mimir"`.
 2. Done Nov 9: Grafana collector in `pkg/collect/grafana`. Dashboards come from search, dashboard JSON and library panels. Datasources resolve from the legacy name string, `null` (the default), `-- Mixed --` with per-query overrides, datasource variables and built-ins. A dashboard tvt can't read is an error. `RouterLog` implements `collect.ViewSource`; `DashboardView.Browser` (Referer is `/d/<uid>`) separates people from API clients, and `ExcludeUsers` takes tvt's own login (`Client.Login`). Shared helpers: `internal/logfile` (globs, `.gz`) and `internal/logfmt`.
-3. SQLite store.
+3. Done Nov 9: SQLite store in `pkg/store` (`modernc.org/sqlite`; keep `modernc.org/libc` at the exact version its `go.mod` requires). It's a separate package so `pkg/graph` stays I/O-free. Each scan is one transaction (`BeginScan` → `Put*` → `Finish`), so an interrupted scan leaves nothing. Rows carry `last_scan`, so deleted dashboards stop protecting signals. Times are integer Unix ms. Foreign keys are deferred and checked at commit. `meta.schema_version` refuses newer or non-tvt databases.
+4. Done Nov 9: `tvt scan` wired (`cmd/tvt/scan.go`). `pkg/scan.Build` is the I/O-free mapping from collector output to graph rows and owns the ID scheme (`prom:metric:<name>`, `rule:<source>:<ns>/<group>/<name>`, `panel:<org>:<uid>:<panel>:<n>`, `var:<org>:<uid>:<name>`; collisions get `#2`). Collection runs before the store is opened, so a failed scan never creates or touches the DB. Views come from `--grafana-log` (lab: `make export-logs` in tvt-lab); every evidence source is stored in `scan_sources` with its coverage, unconfigured ones at 0. Mimir 2.16 has no `/api/v1/status/tsdb` (404): `--mimir` fails with a hint to use `--prom`. References still need the PromQL extractor (Sprint 2). Golden test: `cmd/tvt/scan_test.go` against `testdata/lab` (use `grafana/grafana.log`, not `router.log`, which holds a spike-1 Legacy Queue view).
+
+Next: Sprint 2, the PromQL extractor and references (panel/rule expressions and the query log to signals).
 
 Run `scripts/capture-fixtures.sh` against the lab first and build against those fixtures.

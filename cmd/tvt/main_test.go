@@ -23,7 +23,9 @@ func TestRun(t *testing.T) {
 		{"scan both metrics", []string{"scan", "--grafana", "http://g:3000", "--prom", "http://p", "--mimir", "http://m"}, exitUsage, "mutually exclusive"},
 		{"scan bad scheme", []string{"scan", "--grafana", "ftp://g", "--prom", "http://p"}, exitUsage, "scheme must be http"},
 		{"scan bad window", []string{"scan", "--grafana", "http://g", "--prom", "http://p", "--window", "0"}, exitUsage, "--window"},
-		{"scan valid", []string{"scan", "--grafana", "http://g:3000", "--prom", "http://p:9090", "--loki", "http://l:3100"}, exitNotImplemented, "scan plan: grafana=http://g:3000 metrics=http://p:9090 loki=http://l:3100"},
+		{"scan bad label-top", []string{"scan", "--grafana", "http://g", "--prom", "http://p", "--label-top", "-1"}, exitUsage, "--label-top"},
+		{"scan extra arg", []string{"scan", "--grafana", "http://g", "--prom", "http://p", "oops"}, exitUsage, `unexpected argument "oops"`},
+		{"scan help", []string{"scan", "-h"}, exitOK, "-grafana-log"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
