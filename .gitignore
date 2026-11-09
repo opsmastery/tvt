@@ -1,0 +1,11 @@
+/bin/
+/dist/
+*.db
+*.db-journal
+/tvt-report*
+.DS_Store
+.idea/
+.vscode/
+# local price cards and configs may hold negotiated prices
+/pricecard.yaml
+/tvt.yaml
