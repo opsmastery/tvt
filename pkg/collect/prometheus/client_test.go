@@ -263,3 +263,14 @@ func TestBaseURLPrefix(t *testing.T) {
 		t.Errorf("path = %s", path)
 	}
 }
+
+func TestMimirHasNoTSDBStatus(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler()) // what Mimir 2.16 does
+	defer srv.Close()
+	c := New(srv.URL+"/prometheus", "")
+	c.Source = "mimir"
+	_, err := c.MetricCardinality(context.Background())
+	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "--prom") {
+		t.Fatalf("err = %v, want ErrNotFound with a --prom hint", err)
+	}
+}
