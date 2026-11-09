@@ -22,7 +22,7 @@ Credentials come from the environment (`TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `T
 
 ## Develop
 
-Requires Go 1.24+.
+Requires Go 1.26+.
 
 ```sh
 make            # lint, test, build -> bin/tvt
