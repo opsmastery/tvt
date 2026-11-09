@@ -36,9 +36,14 @@ Done:
 - Lab running on Jason's Mac since Nov 8, so 30 days of history arrives around Dec 8.
 
 Phase 0 spike findings:
-- **Spike 1:** OSS Grafana logs no dashboard or panel attribution on `/api/ds/query`. Dashboard views come from Grafana router-log lines for `GET /api/dashboards/uid/:uid` (logfmt: `uname`, `t`, `path`, `handler=/api/dashboards/uid/:uid`, `status`). Panel usage comes from matching query-log expressions against panel exprs after normalizing Grafana variables.
-- **Spike 2 (Prometheus):** the query log is JSON lines. Entries with `ruleGroup` are rule evaluations and must be excluded from usage evidence. Entries with `httpRequest.clientIP` are API queries, and the Grafana container's IP means dashboard or Explore traffic.
-- Still open: Loki and Mimir query-log formats, the LogQL parser's dependency weight, and the price card format.
+- **Spike 1:** OSS Grafana's own logs carry no dashboard or panel attribution for `/api/ds/query`. Dashboard views come from Grafana router-log lines for `GET /api/dashboards/uid/:uid` (logfmt: `uname`, `t`, `path`, `handler=/api/dashboards/uid/:uid`, `status`). Grafana *does* forward `X-Dashboard-Uid`/`X-Panel-Id` to datasources; Prometheus just doesn't log them (see spike 2).
+- **Spike 2:** details in `docs/query-logs.md`.
+  - Prometheus: JSON lines. Exclude `ruleGroup` entries (rule evaluations). `httpRequest.clientIP` equal to Grafana's IP means dashboard or Explore traffic. Panel usage needs expression matching after normalizing Grafana variables.
+  - Loki: `caller=metrics.go` lines in Loki's own log. Count only `component=frontend` with `query_type` in limited/filter/metric. `source=` comes from `X-Query-Tags`, and tvt must send `X-Query-Tags: Source=tvt`.
+  - Mimir: query-frontend `msg="query stats"` lines. With `log_query_request_headers` they carry `header_x_dashboard_uid`/`header_x_panel_id`, which give direct panel attribution.
+- **Spike 3:** Loki's LogQL package is AGPL-3.0 and adds about 20 MB and 330 modules. Write our own extractor (ADR 0005). `promql/parser` is Apache 2.0 and uses `parser.NewParser(parser.Options{}).ParseExpr` (there is no package-level `ParseExpr` in Prometheus v0.316).
+- **Spike 4:** price card format v1 in `docs/pricecard.md`: marginal prices, included allotments applied to the total, strict decoding, a required `version`.
+- Still open: query-log overhead at volume, `X-Grafana-User` forwarding, Mimir remote ruler.
 
 Next (Sprint 1, Dec 1-12):
 1. Prometheus collector (`/api/v1/status/tsdb`, `/api/v1/rules`, query-log parser).
