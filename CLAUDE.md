@@ -25,7 +25,7 @@ make race      # tests with -race
 - `check` fails closed: a config it can't evaluate is a failure.
 - Commits are authored as Jason Vance.
 
-## Status (Nov 8, 2026)
+## Status (Nov 9, 2026)
 
 Done:
 - CLI skeleton.
@@ -43,10 +43,11 @@ Phase 0 spike findings:
   - Mimir: query-frontend `msg="query stats"` lines. With `log_query_request_headers` they carry `header_x_dashboard_uid`/`header_x_panel_id`, which give direct panel attribution.
 - **Spike 3:** Loki's LogQL package is AGPL-3.0 and adds about 20 MB and 330 modules. Write our own extractor (ADR 0005). `promql/parser` is Apache 2.0 and uses `parser.NewParser(parser.Options{}).ParseExpr` (there is no package-level `ParseExpr` in Prometheus v0.316).
 - **Spike 4:** price card format v1 in `docs/pricecard.md`: marginal prices, included allotments applied to the total, strict decoding, a required `version`.
-- Still open: query-log overhead at volume, `X-Grafana-User` forwarding, Mimir remote ruler.
+- **Nov 9 follow-ups** (in `docs/query-logs.md`): `GF_DATAPROXY_SEND_USER_HEADER=true` makes Grafana forward `X-Grafana-User`, which Mimir logs. Mimir remote-ruler evaluations show up in query-frontend logs with `user_agent=mimir/...`, so drop them. Prometheus query-log cost is disk (~635 B/line, one line per rule evaluation), not latency. The Prometheus query-log timestamp is `time` in 3.x and `ts` in 2.x.
+- Still open: overhead under concurrent load at partner scale.
 
-Next (Sprint 1, Dec 1-12):
-1. Prometheus collector (`/api/v1/status/tsdb`, `/api/v1/rules`, query-log parser).
+Sprint 1 (Dec 1-12, started early):
+1. Done Nov 9: Prometheus collector in `pkg/collect/prometheus`. TSDB status raises `limit` until per-metric counts sum to `headStats.numSeries`. Series are decoded as a stream and a truncated result is an error. Rules reject unknown types. The query log reads globs and `.gz` files, and rule-evaluation lines act as a coverage heartbeat. It never runs PromQL, because Prometheus can't tell tvt's queries apart from real usage. It also works for Mimir via `BaseURL=.../prometheus`, `Source="mimir"`.
 2. Grafana collector (search, dashboard JSON, router-log views).
 3. SQLite store.
 
