@@ -103,6 +103,9 @@ type Panel struct {
 }
 
 // PanelQuery is one query (target) in a panel.
+//
+// DatasourceUID "$name" means a datasource template variable: the query can
+// run against any datasource of DatasourceType, so it references all of them.
 type PanelQuery struct {
 	DatasourceUID  string
 	DatasourceType string // "prometheus", "loki", ...
@@ -120,6 +123,7 @@ type Variable struct {
 // DashboardView is one load of a dashboard's JSON.
 type DashboardView struct {
 	DashboardUID string
+	OrgID        int64 // dashboard UIDs are only unique within an organization
 	User         string
 	At           time.Time
 	// Browser is true when the load came from the dashboard page in a
