@@ -1,0 +1,23 @@
+# Example tvt config. Copy to ./tvt.yaml (git-ignored). Draft: not read by the CLI yet.
+grafana:
+  url: http://localhost:3000
+  # token: from TVT_GRAFANA_TOKEN
+metrics:
+  prometheus: http://localhost:9090
+  # mimir: http://localhost:9009
+logs:
+  loki: http://localhost:3100
+pricecard: ./pricecard.yaml
+window_days: 30
+
+# Consumers tvt can't see in logs (remote-write targets, federation, external
+# tools). Matching signals are treated as hard keeps.
+external_consumers:
+  - name: finance-federation
+    metrics: ["^billing_.*"]
+  - name: siem-export
+    streams: ['{component="audit"}']
+
+# How to attribute cost to teams.
+ownership:
+  labels: [team, service, namespace]

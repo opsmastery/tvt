@@ -1,0 +1,27 @@
+version: 2
+
+builds:
+  - main: ./cmd/tvt
+    binary: tvt
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/jasonvance/tvt/internal/version.Version={{.Version}}
+      - -X github.com/jasonvance/tvt/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/jasonvance/tvt/internal/version.Date={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+# Container image and Helm chart come with continuous mode (Phase 2).

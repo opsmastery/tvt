@@ -1,0 +1,13 @@
+# Example price card. Copy to ./pricecard.yaml (git-ignored) and enter your own prices.
+name: example
+currency: USD
+metrics:
+  per_active_series_month: 0.008
+  per_million_samples: 0
+logs:
+  per_gb_ingested: 0.50
+  per_gb_month_retained: 0.10
+  retention_days: 30
+traces:
+  per_million_spans: 0
+  per_gb_ingested: 0.30
