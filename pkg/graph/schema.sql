@@ -25,6 +25,16 @@ CREATE TABLE IF NOT EXISTS scans (
     log_coverage REAL NOT NULL DEFAULT 0  -- 0..1, share of sources with usable query logs
 );
 
+-- Coverage of each usage-evidence source for a scan, configured or not.
+CREATE TABLE IF NOT EXISTS scan_sources (
+    scan_id      INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    source       TEXT NOT NULL,
+    configured   INTEGER NOT NULL CHECK (configured IN (0, 1)),
+    coverage     REAL NOT NULL CHECK (coverage >= 0 AND coverage <= 1),
+    window_start INTEGER NOT NULL,
+    PRIMARY KEY (scan_id, source)
+);
+
 CREATE TABLE IF NOT EXISTS signals (
     id         TEXT PRIMARY KEY,
     kind       TEXT NOT NULL CHECK (kind IN ('metric', 'label', 'stream', 'span_attribute')),
@@ -70,4 +80,17 @@ CREATE TABLE IF NOT EXISTS costs (
     spans_per_day INTEGER NOT NULL DEFAULT 0,
     monthly_cost  REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (signal_id, scan_id)
+);
+
+-- Dashboard loads in a scan's window, per login and kind. browser = 1 is a
+-- view from the dashboard page; 0 is an API client other than tvt.
+CREATE TABLE IF NOT EXISTS dashboard_loads (
+    scan_id       INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    org_id        INTEGER NOT NULL,
+    dashboard_uid TEXT NOT NULL,
+    login         TEXT NOT NULL,
+    browser       INTEGER NOT NULL CHECK (browser IN (0, 1)),
+    loads         INTEGER NOT NULL,
+    last_at       INTEGER NOT NULL,
+    PRIMARY KEY (scan_id, org_id, dashboard_uid, login, browser)
 );
