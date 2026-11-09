@@ -55,9 +55,6 @@ type rawVariable struct {
 	Type       string          `json:"type"`
 	Query      json.RawMessage `json:"query"`
 	Datasource json.RawMessage `json:"datasource"`
-	Current    struct {
-		Value json.RawMessage `json:"value"`
-	} `json:"current"`
 }
 
 type rawDashboard struct {
@@ -82,7 +79,7 @@ func (c *Client) Dashboards(ctx context.Context) ([]collect.Dashboard, error) {
 	if err != nil {
 		return nil, err
 	}
-	dss, err := c.datasources(ctx)
+	dss, listed, err := c.datasources(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +91,7 @@ func (c *Client) Dashboards(ctx context.Context) ([]collect.Dashboard, error) {
 		if err := c.getJSON(ctx, "/api/dashboards/uid/"+url.PathEscape(h.UID), nil, &raw); err != nil {
 			return nil, fmt.Errorf("dashboard %q (%s): %w", h.Title, h.UID, err)
 		}
-		d, err := c.convert(ctx, raw, h, dss, libs)
+		d, err := c.convert(ctx, raw, h, dss, listed, libs)
 		if err != nil {
 			return nil, fmt.Errorf("dashboard %q (%s): %w", h.Title, h.UID, err)
 		}
@@ -123,17 +120,20 @@ func (c *Client) search(ctx context.Context) ([]searchHit, error) {
 }
 
 // datasources lists datasources for resolving names and the default. A
-// token without datasources:read gets 403; resolution then falls back to
-// the UIDs and types written in the dashboard JSON.
-func (c *Client) datasources(ctx context.Context) ([]datasource, error) {
-	var dss []datasource
-	err := c.getJSON(ctx, "/api/datasources", nil, &dss)
+// token without datasources:read gets 403 (listed is false); queries that
+// name an explicit UID and type still resolve, and any query that needs the
+// list fails the dashboard with an actionable error.
+func (c *Client) datasources(ctx context.Context) (dss []datasource, listed bool, err error) {
+	err = c.getJSON(ctx, "/api/datasources", nil, &dss)
 	var he *httpError
 	if errors.As(err, &he) && (he.Status == http.StatusForbidden || he.Status == http.StatusUnauthorized) {
-		return nil, nil
+		return nil, false, nil
 	}
-	return dss, err
+	return dss, err == nil, err
 }
+
+// errNoDatasourceList explains how to fix an unresolvable reference.
+var errNoDatasourceList = errors.New("needs the datasource list, but /api/datasources was denied; give tvt's service account datasources:read")
 
 // libraryPanel fetches a library panel's model, cached per UID. A library
 // panel that no longer exists (404) renders nothing in Grafana either, so it
@@ -160,9 +160,9 @@ func (c *Client) libraryPanel(ctx context.Context, uid string, cache map[string]
 	return cache[uid], nil
 }
 
-func (c *Client) convert(ctx context.Context, raw rawDashboard, h searchHit, dss []datasource, libs map[string]*rawPanel) (collect.Dashboard, error) {
+func (c *Client) convert(ctx context.Context, raw rawDashboard, h searchHit, dss []datasource, listed bool, libs map[string]*rawPanel) (collect.Dashboard, error) {
 	db := raw.Dashboard
-	r := resolver{dss: dss, vars: map[string]rawVariable{}}
+	r := resolver{dss: dss, listed: listed, vars: map[string]rawVariable{}}
 	for _, v := range db.Templating.List {
 		r.vars[v.Name] = v
 	}
@@ -177,6 +177,9 @@ func (c *Client) convert(ctx context.Context, raw rawDashboard, h searchHit, dss
 			continue
 		}
 		ds := r.resolve(v.Datasource)
+		if ds.needsList {
+			return collect.Dashboard{}, fmt.Errorf("variable %q: datasource %s %w", v.Name, ds.describe(), errNoDatasourceList)
+		}
 		d.Variables = append(d.Variables, collect.Variable{
 			Name:           v.Name,
 			Query:          stringOrQuery(v.Query),
@@ -209,8 +212,11 @@ func (c *Client) convert(ctx context.Context, raw rawDashboard, h searchHit, dss
 			if title == "" {
 				title = src.Title
 			}
-			panel := collect.Panel{ID: p.ID, Title: title, Queries: r.panelQueries(src)}
-			d.Panels = append(d.Panels, panel)
+			queries, err := r.panelQueries(src)
+			if err != nil {
+				return fmt.Errorf("panel %d (%q): %w", p.ID, title, err)
+			}
+			d.Panels = append(d.Panels, collect.Panel{ID: p.ID, Title: title, Queries: queries})
 		}
 		return nil
 	}
@@ -226,17 +232,29 @@ type dsRef struct {
 	mixed    bool // "-- Mixed --": each query names its own datasource
 	skip     bool // built-in (-- Grafana --, -- Dashboard --, expressions): no backend signals
 	present  bool // the JSON named a datasource (false = inherit or default)
+	// needsList: resolving this reference needs /api/datasources (the
+	// default datasource, or a legacy name with no type), which was denied.
+	needsList bool
+	raw       string // the reference as written, for errors
+}
+
+func (d dsRef) describe() string {
+	if d.raw == "" {
+		return "(default)"
+	}
+	return fmt.Sprintf("%q", d.raw)
 }
 
 type resolver struct {
-	dss  []datasource
-	vars map[string]rawVariable
+	dss    []datasource
+	listed bool // /api/datasources was readable
+	vars   map[string]rawVariable
 }
 
-func (r *resolver) panelQueries(p rawPanel) []collect.PanelQuery {
+func (r *resolver) panelQueries(p rawPanel) ([]collect.PanelQuery, error) {
 	panelDS := r.resolve(p.Datasource)
 	if panelDS.skip {
-		return nil
+		return nil, nil
 	}
 	var out []collect.PanelQuery
 	for _, t := range p.Targets {
@@ -256,12 +274,20 @@ func (r *resolver) panelQueries(p rawPanel) []collect.PanelQuery {
 		if expr == "" {
 			continue
 		}
+		// Only a query that is actually emitted needs its datasource; a
+		// panel whose targets all name one doesn't need the default.
+		if ds.needsList {
+			return nil, fmt.Errorf("datasource %s %w", ds.describe(), errNoDatasourceList)
+		}
 		out = append(out, collect.PanelQuery{DatasourceUID: ds.uid, DatasourceType: ds.typ, Expr: expr})
 	}
-	return out
+	return out, nil
 }
 
 func (r *resolver) defaultDS() dsRef {
+	if !r.listed {
+		return dsRef{needsList: true}
+	}
 	for _, d := range r.dss {
 		if d.IsDefault {
 			return dsRef{uid: d.UID, typ: d.Type}
@@ -290,6 +316,9 @@ func (r *resolver) resolve(raw json.RawMessage) dsRef {
 	}
 	ref := r.lookup(uid, typ)
 	ref.present = true
+	if ref.raw == "" {
+		ref.raw = uid
+	}
 	return ref
 }
 
@@ -318,32 +347,30 @@ func (r *resolver) lookup(uid, typ string) dsRef {
 	if uid == "" && typ == "" {
 		return r.defaultDS()
 	}
+	if typ == "" && !r.listed {
+		// A bare string: a name or a UID, and only the list can tell which
+		// backend it is.
+		return dsRef{needsList: true, raw: uid}
+	}
+	// With the list available, an unknown reference is a deleted
+	// datasource; Grafana can't run it either.
 	return dsRef{uid: uid, typ: typ}
 }
 
-// lookupVar resolves a datasource template variable. Its query is the plugin
-// type; its current value, when concrete, is the datasource. When the value
-// can't be pinned down, the reference keeps the variable as its UID with the
-// plugin type, so it matches every datasource of that type downstream.
+// lookupVar resolves a datasource template variable to "$name" with the
+// variable's plugin type (its query). It is never pinned to the saved
+// current value: viewers can pick any datasource of that type, including
+// through URL parameters, so the reference stands for all of them.
 func (r *resolver) lookupVar(name, raw, typ string) dsRef {
 	v, ok := r.vars[name]
 	if !ok || v.Type != "datasource" {
-		return dsRef{uid: raw, typ: typ}
+		return dsRef{uid: raw, typ: typ, raw: raw}
 	}
 	pluginType := stringOrQuery(v.Query)
 	if pluginType == "" {
 		pluginType = typ
 	}
-	var cur string
-	_ = json.Unmarshal(v.Current.Value, &cur)
-	if cur != "" && cur != "$__all" && !strings.HasPrefix(cur, "$") && cur != "default" {
-		for _, d := range r.dss {
-			if d.UID == cur || d.Name == cur {
-				return dsRef{uid: d.UID, typ: d.Type}
-			}
-		}
-	}
-	return dsRef{uid: raw, typ: pluginType}
+	return dsRef{uid: "$" + name, typ: pluginType, raw: raw}
 }
 
 // varName reports whether s is a template variable reference ($ds, ${ds},

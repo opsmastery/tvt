@@ -109,3 +109,15 @@ func (c *Client) Login(ctx context.Context) (string, error) {
 	}
 	return u.Login, nil
 }
+
+// OrgID returns the organization the token belongs to. Pass it to
+// RouterLog.OrgID: the router log covers every organization.
+func (c *Client) OrgID(ctx context.Context) (int64, error) {
+	var o struct {
+		ID int64 `json:"id"`
+	}
+	if err := c.getJSON(ctx, "/api/org", nil, &o); err != nil {
+		return 0, err
+	}
+	return o.ID, nil
+}
