@@ -3,6 +3,7 @@ package prometheus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -30,7 +31,7 @@ const tsdbStartLimit = 10000
 var tsdbMaxLimit = 10_000_000
 
 // MetricCardinality returns active (head block) series per metric name, from
-// /api/v1/status/tsdb.
+// /api/v1/status/tsdb. Results are sorted by series, largest first.
 //
 // The endpoint returns only the top `limit` metrics. The result is complete
 // when the per-metric counts sum to headStats.numSeries; until then the limit
@@ -40,6 +41,9 @@ func (c *Client) MetricCardinality(ctx context.Context) ([]collect.MetricCardina
 		var st tsdbStatus
 		q := url.Values{"limit": {strconv.Itoa(limit)}}
 		if _, err := getJSON(ctx, c, "/api/v1/status/tsdb", q, &st); err != nil {
+			if c.source() == "mimir" && errors.Is(err, ErrNotFound) {
+				return nil, fmt.Errorf("%w (Mimir has no TSDB status endpoint; Mimir cardinality isn't supported yet, so scan the Prometheus that writes to it with --prom)", err)
+			}
 			return nil, err
 		}
 		var sum int64
