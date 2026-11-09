@@ -11,7 +11,7 @@ Phase 0 spike 2 (Nov 8, 2026, tvt-lab: Prometheus 3.5.0, Loki 3.5.3, Mimir 2.16.
 | Mimir query-frontend | `frontend.log_queries_longer_than: -1s` (plus `query_stats_enabled: true`) | logfmt in Mimir's own log | yes | `user_agent`; tenant in `user=` | not logged (ruler queries ingesters directly in the default mode) | **yes**, with `log_query_request_headers` |
 | Grafana router log | `GF_SERVER_ROUTER_LOGGING=true` | logfmt in Grafana's own log | no | `uname` | n/a | dashboard loads only (`GET /api/dashboards/uid/:uid`) |
 
-**Correction to spike 1.** Grafana 12 *does* forward `X-Dashboard-Uid`, `X-Panel-Id` and `X-Grafana-Org-Id` to the datasource on `/api/ds/query`. Spike 1 saw no attribution because Prometheus doesn't log request headers. Mimir does when asked to, so on Mimir panel usage needs no expression matching. `X-Grafana-User` was not forwarded with default settings; Grafana's `dataproxy.send_user_header` probably controls it (not yet tested).
+**Correction to spike 1.** Grafana 12 *does* forward `X-Dashboard-Uid`, `X-Panel-Id` and `X-Grafana-Org-Id` to the datasource on `/api/ds/query`. Spike 1 saw no attribution because Prometheus doesn't log request headers. Mimir does when asked to, so on Mimir panel usage needs no expression matching. `X-Grafana-User` is not forwarded by default. With `[dataproxy] send_user_header = true` (`GF_DATAPROXY_SEND_USER_HEADER=true`) Grafana 12.1 forwards the login on both `/api/ds/query` and the datasource proxy (`/api/datasources/proxy/uid/...`), and Mimir logs it as `header_x_grafana_user=admin` (verified Nov 9).
 
 ## Prometheus
 
@@ -19,7 +19,7 @@ Phase 0 spike 2 (Nov 8, 2026, tvt-lab: Prometheus 3.5.0, Loki 3.5.3, Mimir 2.16.
 query_log_file: /prometheus/query.log
 ```
 
-One JSON object per line: `params.query`, `params.start`/`end`/`step`, `stats.timings`, `ts`.
+One JSON object per line: `time` (RFC 3339, nanoseconds; Prometheus 2.x wrote `ts`), `params.query`, `params.start`/`end`/`step`, `stats.timings`, `stats.samples`. Instant queries have `start` equal to `end` and `step: 0`. Grafana resolves `$__rate_interval` before sending, so the logged text has a concrete range (`[40s]`) that changes with the panel's time range and width.
 
 - Rule evaluations carry `ruleGroup`. Exclude them: rules are counted through the rules API.
 - API queries carry `httpRequest.clientIP` and `httpRequest.path`. In the lab, Grafana's IP (`10.89.0.6`) sent 72 of 75 API queries in the last 500 lines; the rest were the viewer's direct "Explore" queries.
@@ -55,17 +55,30 @@ One `msg="query stats"` line per query from `component=query-frontend`, with `pa
 
 - **Best source of panel usage found so far.** It fills `LoggedQuery.DashboardUID` and `PanelID` directly.
 - `user_agent=Grafana/12.1.0` separates Grafana traffic from scripts and other API clients.
-- Rule evaluations don't pass through the query-frontend in Mimir's default (internal) ruler mode, so nothing needs excluding. With the remote ruler (`ruler.query_frontend.address`) they would appear; check `user_agent` there (not yet tested).
+- Rule evaluations don't pass through the query-frontend in Mimir's default (internal) ruler mode, so nothing needs excluding.
+- With the remote ruler (`ruler.query_frontend.address`), every rule evaluation *does* appear as a `query stats` line: `path=/prometheus/api/v1/query` (instant), `user_agent=mimir/2.16.0`, no Grafana headers, and `param_time` one minute behind wall time (the ruler's evaluation delay). There is no rule-group field. Exclude on the `mimir/` user-agent prefix (verified Nov 9 in a throwaway single-binary Mimir).
+
+## Overhead (measured Nov 9)
+
+The cost of query logging is disk and log volume, not query latency.
+
+| Source | Bytes per line | Lines per query | Notes |
+| --- | --- | --- | --- |
+| Prometheus `query_log_file` | ~635 | 1 per API query **and 1 per rule evaluation** | Lab: 86% of lines were rule evaluations. Volume ≈ (rules × evaluations/day + API queries/day) × 635 B. |
+| Loki `metrics.go` | ~1,450 (frontend line ~1,530) | 1 frontend + 1 or more querier lines; ruler lines per evaluation | Lab: `metrics.go` lines were about half of Loki's own log bytes. |
+| Mimir `query stats` | ~860 with header logging | 1 | Rule evaluations add lines only in remote-ruler mode. |
+
+- **Latency.** A throwaway Prometheus 3.5.0 ran 3,000 sequential instant queries with the log off and on, two rounds each (lab VM, so noisy): p50 1.86 ms off against 1.88 and 2.25 ms on, p99 3.4–3.6 ms off against 3.4 and 4.7 ms on. The cost is at most about 0.5 ms per query and often within noise. Not measured under concurrent load.
+- **Sizing example for partners.** 2,000 rules at a 30 s interval produce 5.76 M rule lines a day, about **3.7 GB/day** of Prometheus query log before compression, even with no dashboard traffic. Partners with many rules need rotation (Prometheus reopens the file on `SIGHUP` or `/-/reload`) or should ship the file and drop `ruleGroup` lines at the shipper. tvt counts rules through the rules API, so it doesn't need those lines.
 
 ## Not yet measured
 
-- Overhead of query logging at volume (Prometheus file I/O, Loki/Mimir log volume). Expect one line per query; the lab is too small to measure.
-- Mimir with the remote ruler; `X-Grafana-User` forwarding via `send_user_header`.
+- Query-log overhead under concurrent query load and at partner scale.
 - The Mimir cardinality API against real data (the lab's Mimir only receives data under `make up-mimir`).
 
 ## Classification rules for collectors
 
 1. Drop rule evaluations (`ruleGroup`, `component=ruler`).
 2. Drop Loki sub-queries and metadata calls (keep `component=frontend` with `query_type` in `limited`, `filter`, `metric`).
-3. Drop tvt's own queries (`source=tvt`, `user_agent=tvt/...`).
-4. Attribute: Mimir headers → dashboard and panel; Grafana IP or user agent → "Grafana, unattributed" (match against panel expressions); anything else → "other API client" (ad hoc weight).
+3. Drop tvt's own queries (`source=tvt`, `user_agent=tvt/...`) and Mimir remote-ruler evaluations (`user_agent=mimir/...`).
+4. Attribute: Mimir headers → dashboard, panel and (with `send_user_header`) user; Grafana IP or user agent → "Grafana, unattributed" (match against panel expressions); anything else → "other API client" (ad hoc weight).
