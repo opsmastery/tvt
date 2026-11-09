@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +24,10 @@ type RouterLog struct {
 	// ExcludeUsers are logins whose loads are not views, typically tvt's own
 	// service account (Client.Login) and other automation.
 	ExcludeUsers []string
+	// OrgID keeps only loads in this organization (Client.OrgID). The log
+	// holds every organization's requests, and dashboard UIDs are only
+	// unique within one. Zero keeps all, each view tagged with its org.
+	OrgID int64
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
 }
@@ -58,11 +64,16 @@ func (r *RouterLog) DashboardViews(ctx context.Context, since time.Time) ([]coll
 		if exclude[kv["uname"]] {
 			return
 		}
+		org, err := strconv.ParseInt(kv["orgId"], 10, 64)
+		if err != nil || (r.OrgID != 0 && org != r.OrgID) {
+			return
+		}
 		out = append(out, collect.DashboardView{
 			DashboardUID: uid,
+			OrgID:        org,
 			User:         kv["uname"],
 			At:           at,
-			Browser:      strings.Contains(kv["referer"], "/d/"+uid),
+			Browser:      refererIsDashboard(kv["referer"], uid),
 		})
 	})
 	if err != nil {
@@ -96,10 +107,32 @@ func (r *RouterLog) Coverage(ctx context.Context, since time.Time) (float64, err
 	return float64(now.Sub(first)) / float64(now.Sub(since)), nil
 }
 
+// refererIsDashboard reports whether referer is the page of dashboard uid:
+// a path with a "d" (dashboard) or "d-solo" (embedded panel) segment
+// followed by exactly uid. Grafana may be served under a sub-path.
+func refererIsDashboard(referer, uid string) bool {
+	u, err := url.Parse(referer)
+	if err != nil {
+		return false
+	}
+	// Split the escaped path so an encoded "/" (%2F) stays inside its segment.
+	segs := strings.Split(u.EscapedPath(), "/")
+	for i := 0; i+1 < len(segs); i++ {
+		if segs[i] != "d" && segs[i] != "d-solo" {
+			continue
+		}
+		if next, err := url.PathUnescape(segs[i+1]); err == nil && next == uid {
+			return true
+		}
+	}
+	return false
+}
+
 var errNotGrafanaLog = errors.New("no line parsed as a Grafana log entry")
 
-// scan calls fn for every logfmt line with a valid t= timestamp at or after
-// since. A non-empty file without one such line is an error.
+// scan calls fn for every Grafana log line (logfmt with logger= and a valid
+// t= timestamp) at or after since. A non-empty file without one such line is
+// an error: requiring logger= keeps other logfmt logs from passing.
 func (r *RouterLog) scan(ctx context.Context, since time.Time, fn func(time.Time, map[string]string)) error {
 	files, err := logfile.Expand(r.Paths)
 	if err != nil {
@@ -110,6 +143,9 @@ func (r *RouterLog) scan(ctx context.Context, since time.Time, fn func(time.Time
 		err := logfile.ScanFile(ctx, path, func(raw []byte) {
 			lines++
 			kv := logfmt.Parse(raw)
+			if kv["logger"] == "" {
+				return
+			}
 			at, err := time.Parse(time.RFC3339Nano, kv["t"])
 			if err != nil {
 				return

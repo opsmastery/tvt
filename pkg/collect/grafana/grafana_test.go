@@ -149,11 +149,14 @@ func TestDashboardEdgeCases(t *testing.T) {
 		}
 	}
 	want := map[int][]q{
-		2:  {{"prometheus", "prometheus", "up"}},
-		3:  {{"loki", "loki", `{app="x"}`}},
-		4:  {{"loki", "loki", `{app="y"}`}, {"prometheus", "prometheus", "node_load1"}},
-		5:  {},
-		6:  {{"mimir", "prometheus", "rate(a[5m])"}},
+		2: {{"prometheus", "prometheus", "up"}},
+		3: {{"loki", "loki", `{app="x"}`}},
+		4: {{"loki", "loki", `{app="y"}`}, {"prometheus", "prometheus", "node_load1"}},
+		5: {},
+		// Datasource variables stay symbolic: viewers can switch away from
+		// the saved selection ("mimir"), so they stand for every
+		// datasource of the variable's type.
+		6:  {{"$ds", "prometheus", "rate(a[5m])"}},
 		7:  {{"$anyprom", "prometheus", "b"}},
 		8:  {{"prometheus", "prometheus", "node_cpu_seconds_total"}},
 		10: {{"mimir", "prometheus", "c"}},
@@ -173,7 +176,7 @@ func TestDashboardEdgeCases(t *testing.T) {
 	if titles[8] != "Shared CPU" {
 		t.Errorf("library panel title = %q", titles[8])
 	}
-	if len(d.Variables) != 1 || d.Variables[0].DatasourceUID != "mimir" || d.Variables[0].DatasourceType != "prometheus" {
+	if len(d.Variables) != 1 || d.Variables[0].DatasourceUID != "$ds" || d.Variables[0].DatasourceType != "prometheus" {
 		t.Errorf("variables = %+v", d.Variables)
 	}
 }
@@ -187,6 +190,46 @@ func TestDashboardsWithoutDatasourceAccess(t *testing.T) {
 	}
 	if q := byUID(got)["shop-overview"].Panels[0].Queries[0]; q.DatasourceUID != "prometheus" || q.DatasourceType != "prometheus" {
 		t.Errorf("query = %+v", q)
+	}
+}
+
+func TestDashboardsNeedingDatasourceListFail(t *testing.T) {
+	cases := map[string]string{
+		"panel on the default": `{"dashboard":{"uid":"x","title":"X","panels":[
+			{"id":1,"title":"p","datasource":null,"targets":[{"expr":"up"}]}]}}`,
+		"legacy name": `{"dashboard":{"uid":"x","title":"X","panels":[
+			{"id":1,"title":"p","datasource":"Prometheus","targets":[{"expr":"up"}]}]}}`,
+		"mixed target without datasource": `{"dashboard":{"uid":"x","title":"X","panels":[
+			{"id":1,"title":"p","datasource":{"uid":"-- Mixed --"},"targets":[{"expr":"up"}]}]}}`,
+		"variable on the default": `{"dashboard":{"uid":"x","title":"X","panels":[],
+			"templating":{"list":[{"name":"job","type":"query","query":"label_values(up, job)"}]}}}`,
+	}
+	for name, dash := range cases {
+		srv := labServer(t, map[string]string{
+			"/api/datasources":      "403",
+			"/api/search":           `[{"uid":"x","title":"X"}]`,
+			"/api/dashboards/uid/x": dash,
+		})
+		_, err := New(srv.URL, "").Dashboards(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "datasources:read") {
+			t.Errorf("%s: err = %v, want an actionable datasources:read error", name, err)
+		}
+	}
+
+	// Explicit UIDs and types, and a panel default no target uses, still
+	// work without the list.
+	srv := labServer(t, map[string]string{
+		"/api/datasources": "403",
+		"/api/search":      `[{"uid":"x","title":"X"}]`,
+		"/api/dashboards/uid/x": `{"dashboard":{"uid":"x","title":"X","panels":[
+			{"id":1,"title":"p","datasource":null,"targets":[{"datasource":{"type":"loki","uid":"loki"},"expr":"{a=\"b\"}"}]}]}}`,
+	})
+	got, err := New(srv.URL, "").Dashboards(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q := got[0].Panels[0].Queries; len(q) != 1 || q[0].DatasourceUID != "loki" {
+		t.Errorf("queries = %+v", q)
 	}
 }
 
@@ -306,7 +349,7 @@ func writeLog(t *testing.T, content string) string {
 
 func TestDashboardViewsFilters(t *testing.T) {
 	line := func(method, path, status, handler, referer string) string {
-		return fmt.Sprintf(`logger=context uname=bob t=2026-11-09T10:00:00Z level=info msg="Request Completed" method=%s path=%s status=%s referer=%s handler=%s`,
+		return fmt.Sprintf(`logger=context userId=2 orgId=1 uname=bob t=2026-11-09T10:00:00Z level=info msg="Request Completed" method=%s path=%s status=%s referer=%s handler=%s`,
 			method, path, status, referer, handler)
 	}
 	p := writeLog(t, strings.Join([]string{
@@ -333,6 +376,10 @@ func TestRouterLogErrorsAndCoverage(t *testing.T) {
 	if _, err := (&RouterLog{}).DashboardViews(context.Background(), time.Time{}); err == nil {
 		t.Error("no paths accepted")
 	}
+	// logfmt with a t= timestamp but not Grafana's (no logger=).
+	if _, err := (&RouterLog{Paths: []string{writeLog(t, `t=2026-11-09T10:00:00Z level=info msg="hello"`+"\n")}}).DashboardViews(context.Background(), time.Time{}); err == nil {
+		t.Error("non-Grafana logfmt accepted")
+	}
 
 	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 	p := writeLog(t, `logger=context t=2026-11-03T12:00:00Z msg="Request Completed"`+"\n")
@@ -344,5 +391,62 @@ func TestRouterLogErrorsAndCoverage(t *testing.T) {
 	cov, err = rl.Coverage(context.Background(), now.Add(-24*time.Hour))
 	if err != nil || cov != 1 {
 		t.Errorf("coverage = %v, %v; want 1 (log predates window)", cov, err)
+	}
+}
+
+func TestRefererIsDashboard(t *testing.T) {
+	cases := map[string]bool{
+		"https://g/d/a/slug?orgId=1":           true,
+		"https://g/d/a":                        true,
+		"https://example.com/grafana/d/a/slug": true, // sub-path
+		"https://g/d-solo/a/slug?panelId=2":    true, // embedded panel
+		"https://g/d/ab/other-dashboard":       false,
+		"https://g/d/b/other?return=/d/a/slug": false, // only in the query
+		"https://g/dashboards/f/a/":            false,
+		"":                                     false,
+		"http://g/d/a%2Fx/slug":                false,
+	}
+	for ref, want := range cases {
+		if got := refererIsDashboard(ref, "a"); got != want {
+			t.Errorf("refererIsDashboard(%q) = %v, want %v", ref, got, want)
+		}
+	}
+}
+
+func TestDashboardViewsByOrg(t *testing.T) {
+	line := func(org, uid string) string {
+		return fmt.Sprintf(`logger=context userId=1 orgId=%s uname=ann t=2026-11-09T10:00:00Z msg="Request Completed" method=GET path=/api/dashboards/uid/%s status=200 referer=https://g/d/%s/s handler=/api/dashboards/uid/:uid`,
+			org, uid, uid)
+	}
+	p := writeLog(t, line("1", "x")+"\n"+line("2", "x")+"\n"+line("2", "y")+"\n")
+
+	all, err := (&RouterLog{Paths: []string{p}}).DashboardViews(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 || all[0].OrgID != 1 || all[1].OrgID != 2 {
+		t.Errorf("all orgs = %+v", all)
+	}
+	org1, err := (&RouterLog{Paths: []string{p}, OrgID: 1}).DashboardViews(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(org1) != 1 || org1[0].DashboardUID != "x" || org1[0].OrgID != 1 {
+		t.Errorf("org 1 = %+v", org1)
+	}
+}
+
+func TestOrgID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/org" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `{"id":3,"name":"Shop"}`)
+	}))
+	t.Cleanup(srv.Close)
+	id, err := New(srv.URL, "").OrgID(context.Background())
+	if err != nil || id != 3 {
+		t.Errorf("OrgID = %d, %v", id, err)
 	}
 }
