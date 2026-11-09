@@ -21,3 +21,37 @@ external_consumers:
 # How to attribute cost to teams.
 ownership:
   labels: [team, service, namespace]
+
+# Where changes land (ADR 0007). Every signal must be claimed by exactly one
+# pipeline; unclaimed or doubly claimed signals are reported, never proposed.
+pipelines:
+  - name: prometheus-scrape
+    kind: prometheus            # prometheus | alloy | otelcol (vector later)
+    repo: github.com/acme/observability-config
+    branch: main
+    files: [prometheus/prometheus.yml]
+    handles:                    # label selectors for the signals this pipeline ingests
+      - '{job=~"prometheus|loki|grafana|alertmanager"}'
+    reviewers: ["@acme/observability"]
+
+  - name: alloy-apps
+    kind: alloy
+    repo: github.com/acme/observability-config
+    branch: main
+    files: [alloy/config.alloy]
+    handles:
+      - '{job=~"shop|node"}'    # metrics scraped by Alloy
+      - '{app="shop"}'          # log streams shipped by Alloy
+    reviewers: ["@acme/observability"]
+
+  - name: otel-gateway
+    kind: otelcol
+    repo: gitlab.com/acme/platform-gitops
+    branch: main
+    # Config rendered from Helm: point at the values key, not the rendered file.
+    helm_values:
+      file: charts/otel-gateway/values.yaml
+      path: config
+    handles:
+      - '{service_namespace="payments"}'
+    reviewers: ["@acme/payments-sre"]
