@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/jasonvance/tvt/internal/version"
+	"github.com/Opsmastery-Summit/tvt/internal/version"
 )
 
 // Exit codes.

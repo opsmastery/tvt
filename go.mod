@@ -1,3 +1,3 @@
-module github.com/jasonvance/tvt
+module github.com/Opsmastery-Summit/tvt
 
 go 1.24
