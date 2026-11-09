@@ -1,20 +1,14 @@
 package prometheus
 
 import (
-	"bufio"
-	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/internal/logfile"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 )
 
@@ -159,92 +153,29 @@ var errNotQueryLog = errors.New("no line parsed as a Prometheus query log entry"
 // still being written) are skipped, but a file where no line parses is an
 // error: it is probably not a query log.
 func (q *QueryLog) scan(ctx context.Context, since time.Time, fn func(*queryLogLine)) error {
-	files, err := q.files()
+	files, err := logfile.Expand(q.Paths)
 	if err != nil {
-		return err
+		return fmt.Errorf("prometheus query log: %w", err)
 	}
 	for _, path := range files {
-		if err := scanFile(ctx, path, since, fn); err != nil {
+		var lines, parsed int
+		err := logfile.ScanFile(ctx, path, func(raw []byte) {
+			lines++
+			var l queryLogLine
+			if json.Unmarshal(raw, &l) != nil || l.at().IsZero() {
+				return
+			}
+			parsed++
+			if !l.at().Before(since) {
+				fn(&l)
+			}
+		})
+		if err == nil && lines > 0 && parsed == 0 {
+			err = errNotQueryLog
+		}
+		if err != nil {
 			return fmt.Errorf("prometheus query log %s: %w", path, err)
 		}
-	}
-	return nil
-}
-
-func (q *QueryLog) files() ([]string, error) {
-	if len(q.Paths) == 0 {
-		return nil, errors.New("prometheus query log: no paths configured")
-	}
-	seen := map[string]bool{}
-	var files []string
-	for _, p := range q.Paths {
-		matches, err := filepath.Glob(p)
-		if err != nil {
-			return nil, fmt.Errorf("prometheus query log: bad pattern %q: %w", p, err)
-		}
-		if len(matches) == 0 {
-			return nil, fmt.Errorf("prometheus query log: %s: no such file", p)
-		}
-		for _, m := range matches {
-			if !seen[m] {
-				seen[m] = true
-				files = append(files, m)
-			}
-		}
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
-func scanFile(ctx context.Context, path string, since time.Time, fn func(*queryLogLine)) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	var r io.Reader = f
-	if strings.HasSuffix(path, ".gz") {
-		gz, err := gzip.NewReader(f)
-		if err != nil {
-			return err
-		}
-		defer gz.Close()
-		r = gz
-	}
-
-	br := bufio.NewReaderSize(r, 64*1024)
-	var lines, parsed int
-	for {
-		// ReadBytes has no line-length limit; long PromQL expressions are fine.
-		raw, err := br.ReadBytes('\n')
-		if len(raw) > 0 {
-			if lines%4096 == 0 {
-				if cerr := ctx.Err(); cerr != nil {
-					return cerr
-				}
-			}
-			raw = bytes.TrimSpace(raw)
-			if len(raw) > 0 {
-				lines++
-				var l queryLogLine
-				if json.Unmarshal(raw, &l) == nil && !l.at().IsZero() {
-					parsed++
-					if !l.at().Before(since) {
-						fn(&l)
-					}
-				}
-			}
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-	}
-	if lines > 0 && parsed == 0 {
-		return errNotQueryLog
 	}
 	return nil
 }
