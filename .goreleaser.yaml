@@ -9,9 +9,9 @@ builds:
     goarch: [amd64, arm64]
     ldflags:
       - -s -w
-      - -X github.com/jasonvance/tvt/internal/version.Version={{.Version}}
-      - -X github.com/jasonvance/tvt/internal/version.Commit={{.ShortCommit}}
-      - -X github.com/jasonvance/tvt/internal/version.Date={{.Date}}
+      - -X github.com/Opsmastery-Summit/tvt/internal/version.Version={{.Version}}
+      - -X github.com/Opsmastery-Summit/tvt/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/Opsmastery-Summit/tvt/internal/version.Date={{.Date}}
 
 archives:
   - formats: [tar.gz]
