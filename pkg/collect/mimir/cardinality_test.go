@@ -130,6 +130,31 @@ func TestMetricCardinalityTruncated(t *testing.T) {
 	}
 }
 
+func TestMetricCardinalityNamesOutsideAlphabet(t *testing.T) {
+	// Once a response is cut off, names the prefix partitions can't reach
+	// (UTF-8 names, a dot after a prefix) must fail the scan, not vanish.
+	for name, odd := range map[string]string{
+		"utf8 first char":  "ümlaut_total",
+		"dot after prefix": "http.server.duration",
+	} {
+		t.Run(name, func(t *testing.T) {
+			names := map[string]int64{odd: 3}
+			for i := range 20 {
+				names[fmt.Sprintf("http%02d", i)] = 1
+			}
+			c := New(server(t, &testutil.MimirNames{T: t, Names: names}, nil).URL+"/prometheus", "")
+			c.Limit = 5
+			got, err := c.MetricCardinality(context.Background())
+			if !errors.Is(err, ErrTruncated) {
+				t.Fatalf("got %d metrics, err %v; want ErrTruncated", len(got), err)
+			}
+			if !strings.Contains(err.Error(), "outside the partition alphabet") {
+				t.Errorf("err = %v", err)
+			}
+		})
+	}
+}
+
 func TestLimitNeverExceedsMax(t *testing.T) {
 	names := map[string]int64{"a": 1}
 	for _, lim := range []int{0, -1, 501, 10000} {

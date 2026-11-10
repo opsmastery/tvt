@@ -53,8 +53,8 @@ var maxPrefix = 32
 // Mimir returns at most MaxLimit names per call. When a call is cut off
 // (fewer rows than label_values_count), the names are partitioned by prefix
 // with selector {__name__=~"<prefix>.*"} and each partition is read until
-// it is complete. A partition that can't be completed returns ErrTruncated
-// rather than undercounting.
+// it is complete. A partition that can't be completed, or names that no
+// partition covers, return ErrTruncated rather than undercounting.
 func (c *Client) MetricCardinality(ctx context.Context) ([]collect.MetricCardinality, error) {
 	counts := map[string]int64{}
 	if err := c.metricNames(ctx, "", counts); err != nil {
@@ -103,6 +103,14 @@ func (c *Client) metricNames(ctx context.Context, prefix string, out map[string]
 		if _, err := c.nameValues(ctx, fmt.Sprintf("{__name__=%q}", prefix), out); err != nil {
 			return err
 		}
+	}
+	// Names whose next character is outside the partition alphabet (UTF-8
+	// names such as OpenTelemetry's dotted ones, or a name starting with a
+	// digit) are in total but in no partition. Missing them would make
+	// those metrics look like they don't exist, so fail instead.
+	if found := int64(len(out) - before); found < total {
+		return fmt.Errorf("%w: %d of %d metric names starting with %q are outside the partition alphabet [%s]",
+			ErrTruncated, total-found, total, prefix, nextChars)
 	}
 	return nil
 }
