@@ -54,7 +54,7 @@ func syntheticSeries(w http.ResponseWriter, r *http.Request) {
 }
 
 type labServers struct {
-	prom, grafana *httptest.Server
+	prom, grafana, loki *httptest.Server
 }
 
 func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
@@ -85,13 +85,15 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 		},
 		"/api/org": func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"id":1,"name":"Main Org."}`) },
 	})
-	return labServers{prom, graf}
+	loki := fixtureServer(t, map[string]string{"/loki/api/v1/rules": "loki/rules.yaml"}, nil)
+	return labServers{prom, graf, loki}
 }
 
 func labOptions(l labServers, db string) scanOptions {
 	return scanOptions{
 		Grafana:       l.grafana.URL,
 		Prom:          l.prom.URL,
+		Loki:          l.loki.URL,
 		DB:            db,
 		Window:        30,
 		LabelTop:      2,
@@ -120,7 +122,7 @@ func TestScanLab(t *testing.T) {
 		t.Fatalf("scan: %v\n%s", err, out.String())
 	}
 	t.Log("\n" + out.String())
-	for _, want := range []string{"prom ", "5 rules", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "19 dashboard loads (19 in a browser)", ", 19 dashboard loads,"} {
+	for _, want := range []string{"prom ", "5 rules", "loki         1 rule (", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "19 dashboard loads (19 in a browser)", ", 19 dashboard loads,"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -200,8 +202,40 @@ func TestScanLab(t *testing.T) {
 			}
 		}
 	}
-	if rules != 5 || shop == 0 || legacy == 0 {
+	if rules != 6 || shop == 0 || legacy == 0 {
 		t.Errorf("rules=%d shop=%d legacy=%d", rules, shop, legacy)
+	}
+
+	// The Loki rule is a consumer, and the stream it alerts on is a hard
+	// keep: an alert rule references it. The reference is assumed until the
+	// LogQL extractor exists, so it covers all the stream's labels.
+	byID := map[string]graph.Consumer{}
+	for _, c := range cons {
+		byID[c.ID] = c
+	}
+	const lokiAlert = "rule:loki:shop-audit.yml/shop-audit/ShopAuditDenials"
+	if c, ok := byID[lokiAlert]; !ok || c.Kind != graph.ConsumerAlertRule {
+		t.Errorf("ShopAuditDenials consumer = %+v, %v", c, ok)
+	}
+	const auditStream = `loki:stream:{app="shop", component="audit"}`
+	if s, ok := ids[auditStream]; !ok || s.Kind != graph.KindStream || s.Source != "loki" {
+		t.Errorf("audit stream signal = %+v, %v", s, ok)
+	}
+	refs, err := st.References(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hardKeep := false
+	for _, r := range refs {
+		if r.SignalID == auditStream && byID[r.ConsumerID].Kind.HardKeep() {
+			hardKeep = true
+			if !r.Assumed {
+				t.Errorf("reference %+v is not marked assumed", r)
+			}
+		}
+	}
+	if !hardKeep {
+		t.Errorf("%s is not hard-keep; refs = %+v", auditStream, refs)
 	}
 
 	// tvt's own fetches (sa-1-tvt) are not loads.
@@ -249,12 +283,12 @@ func TestScanWithoutLogs(t *testing.T) {
 	setNow(t)
 	l := newLab(t, nil)
 	o := labOptions(l, filepath.Join(t.TempDir(), "tvt.db"))
-	o.GrafanaLogs, o.PromQueryLogs, o.Loki = nil, nil, "http://loki:3100"
+	o.GrafanaLogs, o.PromQueryLogs, o.Loki = nil, nil, ""
 	var out bytes.Buffer
 	if err := runScan(context.Background(), o, env, &out); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"not configured (--grafana-log)", "not configured (--prom-query-log)", "not collected yet", "log coverage 0%"} {
+	for _, want := range []string{"not configured (--grafana-log)", "not configured (--prom-query-log)", "log coverage 0%"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
 		}
@@ -277,13 +311,20 @@ func TestScanAborts(t *testing.T) {
 		ctx     context.Context
 		env     func(string) string
 		logs    stringList
+		loki    http.HandlerFunc
 		wantErr string
 	}{
-		{"rules fail", failRules, context.Background(), env, nil, "boom"},
-		{"no grafana token", nil, context.Background(), func(string) string { return "" }, nil, "TVT_GRAFANA_TOKEN is not set"},
-		{"not a grafana log", nil, context.Background(), env, stringList{filepath.Join(lab, "prometheus/query.log")}, "no line parsed as a Grafana log entry"},
-		{"missing log", nil, context.Background(), env, stringList{filepath.Join(lab, "grafana/nope.log")}, "grafana router log"},
-		{"interrupted", nil, cancelled, env, nil, "context canceled"},
+		{"rules fail", failRules, context.Background(), env, nil, nil, "boom"},
+		{"no grafana token", nil, context.Background(), func(string) string { return "" }, nil, nil, "TVT_GRAFANA_TOKEN is not set"},
+		{"not a grafana log", nil, context.Background(), env, stringList{filepath.Join(lab, "prometheus/query.log")}, nil, "no line parsed as a Grafana log entry"},
+		{"missing log", nil, context.Background(), env, stringList{filepath.Join(lab, "grafana/nope.log")}, nil, "grafana router log"},
+		{"interrupted", nil, cancelled, env, nil, nil, "context canceled"},
+		{"loki rules fail", nil, context.Background(), env, nil, func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "ruler unavailable", http.StatusServiceUnavailable)
+		}, "ruler unavailable"},
+		{"loki rules malformed", nil, context.Background(), env, nil, func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "ns:\n  - name: g\n    rules:\n      - expr: '{a=\"b\"}'\n")
+		}, "exactly one of alert or record"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -292,6 +333,11 @@ func TestScanAborts(t *testing.T) {
 			o := labOptions(l, db)
 			if tc.logs != nil {
 				o.GrafanaLogs = tc.logs
+			}
+			if tc.loki != nil {
+				srv := httptest.NewServer(tc.loki)
+				t.Cleanup(srv.Close)
+				o.Loki = srv.URL
 			}
 			var out bytes.Buffer
 			err := runScan(tc.ctx, o, tc.env, &out)
