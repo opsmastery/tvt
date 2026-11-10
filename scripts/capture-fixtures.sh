@@ -115,4 +115,12 @@ else
 fi
 fi
 
+# The golden test asserts against the lab's ground truth, so keep a copy
+# with the fixtures it describes.
+if cp "$LAB_DIR/ground-truth.yaml" "$OUT/ground-truth.yaml"; then
+  echo "  ok  $OUT/ground-truth.yaml"
+else
+  echo "  FAIL ground-truth.yaml (is LAB_DIR=$LAB_DIR right?)" >&2
+fi
+
 echo "Done. Review $OUT before committing."
