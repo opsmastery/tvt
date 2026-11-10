@@ -14,3 +14,5 @@ Date: 2026-11-08 · Status: accepted
 
 - Cross-compiling for linux, darwin and windows on amd64 and arm64 is trivial.
 - The initial scaffold has no third-party dependencies at all.
+
+Exception: self-observability uses the standard OpenTelemetry Go SDK (ADR 0008).
