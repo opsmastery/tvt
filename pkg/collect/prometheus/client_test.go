@@ -270,7 +270,7 @@ func TestMimirHasNoTSDBStatus(t *testing.T) {
 	c := New(srv.URL+"/prometheus", "")
 	c.Source = "mimir"
 	_, err := c.MetricCardinality(context.Background())
-	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "--prom") {
-		t.Fatalf("err = %v, want ErrNotFound with a --prom hint", err)
+	if !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "pkg/collect/mimir") {
+		t.Fatalf("err = %v, want ErrNotFound with a hint to use pkg/collect/mimir", err)
 	}
 }
