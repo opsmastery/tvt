@@ -1,6 +1,6 @@
 // Package parse extracts which signals a query touches. PromQL uses the
-// upstream Prometheus parser; LogQL uses Loki's syntax package (or a vendored
-// subset, pending the Phase 0 dependency spike).
+// upstream Prometheus parser; LogQL gets tvt's own extractor (ADR 0005), and
+// until then LogStreamSelectors finds only stream selectors.
 //
 // Label-level detail matters: dropping a label breaks queries that match on
 // it, group by it or join on it, and silently changes queries that use

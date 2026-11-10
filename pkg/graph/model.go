@@ -79,6 +79,10 @@ type Reference struct {
 	LastSeen   time.Time
 	Actor      string // user or agent that issued the query, when known
 	Via        string // recording rule ID when the dependency is transitive
+	// Assumed means the reference was inferred without fully parsing the
+	// consumer's query (for example a LogQL rule before the LogQL extractor
+	// exists). It covers every label of the signal: unknown means used.
+	Assumed bool
 }
 
 // Cost is the observed volume of a signal and what it costs per month.

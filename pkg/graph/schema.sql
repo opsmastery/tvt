@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS refs (
     via         TEXT NOT NULL DEFAULT '',
     last_seen   INTEGER,
     actor       TEXT NOT NULL DEFAULT '',
+    -- 1 when the reference was inferred without a full parse of the query:
+    -- it covers every label of the signal (schema version 2).
+    assumed     INTEGER NOT NULL DEFAULT 0 CHECK (assumed IN (0, 1)),
     last_scan   INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (signal_id, consumer_id, via)
 );
