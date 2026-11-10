@@ -393,8 +393,10 @@ func TestAssumedReferences(t *testing.T) {
 	}
 }
 
-func TestUpgradeFromVersion1(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "v1.db")
+// versionOneDB writes a database with one scan and turns it into schema
+// version 1 (no refs.assumed). It returns the open store.
+func versionOneDB(t *testing.T, path string) *Store {
+	t.Helper()
 	s, err := Open(ctx, path)
 	must(t, err)
 	scan(t, s, t0, func(sc *Scan) {
@@ -402,7 +404,6 @@ func TestUpgradeFromVersion1(t *testing.T) {
 		must(t, sc.PutConsumer(ctx, graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}))
 		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c"}))
 	})
-	// Turn it into a version 1 database: no refs.assumed.
 	for _, q := range []string{
 		`ALTER TABLE refs DROP COLUMN assumed`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
@@ -411,9 +412,14 @@ func TestUpgradeFromVersion1(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
-	s.Close()
+	return s
+}
 
-	s, err = Open(ctx, path)
+func TestUpgradeFromVersion1(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.db")
+	versionOneDB(t, path).Close()
+
+	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatalf("open version 1 database: %v", err)
 	}
@@ -436,4 +442,27 @@ func TestUpgradeFromVersion1(t *testing.T) {
 		must(t, sc.PutConsumer(ctx, graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}))
 		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c", Assumed: true}))
 	})
+}
+
+// An upgrade that stops after its ALTER commits (before migrate runs) must
+// leave a database the next Open accepts, not one that reports version 1
+// and fails on a duplicate column.
+func TestUpgradeInterrupted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.db")
+	s := versionOneDB(t, path)
+	must(t, s.upgrade(ctx, 1))
+	s.Close()
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("open after interrupted upgrade: %v", err)
+	}
+	defer s.Close()
+	info, err := s.LatestScan(ctx)
+	must(t, err)
+	refs, err := s.References(ctx, info.ID)
+	must(t, err)
+	if len(refs) != 1 {
+		t.Errorf("refs = %+v, want the old reference", refs)
+	}
 }
