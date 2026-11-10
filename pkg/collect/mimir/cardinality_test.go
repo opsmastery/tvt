@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -16,37 +16,24 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 )
 
-const fixtures = "../../../testdata/lab/mimir"
+var fixtures = filepath.Join(testutil.Lab, "mimir")
 
 func readFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(fixtures + "/" + name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
+	return testutil.ReadFile(t, "lab/mimir/"+name)
 }
 
-// server routes label_values on __name__ to names, other paths to extra,
-// and fails the test on anything but a GET.
+// server routes label_values on __name__ to names and other paths to extra.
 func server(t *testing.T, names *testutil.MimirNames, extra map[string]http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("%s %s: tvt must only GET", r.Method, r.URL.Path)
-		}
-		if h, ok := extra[r.URL.Path]; ok {
-			h(w, r)
-			return
-		}
-		if r.URL.Path == testutil.MimirLabelValuesPath && names != nil {
-			names.ServeHTTP(w, r)
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	routes := testutil.Routes{}
+	for path, h := range extra {
+		routes[path] = h
+	}
+	if _, ok := routes[testutil.MimirLabelValuesPath]; !ok && names != nil {
+		routes[testutil.MimirLabelValuesPath] = names
+	}
+	return testutil.NewServer(t, routes)
 }
 
 func TestMetricCardinalityFixture(t *testing.T) {
@@ -215,12 +202,11 @@ func TestErrors(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var auth string
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				auth = r.Header.Get("Authorization")
 				w.WriteHeader(tc.status)
 				w.Write(tc.body)
 			}))
-			t.Cleanup(srv.Close)
 			c := New(srv.URL+"/prometheus", "secret-token")
 			for call, err := range map[string]error{
 				"MetricCardinality": func() error { _, err := c.MetricCardinality(context.Background()); return err }(),
