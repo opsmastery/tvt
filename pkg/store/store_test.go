@@ -355,3 +355,114 @@ func TestSourcesAndLoads(t *testing.T) {
 		t.Errorf("loads\n got  %+v\n want %+v", gotLoads, loads)
 	}
 }
+
+func TestAssumedReferences(t *testing.T) {
+	s, _ := open(t)
+	sig := graph.Signal{ID: "loki:stream:{app=\"shop\"}", Kind: graph.KindStream, Name: `{app="shop"}`, Source: "loki"}
+	con := graph.Consumer{ID: "rule:loki:a/b/c", Kind: graph.ConsumerAlertRule, Name: "c"}
+	exact := graph.Reference{SignalID: sig.ID, ConsumerID: con.ID}
+	assumed := graph.Reference{SignalID: sig.ID, ConsumerID: con.ID, Assumed: true}
+
+	// Within a scan the broader, assumed reading wins whatever the order.
+	for name, order := range map[string][]graph.Reference{
+		"assumed first": {assumed, exact},
+		"exact first":   {exact, assumed},
+	} {
+		id := scan(t, s, t0, func(sc *Scan) {
+			must(t, sc.PutSignal(ctx, sig))
+			must(t, sc.PutConsumer(ctx, con))
+			for _, r := range order {
+				must(t, sc.PutReference(ctx, r))
+			}
+		})
+		refs, _ := s.References(ctx, id)
+		if len(refs) != 1 || !refs[0].Assumed {
+			t.Errorf("%s: refs = %+v, want one assumed", name, refs)
+		}
+	}
+
+	// A later scan that resolves the reference exactly replaces it.
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutConsumer(ctx, con))
+		must(t, sc.PutReference(ctx, exact))
+	})
+	refs, _ := s.References(ctx, id)
+	if len(refs) != 1 || refs[0].Assumed {
+		t.Errorf("later exact scan: refs = %+v, want one exact", refs)
+	}
+}
+
+// versionOneDB writes a database with one scan and turns it into schema
+// version 1 (no refs.assumed). It returns the open store.
+func versionOneDB(t *testing.T, path string) *Store {
+	t.Helper()
+	s, err := Open(ctx, path)
+	must(t, err)
+	scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, graph.Signal{ID: "m", Kind: graph.KindMetric, Name: "m", Source: "prom"}))
+		must(t, sc.PutConsumer(ctx, graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}))
+		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c"}))
+	})
+	for _, q := range []string{
+		`ALTER TABLE refs DROP COLUMN assumed`,
+		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	return s
+}
+
+func TestUpgradeFromVersion1(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.db")
+	versionOneDB(t, path).Close()
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("open version 1 database: %v", err)
+	}
+	defer s.Close()
+	var v string
+	must(t, s.db.QueryRow(`SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&v))
+	if v != "2" {
+		t.Errorf("schema_version = %s, want 2", v)
+	}
+	info, err := s.LatestScan(ctx)
+	must(t, err)
+	refs, err := s.References(ctx, info.ID)
+	must(t, err)
+	if len(refs) != 1 || refs[0].Assumed {
+		t.Errorf("refs after upgrade = %+v, want the old reference, not assumed", refs)
+	}
+	// And it takes new scans with assumed references.
+	scan(t, s, t0.Add(time.Hour), func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, graph.Signal{ID: "m", Kind: graph.KindMetric, Name: "m", Source: "prom"}))
+		must(t, sc.PutConsumer(ctx, graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}))
+		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c", Assumed: true}))
+	})
+}
+
+// An upgrade that stops after its ALTER commits (before migrate runs) must
+// leave a database the next Open accepts, not one that reports version 1
+// and fails on a duplicate column.
+func TestUpgradeInterrupted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.db")
+	s := versionOneDB(t, path)
+	must(t, s.upgrade(ctx, 1))
+	s.Close()
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("open after interrupted upgrade: %v", err)
+	}
+	defer s.Close()
+	info, err := s.LatestScan(ctx)
+	must(t, err)
+	refs, err := s.References(ctx, info.ID)
+	must(t, err)
+	if len(refs) != 1 {
+		t.Errorf("refs = %+v, want the old reference", refs)
+	}
+}

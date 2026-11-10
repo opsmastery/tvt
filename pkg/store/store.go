@@ -26,7 +26,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -90,7 +90,11 @@ func (s *Store) migrate(ctx context.Context) error {
 			if n > SchemaVersion {
 				return fmt.Errorf("database schema version %d is newer than this tvt supports (%d); upgrade tvt", n, SchemaVersion)
 			}
-			// Older versions get migrations here once there are any.
+			if n < SchemaVersion {
+				if err := s.upgrade(ctx, n); err != nil {
+					return fmt.Errorf("upgrade schema from version %d: %w", n, err)
+				}
+			}
 		}
 	}
 
@@ -106,6 +110,31 @@ func (s *Store) migrate(ctx context.Context) error {
 		`INSERT INTO meta (key, value) VALUES ('schema_version', ?)
 		 ON CONFLICT (key) DO UPDATE SET value = excluded.value`, strconv.Itoa(SchemaVersion)); err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+// upgrade brings a database at schema version from up to the columns that
+// graph.Schema's CREATE TABLE IF NOT EXISTS statements can't add to an
+// existing table. Each ALTER commits together with the version it reaches,
+// so an upgrade interrupted at any point leaves a database whose recorded
+// version matches its columns and the next Open resumes from there. migrate
+// then applies the schema.
+func (s *Store) upgrade(ctx context.Context, from int) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if from < 2 {
+		if _, err := tx.ExecContext(ctx,
+			`ALTER TABLE refs ADD COLUMN assumed INTEGER NOT NULL DEFAULT 0 CHECK (assumed IN (0, 1))`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE meta SET value = '2' WHERE key = 'schema_version'`); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -204,7 +233,7 @@ func (s *Store) Consumers(ctx context.Context, scanID int64) ([]graph.Consumer, 
 // signal, consumer and via.
 func (s *Store) References(ctx context.Context, scanID int64) ([]graph.Reference, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT signal_id, consumer_id, via, last_seen, actor FROM refs WHERE last_scan = ?
+		`SELECT signal_id, consumer_id, via, last_seen, actor, assumed FROM refs WHERE last_scan = ?
 		 ORDER BY signal_id, consumer_id, via`, scanID)
 	if err != nil {
 		return nil, err
@@ -214,7 +243,7 @@ func (s *Store) References(ctx context.Context, scanID int64) ([]graph.Reference
 	for rows.Next() {
 		var r graph.Reference
 		var seen sql.NullInt64
-		if err := rows.Scan(&r.SignalID, &r.ConsumerID, &r.Via, &seen, &r.Actor); err != nil {
+		if err := rows.Scan(&r.SignalID, &r.ConsumerID, &r.Via, &seen, &r.Actor, &r.Assumed); err != nil {
 			return nil, err
 		}
 		r.LastSeen = fromNullMillis(seen)
@@ -357,9 +386,12 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 					WHEN excluded.last_viewed IS NULL THEN consumers.last_viewed
 					ELSE max(consumers.last_viewed, excluded.last_viewed) END,
 				last_scan = excluded.last_scan`},
-		{&sc.ref, `INSERT INTO refs (signal_id, consumer_id, via, last_seen, actor, last_scan)
-			VALUES (?, ?, ?, ?, ?, ?)
+		{&sc.ref, `INSERT INTO refs (signal_id, consumer_id, via, last_seen, actor, assumed, last_scan)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (signal_id, consumer_id, via) DO UPDATE SET
+				assumed = CASE
+					WHEN refs.last_scan = excluded.last_scan THEN max(refs.assumed, excluded.assumed)
+					ELSE excluded.assumed END,
 				actor = CASE
 					WHEN refs.last_seen IS NULL OR excluded.last_seen >= refs.last_seen THEN excluded.actor
 					ELSE refs.actor END,
@@ -427,6 +459,8 @@ func (sc *Scan) PutConsumer(ctx context.Context, c graph.Consumer) error {
 // PutReference records a reference seen in this scan. Repeats (the same
 // query many times in a log) keep the latest LastSeen and its Actor. The
 // signal and consumer may be put before or after; both must exist by Finish.
+// Within one scan, a reference put once as Assumed stays assumed: the
+// broader reading wins.
 func (sc *Scan) PutReference(ctx context.Context, r graph.Reference) error {
 	if err := sc.check(); err != nil {
 		return err
@@ -434,7 +468,7 @@ func (sc *Scan) PutReference(ctx context.Context, r graph.Reference) error {
 	if r.SignalID == "" || r.ConsumerID == "" {
 		return errors.New("store: reference: SignalID and ConsumerID are required")
 	}
-	_, err := sc.ref.ExecContext(ctx, r.SignalID, r.ConsumerID, r.Via, nullMillis(r.LastSeen), r.Actor, sc.ID)
+	_, err := sc.ref.ExecContext(ctx, r.SignalID, r.ConsumerID, r.Via, nullMillis(r.LastSeen), r.Actor, boolInt(r.Assumed), sc.ID)
 	return wrap("reference", r.SignalID+" -> "+r.ConsumerID, err)
 }
 
