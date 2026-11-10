@@ -13,44 +13,36 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 )
 
-const fixtures = "../../../testdata/lab/grafana"
+var fixtures = filepath.Join(testutil.Lab, "grafana")
 
 // labServer serves the recorded lab responses, plus any extra paths given
 // as inline JSON (a body starting with a digit is an HTTP status).
 func labServer(t *testing.T, extra map[string]string) *httptest.Server {
 	t.Helper()
-	files := map[string]string{
+	routes := testutil.Routes{}
+	for path, name := range map[string]string{
 		"/api/search":                       "search.json",
 		"/api/datasources":                  "datasources.json",
 		"/api/dashboards/uid/shop-overview": "dashboard_shop-overview.json",
 		"/api/dashboards/uid/legacy-queue":  "dashboard_legacy-queue.json",
+	} {
+		routes[path] = testutil.File(t, "lab/grafana/"+name)
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if body, ok := extra[r.URL.Path]; ok {
+	for path, body := range extra {
+		routes[path] = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if code, err := strconv.Atoi(body); err == nil {
 				w.WriteHeader(code)
 				fmt.Fprint(w, `{"message":"nope"}`)
 				return
 			}
 			fmt.Fprint(w, body)
-			return
-		}
-		name, ok := files[r.URL.Path]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		b, err := os.ReadFile(filepath.Join(fixtures, name))
-		if err != nil {
-			t.Errorf("fixture %s: %v", name, err)
-		}
-		w.Write(b)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+		})
+	}
+	return testutil.NewServer(t, routes)
 }
 
 func byUID(ds []collect.Dashboard) map[string]collect.Dashboard {
@@ -247,7 +239,7 @@ func TestSearchPaginates(t *testing.T) {
 	t.Cleanup(func() { searchPageSize = old })
 
 	var pages []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pages = append(pages, r.URL.Query().Get("page"))
 		if r.URL.Query().Get("type") != "dash-db" {
 			t.Errorf("type = %q", r.URL.Query().Get("type"))
@@ -261,7 +253,6 @@ func TestSearchPaginates(t *testing.T) {
 			fmt.Fprint(w, `[]`)
 		}
 	}))
-	t.Cleanup(srv.Close)
 	hits, err := New(srv.URL, "").search(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +265,7 @@ func TestSearchPaginates(t *testing.T) {
 func TestLoginAndToken(t *testing.T) {
 	const token = "glsa_s3cret"
 	var auth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("Authorization")
 		if r.URL.Path == "/api/user" {
 			fmt.Fprint(w, `{"id":2,"login":"sa-1-tvt"}`)
@@ -283,7 +274,6 @@ func TestLoginAndToken(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"message":"invalid API key"}`)
 	}))
-	t.Cleanup(srv.Close)
 
 	c := New(srv.URL, token)
 	login, err := c.Login(context.Background())
@@ -437,14 +427,13 @@ func TestDashboardViewsByOrg(t *testing.T) {
 }
 
 func TestOrgID(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/org" {
 			http.NotFound(w, r)
 			return
 		}
 		fmt.Fprint(w, `{"id":3,"name":"Shop"}`)
 	}))
-	t.Cleanup(srv.Close)
 	id, err := New(srv.URL, "").OrgID(context.Background())
 	if err != nil || id != 3 {
 		t.Errorf("OrgID = %d, %v", id, err)

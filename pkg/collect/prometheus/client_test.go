@@ -14,31 +14,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 )
 
-const fixtures = "../../../testdata/lab/prometheus"
+var fixtures = filepath.Join(testutil.Lab, "prometheus")
 
 // fixtureServer serves recorded lab responses by API path.
 func fixtureServer(t *testing.T, files map[string]string) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name, ok := files[r.URL.Path]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		b, err := os.ReadFile(filepath.Join(fixtures, name))
-		if err != nil {
-			t.Errorf("fixture %s: %v", name, err)
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(b)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	routes := testutil.Routes{}
+	for path, name := range files {
+		routes[path] = testutil.File(t, "lab/prometheus/"+name)
+	}
+	return testutil.NewServer(t, routes)
 }
 
 func TestMetricCardinalityFixture(t *testing.T) {
@@ -86,7 +75,7 @@ func TestMetricCardinalityFixture(t *testing.T) {
 // honouring limit, and records the limits requested.
 func tsdbServer(t *testing.T, n int, limits *[]int) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		*limits = append(*limits, limit)
 		var rows []string
@@ -96,7 +85,6 @@ func tsdbServer(t *testing.T, n int, limits *[]int) *httptest.Server {
 		fmt.Fprintf(w, `{"status":"success","data":{"headStats":{"numSeries":%d},"seriesCountByMetricName":[%s]}}`,
 			n, strings.Join(rows, ","))
 	}))
-	t.Cleanup(srv.Close)
 	return srv
 }
 
@@ -131,7 +119,7 @@ func TestMetricCardinalityTruncated(t *testing.T) {
 func TestLabelCardinality(t *testing.T) {
 	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 	var gotQuery map[string][]string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.Query()
 		fmt.Fprint(w, `{"status":"success","data":[
 			{"__name__":"cart","op":"add","user_id":"u1","job":"shop"},
@@ -140,7 +128,6 @@ func TestLabelCardinality(t *testing.T) {
 			{"__name__":"cart","op":"view","job":"shop"}
 		]}`)
 	}))
-	t.Cleanup(srv.Close)
 
 	c := New(srv.URL, "")
 	c.Now = func() time.Time { return now }
@@ -209,10 +196,9 @@ func TestRulesFixture(t *testing.T) {
 }
 
 func TestRulesUnknownTypeFails(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"status":"success","data":{"groups":[{"name":"g","file":"f","rules":[{"name":"x","query":"up","type":"mystery"}]}]}}`)
 	}))
-	t.Cleanup(srv.Close)
 	if _, err := New(srv.URL, "").Rules(context.Background()); err == nil {
 		t.Fatal("unknown rule type accepted")
 	}
@@ -221,12 +207,11 @@ func TestRulesUnknownTypeFails(t *testing.T) {
 func TestTokenSentAndNeverInErrors(t *testing.T) {
 	const token = "s3cret-token"
 	var auth, ua string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth, ua = r.Header.Get("Authorization"), r.Header.Get("User-Agent")
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprint(w, `{"status":"error","errorType":"unauthorized","error":"bad credentials"}`)
 	}))
-	t.Cleanup(srv.Close)
 
 	_, err := New(srv.URL, token).Rules(context.Background())
 	if err == nil {
@@ -249,11 +234,10 @@ func TestTokenSentAndNeverInErrors(t *testing.T) {
 func TestBaseURLPrefix(t *testing.T) {
 	// Mimir serves the Prometheus API under /prometheus.
 	var path string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
 		fmt.Fprint(w, `{"status":"success","data":{"groups":[]}}`)
 	}))
-	t.Cleanup(srv.Close)
 	c := New(srv.URL+"/prometheus", "")
 	c.Source = "mimir"
 	if _, err := c.Rules(context.Background()); err != nil {
@@ -265,8 +249,7 @@ func TestBaseURLPrefix(t *testing.T) {
 }
 
 func TestMimirHasNoTSDBStatus(t *testing.T) {
-	srv := httptest.NewServer(http.NotFoundHandler()) // what Mimir 2.16 does
-	defer srv.Close()
+	srv := testutil.Serve(t, http.NotFoundHandler()) // what Mimir 2.16 does
 	c := New(srv.URL+"/prometheus", "")
 	c.Source = "mimir"
 	_, err := c.MetricCardinality(context.Background())
