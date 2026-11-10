@@ -221,3 +221,64 @@ func TestBuildMimirAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildLogQLRules(t *testing.T) {
+	in := labInputs()
+	in.Rules = append(in.Rules,
+		collect.Rule{Source: "loki", Namespace: "shop-audit.yml", Group: "shop-audit", Name: "ShopAuditDenials", Kind: collect.RuleAlert,
+			Expr: `sum(count_over_time({app="shop", component="audit"} |= "result=denied" [5m])) > 20`, Language: "logql"},
+		// Same stream written in another order: one signal, two references.
+		collect.Rule{Source: "loki", Namespace: "shop-audit.yml", Group: "shop-audit", Name: "shop:audit:rate", Kind: collect.RuleRecord,
+			Expr: `sum(rate({component="audit",app="shop"}[5m])) / sum(rate({app="shop"}[5m]))`, Language: "logql"},
+		// Unreadable selector: references every stream.
+		collect.Rule{Source: "loki", Namespace: "x.yml", Group: "x", Name: "Broken", Kind: collect.RuleAlert,
+			Expr: `count_over_time({app=~shop}[5m]) > 0`, Language: "logql"},
+	)
+	out, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streams := map[string]graph.Signal{}
+	for _, s := range out.Signals {
+		if s.Kind == graph.KindStream {
+			streams[s.ID] = s
+		}
+	}
+	audit := `loki:stream:{app="shop", component="audit"}`
+	for _, id := range []string{audit, `loki:stream:{app="shop"}`, "loki:stream:" + AllStreams} {
+		if s, ok := streams[id]; !ok || s.Source != "loki" {
+			t.Errorf("stream signal %s missing or wrong: %+v", id, s)
+		}
+	}
+	if len(streams) != 3 {
+		t.Errorf("stream signals = %v, want 3", streams)
+	}
+
+	cons := consumers(out)
+	refs := map[string][]string{} // signal -> consumers
+	for _, r := range out.References {
+		if !r.Assumed {
+			t.Errorf("LogQL reference not marked assumed: %+v", r)
+		}
+		if _, ok := cons[r.ConsumerID]; !ok {
+			t.Errorf("reference to unknown consumer %s", r.ConsumerID)
+		}
+		refs[r.SignalID] = append(refs[r.SignalID], r.ConsumerID)
+	}
+	alert := "rule:loki:shop-audit.yml/shop-audit/ShopAuditDenials"
+	if cons[alert].Kind != graph.ConsumerAlertRule {
+		t.Errorf("ShopAuditDenials consumer = %+v", cons[alert])
+	}
+	if got := strings.Join(refs[audit], ","); got != alert+",rule:loki:shop-audit.yml/shop-audit/shop:audit:rate" {
+		t.Errorf("audit stream consumers = %s", got)
+	}
+	if got := refs["loki:stream:"+AllStreams]; len(got) != 1 || got[0] != "rule:loki:x.yml/x/Broken" {
+		t.Errorf("all-streams consumers = %v", got)
+	}
+	// PromQL rules get no references yet (Sprint 2).
+	for _, r := range out.References {
+		if strings.HasPrefix(r.ConsumerID, "rule:prometheus:") {
+			t.Errorf("unexpected PromQL reference %+v", r)
+		}
+	}
+}
