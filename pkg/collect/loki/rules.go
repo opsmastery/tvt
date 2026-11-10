@@ -63,6 +63,13 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 	if err := yaml.Unmarshal(raw, &byNS); err != nil {
 		return nil, fmt.Errorf("loki: %s: decode: %w", rulesPath, err)
 	}
+	if byNS == nil {
+		// An empty body or YAML null decodes without error. Loki says "no
+		// rules" with a 404 (handled above) or {}; anything else could be a
+		// broken proxy, and reading it as zero rules would drop every alert's
+		// protection from the scan.
+		return nil, fmt.Errorf("loki: %s: decode: response is not a rule listing (empty or null)", rulesPath)
+	}
 	namespaces := make([]string, 0, len(byNS))
 	for ns := range byNS {
 		namespaces = append(namespaces, ns)
