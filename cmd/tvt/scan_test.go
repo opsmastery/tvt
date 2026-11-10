@@ -18,33 +18,23 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
 
-const lab = "../../testdata/lab"
+var lab = testutil.Lab
 
 // scanTime is just after the last line of testdata/lab/grafana/grafana.log.
 var scanTime = time.Date(2026, 11, 9, 16, 0, 0, 0, time.UTC)
 
-// fixtureServer serves files from testdata/lab by URL path. A handler in
-// override takes precedence.
+// fixtureServer serves files from testdata/lab by URL path through the
+// shared read-only server. A handler in override takes precedence.
 func fixtureServer(t *testing.T, files map[string]string, override map[string]http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h, ok := override[r.URL.Path]; ok {
-			h(w, r)
-			return
-		}
-		name, ok := files[r.URL.Path]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		b, err := os.ReadFile(filepath.Join(lab, name))
-		if err != nil {
-			t.Errorf("fixture %s: %v", name, err)
-		}
-		w.Write(b)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	routes := testutil.Routes{}
+	for path, name := range files {
+		routes[path] = testutil.File(t, "lab/"+name)
+	}
+	for path, h := range override {
+		routes[path] = h
+	}
+	return testutil.NewServer(t, routes)
 }
 
 // syntheticSeries answers /api/v1/series with two series per metric that
@@ -162,11 +152,6 @@ func TestScanLab(t *testing.T) {
 			t.Errorf("metric %s is not a signal", m.Name)
 		}
 	}
-	for _, m := range []string{"shop_http_requests_total", "shop_payment_queue_depth", "shop_legacy_queue_depth", "shop_cart_operations_total"} {
-		if _, ok := ids["prom:metric:"+m]; !ok {
-			t.Errorf("ground-truth metric %s is not a signal", m)
-		}
-	}
 	// --label-top 2: the two largest metrics, flag and job each.
 	if s, ok := ids["prom:label:shop_feature_flag_evaluations_total:flag"]; !ok || s.Kind != graph.KindLabel {
 		t.Errorf("label signal missing: %+v", s)
@@ -181,75 +166,40 @@ func TestScanLab(t *testing.T) {
 		t.Errorf("%d label signals, want 4", labels)
 	}
 
-	// Rules are consumers; Shop Overview is viewed, Legacy Queue isn't.
-	cons, err := st.Consumers(ctx, info.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rules, shop, legacy int
-	for _, c := range cons {
-		switch {
-		case c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule:
+	// Ground truth, Sprint 1 rows: every seeded metric is a signal; every
+	// lab rule from a ruler tvt collects is a consumer (Grafana-managed
+	// rules arrive in Sprint 2); Shop Overview is viewed and Legacy Queue
+	// isn't; the Loki alert's stream is hard-keep.
+	gt := loadGroundTruth(t)
+	g := readGraph(t, db)
+	assertMetrics(t, g, "prom", gt.Metrics)
+	want := assertRules(t, g, gt.Rules, "prometheus", "loki")
+	var rules int
+	for _, c := range g.consumers {
+		if c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule {
 			rules++
-		case strings.HasPrefix(c.ID, "panel:1:shop-overview:") || strings.HasPrefix(c.ID, "var:1:shop-overview:"):
-			shop++
-			if c.LastViewed.IsZero() {
-				t.Errorf("Shop Overview consumer %s has no last_viewed", c.ID)
-			}
-		case strings.HasPrefix(c.ID, "panel:1:legacy-queue:"):
-			legacy++
-			if !c.LastViewed.IsZero() {
-				t.Errorf("Legacy Queue consumer %s viewed at %v; it must stay unviewed", c.ID, c.LastViewed)
-			}
 		}
 	}
-	if rules != 6 || shop == 0 || legacy == 0 {
-		t.Errorf("rules=%d shop=%d legacy=%d", rules, shop, legacy)
+	if rules != want {
+		t.Errorf("%d rule consumers, want the %d ground-truth rules", rules, want)
 	}
-
-	// The Loki rule is a consumer, and the stream it alerts on is a hard
-	// keep: an alert rule references it. The reference is assumed until the
-	// LogQL extractor exists, so it covers all the stream's labels.
-	byID := map[string]graph.Consumer{}
-	for _, c := range cons {
-		byID[c.ID] = c
-	}
-	const lokiAlert = "rule:loki:shop-audit.yml/shop-audit/ShopAuditDenials"
-	if c, ok := byID[lokiAlert]; !ok || c.Kind != graph.ConsumerAlertRule {
-		t.Errorf("ShopAuditDenials consumer = %+v, %v", c, ok)
-	}
-	const auditStream = `loki:stream:{app="shop", component="audit"}`
-	if s, ok := ids[auditStream]; !ok || s.Kind != graph.KindStream || s.Source != "loki" {
-		t.Errorf("audit stream signal = %+v, %v", s, ok)
-	}
-	refs, err := st.References(ctx, info.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hardKeep := false
-	for _, r := range refs {
-		if r.SignalID == auditStream && byID[r.ConsumerID].Kind.HardKeep() {
-			hardKeep = true
-			if !r.Assumed {
-				t.Errorf("reference %+v is not marked assumed", r)
-			}
+	assertDashboards(t, g, "1", gt)
+	assertHardKeepStreams(t, g, gt.Streams)
+	// Until the LogQL extractor exists, every stream reference is assumed:
+	// it covers all the stream's labels.
+	for _, r := range g.refs {
+		if g.signals[r.SignalID].Kind == graph.KindStream && !r.Assumed {
+			t.Errorf("stream reference %+v is not marked assumed", r)
 		}
 	}
-	if !hardKeep {
-		t.Errorf("%s is not hard-keep; refs = %+v", auditStream, refs)
-	}
 
-	// tvt's own fetches (sa-1-tvt) are not loads.
-	loads, err := st.Loads(ctx, info.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(loads) == 0 {
+	// tvt's own fetches (its login, sa-1-tvt) are not loads.
+	if len(g.loads) == 0 {
 		t.Error("no dashboard loads")
 	}
-	for _, ld := range loads {
-		if ld.Login == "sa-1-tvt" || ld.DashboardUID == "legacy-queue" {
-			t.Errorf("load %+v should have been excluded", ld)
+	for _, ld := range g.loads {
+		if ld.Login == "sa-1-tvt" {
+			t.Errorf("load %+v by tvt itself should have been excluded", ld)
 		}
 	}
 
@@ -370,31 +320,25 @@ func TestScanLabMimir(t *testing.T) {
 		t.Errorf("shop metrics differ:\nmimir %v\nprom  %v", mimirShop, promShop)
 	}
 
-	cons, err := st.Consumers(ctx, info.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]graph.Consumer{}
+	// Ground truth: Prometheus remote-writes every series, so every seeded
+	// metric is a Mimir signal too, plus the metric only Mimir's ruler reads;
+	// Mimir's and Loki's rules are consumers; views are the same.
+	gt := loadGroundTruth(t)
+	g := readGraph(t, db)
+	assertMetrics(t, g, "mimir", gt.Metrics)
+	assertMetrics(t, g, "mimir", gt.Mimir.Metrics)
+	want := assertRules(t, g, gt.Mimir.Rules, "mimir") + assertRules(t, g, gt.Rules, "loki")
 	var rules int
-	for _, c := range cons {
-		byID[c.ID] = c
+	for _, c := range g.consumers {
 		if c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule {
 			rules++
 		}
 	}
-	for id, kind := range map[string]graph.ConsumerKind{
-		"rule:mimir:tvt-lab/shop-recording/NodeLoadHigh":                                    graph.ConsumerAlertRule,
-		"rule:mimir:tvt-lab/shop-recording/route:shop_http_request_duration_seconds:p99_5m": graph.ConsumerRecordingRule,
-		"rule:mimir:tvt-lab/shop-recording/job:shop_cache_hit_ratio:5m":                     graph.ConsumerRecordingRule,
-		"rule:loki:shop-audit.yml/shop-audit/ShopAuditDenials":                              graph.ConsumerAlertRule,
-	} {
-		if byID[id].Kind != kind {
-			t.Errorf("consumer %s = %+v, want kind %s", id, byID[id], kind)
-		}
+	if rules != want {
+		t.Errorf("%d rule consumers, want the %d ground-truth Mimir and Loki rules", rules, want)
 	}
-	if rules != 4 {
-		t.Errorf("%d rule consumers, want 3 Mimir + 1 Loki", rules)
-	}
+	assertDashboards(t, g, "1", gt)
+	assertHardKeepStreams(t, g, gt.Streams)
 }
 
 // A Mimir without cardinality analysis fails the scan with the setting to
@@ -462,9 +406,7 @@ func TestScanAborts(t *testing.T) {
 				o.GrafanaLogs = tc.logs
 			}
 			if tc.loki != nil {
-				srv := httptest.NewServer(tc.loki)
-				t.Cleanup(srv.Close)
-				o.Loki = srv.URL
+				o.Loki = testutil.Serve(t, tc.loki).URL
 			}
 			var out bytes.Buffer
 			err := runScan(tc.ctx, o, tc.env, &out)

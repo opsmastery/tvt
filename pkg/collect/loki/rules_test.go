@@ -6,45 +6,35 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 )
 
-const fixtures = "../../../testdata/lab/loki"
-
-// server answers every request with h, after checking it is a GET tagged
-// as tvt's own.
+// server answers every request with h, after checking it is tagged as
+// tvt's own (testutil.Serve checks it is a read).
 func server(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("%s %s: tvt must only GET", r.Method, r.URL.Path)
-		}
+	return testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-Query-Tags"); got != "Source=tvt" {
 			t.Errorf("X-Query-Tags = %q, want Source=tvt", got)
 		}
 		h(w, r)
 	}))
-	t.Cleanup(srv.Close)
-	return srv
 }
 
+// fixture serves testdata/lab/loki/<name> at the rules path.
 func fixture(t *testing.T, name string) http.HandlerFunc {
-	b, err := os.ReadFile(fixtures + "/" + name)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := testutil.File(t, "lab/loki/"+name)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != rulesPath {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "application/yaml")
-		w.Write(b)
+		f.ServeHTTP(w, r)
 	}
 }
 

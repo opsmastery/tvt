@@ -1,0 +1,246 @@
+# What tvt should conclude about the lab, given 30+ days of history with the
+# viewer running. tvt's golden tests compare a scan of this lab against this file.
+#
+# Classes:
+#   hard_keep         never recommended (alert, recording rule feeding an alert, Loki alert,
+#                     Grafana-managed alert)
+#   keep_high         on a viewed dashboard
+#   keep_medium       ad hoc queries only
+#   low               only on a dashboard nobody views
+#   drop_metric       no references: recommend dropping
+#   drop_label        metric is used, but this label is never matched, grouped or joined on
+#   drop_rule         recording rule with no consumers (recommend removing the rule)
+#   route_cold        log stream never queried: recommend cold storage over deletion
+#   line_handoff      a line pattern inside a kept stream that nothing reads: tvt reports it with its
+#                     cost and hands the line-level cut to zeroreads (tvt doesn't generate line filters)
+#   lower_resolution  scrape interval is finer than any dashboard step uses
+
+metrics:
+  shop_http_requests_total:
+    class: hard_keep
+    why: ShopHighErrorRate alert; also Shop Overview panels 1-2 and the $route variable
+  shop_http_request_duration_seconds_bucket:
+    class: hard_keep
+    why: recording rule route:shop_http_request_duration_seconds:p99_5m feeds ShopHighLatency
+  shop_payment_queue_depth:
+    class: hard_keep
+    why: ShopPaymentQueueBacklog alert; on no dashboard and never queried (alert-only edge case)
+  shop_order_export_lag_seconds:
+    class: hard_keep
+    why: >
+      Grafana-managed alert "Shop order export lag" (grafana/provisioning/alerting).
+      No Prometheus rule, no dashboard. Its only usage evidence outside the ruler API
+      is Grafana's alert evaluation in the Prometheus query log, every minute from
+      Grafana's IP, which by itself would only rank it as ad hoc usage.
+    source: Grafana ruler API (/api/prometheus/grafana/api/v1/rules) or provisioning API
+  route:shop_http_request_duration_seconds:p99_5m:
+    class: hard_keep
+    why: recorded series used by ShopHighLatency and Shop Overview panel 3
+  shop_cart_operations_total:
+    class: keep_high
+    why: Shop Overview panel 4, sum by (op)
+  node_cpu_seconds_total:
+    class: keep_high
+    why: Shop Overview panel 5
+  node_memory_MemAvailable_bytes:
+    class: keep_medium
+    why: ad hoc query from the viewer every third round
+  shop_healthcheck_checks_total:
+    class: keep_high
+    why: Shop Overview panel 7 (health check pass rate by probe)
+  shop_healthcheck_duration_seconds_*:
+    class: drop_metric
+    why: emitted but on no dashboard, alert or query (low priority; small)
+  shop_legacy_queue_depth:
+    class: low
+    why: Legacy Queue dashboard, never viewed
+  shop_legacy_batch_duration_seconds:
+    class: low
+    why: Legacy Queue dashboard, never viewed
+  shop_cache_*:
+    class: drop_metric
+    why: 30 gauges x 2 caches x 16 shards = 960 series, never referenced
+  shop_feature_flag_evaluations_total:
+    class: drop_metric
+    why: high cardinality (flag x variant x user_id), never referenced
+  "*_created":
+    class: drop_metric
+    why: prometheus_client emits a _created series per counter/histogram; never referenced
+  shop_http_request_duration_seconds_sum:
+    class: drop_metric
+    why: only _bucket is used; _sum is unreferenced (low priority, cheap)
+  shop_http_request_duration_seconds_count:
+    class: drop_metric
+    why: only _bucket is used; _count is unreferenced (low priority, cheap)
+  shop_cache_hits_total:
+    class: drop_metric
+    why: only input is the unused recording rule job:shop_cache_hit_ratio:5m
+  shop_cache_requests_total:
+    class: drop_metric
+    why: only input is the unused recording rule job:shop_cache_hit_ratio:5m
+  node_*:
+    class: drop_metric
+    why: every node-exporter metric except node_cpu_seconds_total and node_memory_MemAvailable_bytes
+
+labels:
+  shop_cart_operations_total/user_id:
+    class: drop_label
+    why: panel 4 groups by op only; 2000 possible users drive the cardinality
+    check: dropping user_id must not create duplicate series (op stays unique per series after aggregation)
+
+# Every rule in the lab, by name. source is the ruler that evaluates it:
+# prometheus (prometheus/rules/shop.yml), loki (loki/rules) or grafana
+# (grafana/provisioning/alerting). Mimir's rules are under mimir: below.
+rules:
+  ShopHighLatency:
+    source: prometheus
+    group: shop-alerts
+    kind: alert
+    class: hard_keep
+    why: alert
+  ShopHighErrorRate:
+    source: prometheus
+    group: shop-alerts
+    kind: alert
+    class: hard_keep
+    why: alert
+  ShopPaymentQueueBacklog:
+    source: prometheus
+    group: shop-alerts
+    kind: alert
+    class: hard_keep
+    why: alert
+  route:shop_http_request_duration_seconds:p99_5m:
+    source: prometheus
+    group: shop-recording
+    kind: record
+    class: hard_keep
+    why: feeds ShopHighLatency
+  job:shop_cache_hit_ratio:5m:
+    source: prometheus
+    group: shop-recording
+    kind: record
+    class: drop_rule
+    why: no alert, dashboard or query uses it
+  ShopAuditDenials:
+    source: loki
+    group: shop-audit
+    kind: alert
+    class: hard_keep
+    why: Loki alert on {app="shop", component="audit"}
+  Shop order export lag:
+    source: grafana
+    group: shop-grafana-alerts
+    kind: alert
+    class: hard_keep
+    why: Grafana-managed alert on shop_order_export_lag_seconds
+
+# Dashboards and whether people view them. The viewer service loads Shop
+# Overview in a browser; nothing loads Legacy Queue.
+dashboards:
+  shop-overview:
+    title: Shop Overview
+    viewed: true
+  legacy-queue:
+    title: Legacy Queue
+    viewed: false
+
+# Only with the mimir profile (make up-mimir): what a scan of Mimir
+# (tvt scan --mimir) adds on top of the sections above. The one-shot
+# mimir-rules service loads mimir/rules/shop.yml into Mimir's ruler, namespace
+# tvt-lab. Prometheus remote-writes every series, so Mimir has the same
+# metrics; only the rules differ.
+mimir:
+  rules:
+    route:shop_http_request_duration_seconds:p99_5m:
+      group: shop-recording
+      kind: record
+      class: hard_keep
+      why: >
+        Copy of the Prometheus rule (its series carry ruler=mimir). Its output has the
+        metric name ShopHighLatency and Shop Overview panel 3 read, and tvt matches by
+        name, so it must not recommend removing the rule.
+    job:shop_cache_hit_ratio:5m:
+      group: shop-recording
+      kind: record
+      class: drop_rule
+      why: copy of the unused Prometheus rule; no alert, dashboard or query reads its output
+    NodeLoadHigh:
+      group: shop-recording
+      kind: alert
+      class: hard_keep
+      why: Mimir-only alert
+  metrics:
+    node_load15:
+      class: hard_keep
+      why: >
+        Read only by the Mimir ruler's NodeLoadHigh alert. A --prom scan can't see
+        it (the Prometheus rules API doesn't list Mimir's rules) and ranks it with
+        node_* as drop_metric; a --mimir scan must protect it.
+
+streams:
+  '{app="shop", component="api", level="info"}':
+    class: keep_high
+    why: Shop Overview logs panel, level=~"info|warn|error"
+  '{app="shop", component="api", level="warn"}':
+    class: keep_high
+    why: same panel
+  '{app="shop", component="api", level="error"}':
+    class: keep_high
+    why: same panel
+  '{app="shop", component="audit", level="info"}':
+    class: hard_keep
+    why: Loki alert ShopAuditDenials; also matched by the logs panel
+  '{app="shop", component="api", level="debug"}':
+    class: route_cold
+    why: about 88% of shop log bytes; excluded by the panel's regex matcher; never queried
+
+# Line-level findings: patterns inside a stream that is itself kept.
+line_patterns:
+  healthz_success:
+    stream: '{app="shop", component="api", level="info"}'
+    pattern: 'method=GET route=/healthz status=200 duration_ms=<_> probe=<_> replica=<_> request_id=<_> user=-'
+    filter: 'route=/healthz AND status=200'   # what zeroreads should be able to prove and cut
+    class: line_handoff
+    why: >
+      About 64% of the info stream's bytes. Health check pass rate is already a
+      metric (panel 7). No alert or query reads the success lines.
+    tvt_expected: >
+      The report lists the pattern under the info stream with its share of bytes and
+      monthly cost, and points to zeroreads. tvt proposes no config for it and does
+      not recommend dropping or rerouting the stream itself (panels 6 and 8 use it).
+    # The blast radius below is what a line-level cut would have to respect; it is
+    # the expected answer when zeroreads (or a future tvt integration) is run on the lab.
+    blast_radius:
+      blocks: []   # nothing should block this drop
+      value_changes:
+        - consumer: Shop Overview panel 8 (log lines per second by level)
+          why: counts every line in the stream with no line filter, so its info series drops by about 60%
+      not_affected:
+        - consumer: Shop Overview panel 6 (logs panel)
+          why: displays raw lines; fewer health check lines is the point, nothing depends on them
+        - consumer: ad hoc query {app="shop", component="api"} |= "route=/healthz" != "status=200"
+          why: line filters exclude status=200, so it only ever reads failures
+  healthz_failure:
+    stream: '{app="shop", component="api", level="warn"}'
+    pattern: 'method=GET route=/healthz status=503 ... reason=db_ping_timeout'
+    class: keep_medium
+    why: read by the on-call ad hoc query; also rare and cheap
+
+scrape:
+  global_scrape_interval:
+    class: lower_resolution
+    why: 10s scrapes, but every panel uses $__rate_interval at multi-minute steps over 6h
+
+# Edge cases the lab deliberately exercises:
+#   - regex matcher that excludes a stream (level=~"info|warn|error" does not match debug)
+#   - dashboard template variable referencing a metric (label_values(...))
+#   - transitive hard keep through a recording rule
+#   - recording rule whose own output is unused
+#   - alert-only metric with no dashboard or query
+#   - metric read only by a Grafana-managed alert (invisible to the Prometheus rules API)
+#   - metric read only by a Mimir ruler alert (node_load15; mimir profile only)
+#   - histogram whose _bucket is used but _sum/_count are not
+#   - /healthz: a droppable line pattern inside a kept stream (line-level: reported and handed to zeroreads)
+#   - a query that references /healthz lines but excludes the successful ones (!= "status=200")
+#   - a LogQL metric query over a whole stream whose values change, but don't break, when lines are dropped
