@@ -7,6 +7,8 @@
 //
 //	<src>:metric:<name>                  metric signal (src = "prom" or "mimir")
 //	<src>:label:<metric>:<label>         label signal
+//	loki:stream:<selector>               log stream selector (canonical, see parse.CanonicalSelector)
+//	loki:stream:*                        every stream: a LogQL rule whose selectors couldn't be read
 //	rule:<source>:<namespace>/<group>/<name>
 //	panel:<org>:<dashboard uid>:<panel id>:<query index>
 //	var:<org>:<dashboard uid>:<variable name>
@@ -25,7 +27,13 @@ import (
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 )
+
+// AllStreams is the selector of the signal a LogQL consumer references when
+// its stream selectors can't be read: unknown means used, so it stands for
+// every stream in Loki.
+const AllStreams = "*"
 
 // Inputs is everything one scan collected.
 type Inputs struct {
@@ -50,9 +58,13 @@ type Inputs struct {
 type Output struct {
 	Signals   []graph.Signal
 	Consumers []graph.Consumer
-	Costs     []graph.Cost
-	Loads     []graph.DashboardLoad
-	Sources   []graph.SourceCoverage
+	// References are the dependencies resolved so far. Until the PromQL and
+	// LogQL extractors exist (Sprint 2) these are only LogQL rules' assumed
+	// references to the streams their selectors name.
+	References []graph.Reference
+	Costs      []graph.Cost
+	Loads      []graph.DashboardLoad
+	Sources    []graph.SourceCoverage
 	// LogCoverage is the mean coverage of Sources; an unconfigured source
 	// counts as 0.
 	LogCoverage float64
@@ -94,17 +106,32 @@ func Build(in Inputs) (Output, error) {
 	ids := newIDSet()
 
 	// Rules.
+	streamIDs := map[string]bool{}
 	for _, r := range in.Rules {
 		kind := graph.ConsumerRecordingRule
 		if r.Kind == collect.RuleAlert {
 			kind = graph.ConsumerAlertRule
 		}
-		out.Consumers = append(out.Consumers, graph.Consumer{
+		c := graph.Consumer{
 			ID:   ids.unique("rule:" + r.Source + ":" + r.Namespace + "/" + r.Group + "/" + r.Name),
 			Kind: kind,
 			Name: r.Name,
 			Expr: r.Expr,
-		})
+		}
+		out.Consumers = append(out.Consumers, c)
+		if r.Language != "logql" {
+			continue
+		}
+		for _, sel := range streamSelectors(r.Expr) {
+			id := "loki:stream:" + sel
+			if !streamIDs[id] {
+				streamIDs[id] = true
+				out.Signals = append(out.Signals, graph.Signal{ID: id, Kind: graph.KindStream, Name: sel, Source: "loki"})
+			}
+			// Assumed: the selector is known, but not which labels the rule
+			// filters or groups by, so it reads all of them.
+			out.References = append(out.References, graph.Reference{SignalID: id, ConsumerID: c.ID, Assumed: true})
+		}
 	}
 
 	// Views: the latest browser view per dashboard sets last_viewed, and
@@ -202,6 +229,25 @@ func Build(in Inputs) (Output, error) {
 		out.LogCoverage = sum / float64(len(out.Sources))
 	}
 	return out, nil
+}
+
+// streamSelectors returns the canonical stream selectors a LogQL expression
+// names, deduplicated, or AllStreams when they can't be read.
+func streamSelectors(expr string) []string {
+	refs, err := parse.LogStreamSelectors(expr)
+	if err != nil {
+		return []string{AllStreams}
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range refs {
+		sel := parse.CanonicalSelector(r.Matchers)
+		if !seen[sel] {
+			seen[sel] = true
+			out = append(out, sel)
+		}
+	}
+	return out
 }
 
 // idSet hands out unique IDs, suffixing repeats with #2, #3, … Every ID
