@@ -18,33 +18,23 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
 
-const lab = "../../testdata/lab"
+var lab = testutil.Lab
 
 // scanTime is just after the last line of testdata/lab/grafana/grafana.log.
 var scanTime = time.Date(2026, 11, 9, 16, 0, 0, 0, time.UTC)
 
-// fixtureServer serves files from testdata/lab by URL path. A handler in
-// override takes precedence.
+// fixtureServer serves files from testdata/lab by URL path through the
+// shared read-only server. A handler in override takes precedence.
 func fixtureServer(t *testing.T, files map[string]string, override map[string]http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h, ok := override[r.URL.Path]; ok {
-			h(w, r)
-			return
-		}
-		name, ok := files[r.URL.Path]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		b, err := os.ReadFile(filepath.Join(lab, name))
-		if err != nil {
-			t.Errorf("fixture %s: %v", name, err)
-		}
-		w.Write(b)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	routes := testutil.Routes{}
+	for path, name := range files {
+		routes[path] = testutil.File(t, "lab/"+name)
+	}
+	for path, h := range override {
+		routes[path] = h
+	}
+	return testutil.NewServer(t, routes)
 }
 
 // syntheticSeries answers /api/v1/series with two series per metric that
@@ -462,9 +452,7 @@ func TestScanAborts(t *testing.T) {
 				o.GrafanaLogs = tc.logs
 			}
 			if tc.loki != nil {
-				srv := httptest.NewServer(tc.loki)
-				t.Cleanup(srv.Close)
-				o.Loki = srv.URL
+				o.Loki = testutil.Serve(t, tc.loki).URL
 			}
 			var out bytes.Buffer
 			err := runScan(tc.ctx, o, tc.env, &out)
