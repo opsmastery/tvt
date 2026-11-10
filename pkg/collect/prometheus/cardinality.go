@@ -42,7 +42,7 @@ func (c *Client) MetricCardinality(ctx context.Context) ([]collect.MetricCardina
 		q := url.Values{"limit": {strconv.Itoa(limit)}}
 		if _, err := getJSON(ctx, c, "/api/v1/status/tsdb", q, &st); err != nil {
 			if c.source() == "mimir" && errors.Is(err, ErrNotFound) {
-				return nil, fmt.Errorf("%w (Mimir has no TSDB status endpoint; Mimir cardinality isn't supported yet, so scan the Prometheus that writes to it with --prom)", err)
+				return nil, fmt.Errorf("%w (Mimir has no TSDB status endpoint; read its cardinality with pkg/collect/mimir)", err)
 			}
 			return nil, err
 		}
