@@ -108,6 +108,14 @@ a-ns:
 	}
 }
 
+func TestRulesEmptyMapping(t *testing.T) {
+	srv := server(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "{}\n") })
+	got, err := New(srv.URL, "").Rules(context.Background())
+	if err != nil || len(got) != 0 {
+		t.Errorf("{}: rules %+v, err %v; want none and no error", got, err)
+	}
+}
+
 func TestRulesEmptyRuler(t *testing.T) {
 	srv := server(t, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no rule groups found", http.StatusNotFound)
@@ -128,6 +136,9 @@ func TestRulesErrors(t *testing.T) {
 		"server error":   {500, "boom", "HTTP 500: boom"},
 		"malformed yaml": {200, "ns: [unclosed", "decode"},
 		"not a listing":  {200, "- just\n- a list\n", "decode"},
+		"empty body":     {200, "", "empty or null"},
+		"null":           {200, "null\n", "empty or null"},
+		"comment only":   {200, "# nothing\n", "empty or null"},
 		"neither kind":   {200, "ns:\n  - name: g\n    rules:\n      - expr: '{a=\"b\"}'\n", "exactly one of alert or record"},
 		"both kinds":     {200, "ns:\n  - name: g\n    rules:\n      - alert: A\n        record: r\n        expr: '{a=\"b\"}'\n", "exactly one of alert or record"},
 		"empty expr":     {200, "ns:\n  - name: g\n    rules:\n      - alert: A\n", "empty expr"},

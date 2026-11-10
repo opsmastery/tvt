@@ -38,6 +38,10 @@ signs:
       - --yes
     artifacts: checksum
 
+release:
+  # A tag with a pre-release suffix (v0.0.1-rc.1) publishes a pre-release.
+  prerelease: auto
+
 changelog:
   sort: asc
 # Container image and Helm chart come with continuous mode (Phase 2).
