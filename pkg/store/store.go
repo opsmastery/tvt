@@ -116,7 +116,10 @@ func (s *Store) migrate(ctx context.Context) error {
 
 // upgrade brings a database at schema version from up to the columns that
 // graph.Schema's CREATE TABLE IF NOT EXISTS statements can't add to an
-// existing table. migrate then applies the schema and records the version.
+// existing table. Each ALTER commits together with the version it reaches,
+// so an upgrade interrupted at any point leaves a database whose recorded
+// version matches its columns and the next Open resumes from there. migrate
+// then applies the schema.
 func (s *Store) upgrade(ctx context.Context, from int) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -126,6 +129,10 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 	if from < 2 {
 		if _, err := tx.ExecContext(ctx,
 			`ALTER TABLE refs ADD COLUMN assumed INTEGER NOT NULL DEFAULT 0 CHECK (assumed IN (0, 1))`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE meta SET value = '2' WHERE key = 'schema_version'`); err != nil {
 			return err
 		}
 	}
