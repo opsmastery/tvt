@@ -130,6 +130,21 @@ func refererIsDashboard(referer, uid string) bool {
 
 var errNotGrafanaLog = errors.New("no line parsed as a Grafana log entry")
 
+// parseLogLine parses one Grafana log line: logfmt with logger= and a valid
+// t= timestamp. ok is false for anything else; requiring logger= keeps
+// other logfmt logs from passing.
+func parseLogLine(raw []byte) (at time.Time, kv map[string]string, ok bool) {
+	kv = logfmt.Parse(raw)
+	if kv["logger"] == "" {
+		return time.Time{}, nil, false
+	}
+	at, err := time.Parse(time.RFC3339Nano, kv["t"])
+	if err != nil {
+		return time.Time{}, nil, false
+	}
+	return at, kv, true
+}
+
 // scan calls fn for every Grafana log line (logfmt with logger= and a valid
 // t= timestamp) at or after since. A non-empty file without one such line is
 // an error: requiring logger= keeps other logfmt logs from passing.
@@ -142,12 +157,8 @@ func (r *RouterLog) scan(ctx context.Context, since time.Time, fn func(time.Time
 		var lines, parsed int
 		err := logfile.ScanFile(ctx, path, func(raw []byte) {
 			lines++
-			kv := logfmt.Parse(raw)
-			if kv["logger"] == "" {
-				return
-			}
-			at, err := time.Parse(time.RFC3339Nano, kv["t"])
-			if err != nil {
+			at, kv, ok := parseLogLine(raw)
+			if !ok {
 				return
 			}
 			parsed++

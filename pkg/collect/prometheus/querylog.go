@@ -51,6 +51,16 @@ type queryLogLine struct {
 	} `json:"httpRequest"`
 }
 
+// parseQueryLogLine parses one line of a query log. ok is false for a line
+// that isn't a query log entry: not JSON, no timestamp, or no query text (a
+// timestamp alone would let any JSON log pass).
+func parseQueryLogLine(raw []byte) (l queryLogLine, ok bool) {
+	if json.Unmarshal(raw, &l) != nil || l.at().IsZero() || l.Params.Query == "" {
+		return queryLogLine{}, false
+	}
+	return l, true
+}
+
 func (l *queryLogLine) at() time.Time {
 	if !l.Time.IsZero() {
 		return l.Time
@@ -169,10 +179,8 @@ func (q *QueryLog) scan(ctx context.Context, since time.Time, fn func(*queryLogL
 		var lines, parsed int
 		err := logfile.ScanFile(ctx, path, func(raw []byte) {
 			lines++
-			// A timestamp alone would let any JSON log pass; a query log
-			// entry always carries the query text.
-			var l queryLogLine
-			if json.Unmarshal(raw, &l) != nil || l.at().IsZero() || l.Params.Query == "" {
+			l, ok := parseQueryLogLine(raw)
+			if !ok {
 				return
 			}
 			parsed++
