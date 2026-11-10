@@ -1,6 +1,6 @@
 # Query logs: what each backend records
 
-Phase 0 spike 2 (Nov 8, 2026, tvt-lab: Prometheus 3.5.0, Loki 3.5.3, Mimir 2.16.0, Grafana 12.1.0). This is the source material for the partner setup guide. Fixtures for Prometheus and Grafana are in `testdata/lab/`.
+Phase 0 spike 2 (Nov 8, 2026, tvt-lab: Prometheus 3.5.0, Loki 3.5.3, Mimir 2.16.0, Grafana 12.1.0). This is the source material for the partner setup guide, now published as the [tvt design partner guide](https://claude.ai/artifact/JMTcB5HjzsrrywuoudLkDf). Keep the two in sync when a setting changes. Fixtures for Prometheus and Grafana are in `testdata/lab/`.
 
 ## Summary
 
