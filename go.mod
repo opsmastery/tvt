@@ -2,6 +2,8 @@ module github.com/Opsmastery-Summit/tvt
 
 go 1.26.0
 
+toolchain go1.26.11
+
 require modernc.org/sqlite v1.62.0
 
 require (
