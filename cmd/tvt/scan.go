@@ -15,8 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/grafana"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/loki"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect/mimir"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/prometheus"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
@@ -108,15 +110,21 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	since := start.Add(-window)
 	in := scan.Inputs{Start: start, Window: window}
 
-	// Metrics: cardinality, labels on the largest metrics, rules.
+	// Metrics: cardinality, labels on the largest metrics, rules. Mimir has
+	// no TSDB status, so its cardinality comes from the cardinality API; its
+	// rules from the same Prometheus-compatible endpoint.
 	pc := prometheus.New(o.Prom, getenv("TVT_PROM_TOKEN"))
+	pc.HTTP, pc.Now = scanHTTP, scanNow
+	var card collect.CardinalitySource = pc
 	in.MetricsSource = "prom"
 	if o.Mimir != "" {
 		pc.BaseURL, pc.Source, in.MetricsSource = mimirAPI(o.Mimir), "mimir", "mimir"
+		mc := mimir.New(pc.BaseURL, pc.Token)
+		mc.HTTP, mc.Now = scanHTTP, scanNow
+		card = mc
 	}
-	pc.HTTP, pc.Now = scanHTTP, scanNow
 	var err error
-	if in.Metrics, err = pc.MetricCardinality(ctx); err != nil {
+	if in.Metrics, err = card.MetricCardinality(ctx); err != nil {
 		return err
 	}
 	var series int64
@@ -125,7 +133,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	}
 	top := min(o.LabelTop, len(in.Metrics)) // sorted largest first
 	for _, m := range in.Metrics[:top] {
-		ls, err := pc.LabelCardinality(ctx, m.Metric)
+		ls, err := card.LabelCardinality(ctx, m.Metric)
 		if err != nil {
 			return err
 		}

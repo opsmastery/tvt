@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
@@ -292,6 +293,132 @@ func TestScanWithoutLogs(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
 		}
+	}
+}
+
+// tvt scan --mimir against the Mimir capture yields the same shop metrics as
+// --prom against the Prometheus capture (both taken from the same lab), and
+// Mimir's rules are consumers.
+func TestScanLabMimir(t *testing.T) {
+	setNow(t)
+	l := newLab(t, nil)
+	top, err := os.ReadFile(filepath.Join(lab, "mimir/label_values_name.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := &testutil.MimirNames{T: t, Names: testutil.LoadMimirNames(t, filepath.Join(lab, "mimir/label_values_name_by_prefix.json")), Top: top}
+	mimirSrv := fixtureServer(t, map[string]string{"/prometheus/api/v1/rules": "mimir/rules.json"},
+		map[string]http.HandlerFunc{testutil.MimirLabelValuesPath: names.ServeHTTP})
+
+	db := filepath.Join(t.TempDir(), "tvt.db")
+	o := labOptions(l, db)
+	// Labels: the capture has label counts for one metric only, and the
+	// Mimir collector's label calls are covered by its own tests.
+	o.Prom, o.Mimir, o.LabelTop = "", mimirSrv.URL, 0
+	var out bytes.Buffer
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	t.Log("\n" + out.String())
+	for _, want := range []string{"mimir        1498 metrics", "3 rules", "loki         1 rule (", "scan 1 written"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q", want)
+		}
+	}
+
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	info, err := st.LatestScan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sigs, err := st.Signals(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mimirShop := map[string]bool{}
+	for _, s := range sigs {
+		if strings.HasPrefix(s.ID, "prom:") {
+			t.Errorf("--mimir scan wrote a prom signal: %s", s.ID)
+		}
+		if s.Kind == graph.KindMetric && strings.HasPrefix(s.Name, "shop_") {
+			if s.ID != "mimir:metric:"+s.Name || s.Source != "mimir" {
+				t.Errorf("signal %+v, want a mimir metric", s)
+			}
+			mimirShop[s.Name] = true
+		}
+	}
+	var tsdb struct {
+		Data struct {
+			SeriesCountByMetricName []struct {
+				Name string `json:"name"`
+			} `json:"seriesCountByMetricName"`
+		} `json:"data"`
+	}
+	readJSON(t, "prometheus/tsdb.json", &tsdb)
+	promShop := map[string]bool{}
+	for _, m := range tsdb.Data.SeriesCountByMetricName {
+		if strings.HasPrefix(m.Name, "shop_") {
+			promShop[m.Name] = true
+		}
+	}
+	if len(promShop) == 0 || fmt.Sprint(mimirShop) != fmt.Sprint(promShop) {
+		t.Errorf("shop metrics differ:\nmimir %v\nprom  %v", mimirShop, promShop)
+	}
+
+	cons, err := st.Consumers(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]graph.Consumer{}
+	var rules int
+	for _, c := range cons {
+		byID[c.ID] = c
+		if c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule {
+			rules++
+		}
+	}
+	for id, kind := range map[string]graph.ConsumerKind{
+		"rule:mimir:tvt-lab/shop-recording/NodeLoadHigh":                                    graph.ConsumerAlertRule,
+		"rule:mimir:tvt-lab/shop-recording/route:shop_http_request_duration_seconds:p99_5m": graph.ConsumerRecordingRule,
+		"rule:mimir:tvt-lab/shop-recording/job:shop_cache_hit_ratio:5m":                     graph.ConsumerRecordingRule,
+		"rule:loki:shop-audit.yml/shop-audit/ShopAuditDenials":                              graph.ConsumerAlertRule,
+	} {
+		if byID[id].Kind != kind {
+			t.Errorf("consumer %s = %+v, want kind %s", id, byID[id], kind)
+		}
+	}
+	if rules != 4 {
+		t.Errorf("%d rule consumers, want 3 Mimir + 1 Loki", rules)
+	}
+}
+
+// A Mimir without cardinality analysis fails the scan with the setting to
+// change, and writes nothing.
+func TestScanMimirAnalysisDisabled(t *testing.T) {
+	setNow(t)
+	l := newLab(t, nil)
+	body, err := os.ReadFile(filepath.Join(lab, "mimir/cardinality_disabled.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mimirSrv := fixtureServer(t, nil, map[string]http.HandlerFunc{testutil.MimirLabelValuesPath: func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write(body)
+	}})
+	db := filepath.Join(t.TempDir(), "tvt.db")
+	o := labOptions(l, db)
+	o.Prom, o.Mimir = "", mimirSrv.URL
+	err = runScan(context.Background(), o, env, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "limits.cardinality_analysis_enabled: true") {
+		t.Fatalf("err = %v, want the setting named", err)
+	}
+	if _, err := os.Stat(db); !os.IsNotExist(err) {
+		t.Errorf("database created after a failed scan: %v", err)
 	}
 }
 
