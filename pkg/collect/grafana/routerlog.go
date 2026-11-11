@@ -93,7 +93,12 @@ func (r *RouterLog) Coverage(ctx context.Context, since time.Time) (float64, err
 	}
 	var first time.Time
 	// Lines before since still prove the log covers the window's start.
+	// Lines after now (clock skew, or a log newer than the scan's start)
+	// say nothing about the window and would make the share negative.
 	err := r.scan(ctx, time.Time{}, func(at time.Time, _ map[string]string) {
+		if at.After(now) {
+			return
+		}
 		if first.IsZero() || at.Before(first) {
 			first = at
 		}
@@ -104,7 +109,7 @@ func (r *RouterLog) Coverage(ctx context.Context, since time.Time) (float64, err
 	if !first.After(since) {
 		return 1, nil
 	}
-	return float64(now.Sub(first)) / float64(now.Sub(since)), nil
+	return min(1, max(0, float64(now.Sub(first))/float64(now.Sub(since)))), nil
 }
 
 // refererIsDashboard reports whether referer is the page of dashboard uid:
