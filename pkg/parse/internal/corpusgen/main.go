@@ -1,12 +1,17 @@
-// Command corpusgen extracts PromQL expressions from kube-prometheus
-// manifests into pkg/parse/testdata/promql-corpus/kube-prometheus.json.
-// See that directory's README for the source commit and how to rerun it.
+// Command corpusgen builds the parser corpora in pkg/parse/testdata.
 //
-//	go run ./pkg/parse/internal/corpusgen <manifests dir> > pkg/parse/testdata/promql-corpus/kube-prometheus.json
+//	corpusgen kube-prometheus <manifests dir> > pkg/parse/testdata/promql-corpus/kube-prometheus.json
+//	corpusgen logql -source partner-a <rule files, dashboards or dirs...> > pkg/parse/testdata/logql-corpus/partner-a.json
+//
+// kube-prometheus extracts PromQL from its manifests (see
+// promql-corpus/README.md). logql extracts LogQL from Loki rule files
+// (.yaml) and dashboards (.json, Loki panels) and redacts values (see
+// logql-corpus/README.md); -no-redact keeps them, for a local check only.
 package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,22 +23,53 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/parse/internal/corpus"
 )
 
+const usage = `usage:
+  corpusgen kube-prometheus <manifests dir>
+  corpusgen logql -source <name> [-no-redact] <files or dirs...>`
+
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: corpusgen <kube-prometheus manifests dir>")
-		os.Exit(2)
+	if len(os.Args) < 2 {
+		fail(2, usage)
 	}
-	exprs, err := extract(os.Args[1])
+	var exprs []corpus.Expr
+	var err error
+	switch os.Args[1] {
+	case "kube-prometheus":
+		if len(os.Args) != 3 {
+			fail(2, usage)
+		}
+		exprs, err = extract(os.Args[2])
+	case "logql":
+		fs := flag.NewFlagSet("logql", flag.ExitOnError)
+		source := fs.String("source", "", "anonymous corpus name, e.g. partner-a (never a company name)")
+		noRedact := fs.Bool("no-redact", false, "keep values (local use only; never commit the output)")
+		_ = fs.Parse(os.Args[2:])
+		if *source == "" || fs.NArg() == 0 {
+			fail(2, usage)
+		}
+		exprs, err = corpus.LogQLFromPaths(fs.Args()...)
+		for i := range exprs {
+			exprs[i].Source = *source + "/" + exprs[i].Source
+			if !*noRedact {
+				exprs[i].Expr = corpus.RedactLogQL(exprs[i].Expr)
+			}
+		}
+	default:
+		fail(2, usage)
+	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "corpusgen:", err)
-		os.Exit(1)
+		fail(1, "corpusgen: "+err.Error())
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", " ")
 	if err := enc.Encode(exprs); err != nil {
-		fmt.Fprintln(os.Stderr, "corpusgen:", err)
-		os.Exit(1)
+		fail(1, "corpusgen: "+err.Error())
 	}
+}
+
+func fail(code int, msg string) {
+	fmt.Fprintln(os.Stderr, msg)
+	os.Exit(code)
 }
 
 func extract(dir string) ([]corpus.Expr, error) {

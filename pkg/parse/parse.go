@@ -1,6 +1,6 @@
 // Package parse extracts which signals a query touches. PromQL uses the
 // upstream Prometheus parser (PromQL); LogQL gets tvt's own extractor
-// (ADR 0005), and until then LogStreamSelectors finds only stream selectors.
+// (LogQL, ADR 0005).
 //
 // Label-level detail matters: dropping a label breaks queries that match on
 // it, group by it or join on it, and silently changes queries that use
@@ -51,6 +51,14 @@ type Ref struct {
 	// on(...) (default, ignoring, and/or/unless), for a label name taken
 	// from a variable, and for every Ref from a query that didn't parse.
 	AllLabels bool
+	// LogQL only. Filters are the labels the pipeline reads (label
+	// filters, unwrap, line_format/label_format, keep, drop). StreamLabels
+	// are labels read that can only be stream labels; Extracted are labels
+	// read that a parser stage may have produced (a stream label only if
+	// the stream carries that name). See LogQL.
+	Filters      []string
+	StreamLabels []string
+	Extracted    []string
 	// Assumed: the reference is a guess, not read exactly from the query.
 	// Reasons says why (a variable, a parse error).
 	Assumed bool
