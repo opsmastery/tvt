@@ -99,9 +99,24 @@ func logqlCases() []logqlCase {
 		{"unpack", `{app="shop"} | unpack | pod=~"web.*"`, []Ref{{
 			Matchers: app, Filters: []string{"pod"}, StreamLabels: []string{"app"}, Extracted: []string{"pod"},
 		}}},
-		{"_extracted suffix", `sum by (level_extracted) (count_over_time({app="shop"} | json code="c" [1m]))`, []Ref{{
+		{"_extracted suffix also reads the stream label", `sum by (level_extracted) (count_over_time({app="shop"} | json code="c" [1m]))`, []Ref{{
 			Matchers: app, Grouping: []string{"level_extracted"}, Created: []string{"code"},
-			StreamLabels: []string{"app"}, Extracted: []string{"level_extracted"},
+			StreamLabels: []string{"app", "level"}, Extracted: []string{"level_extracted"},
+		}}},
+		{"_extracted filter", `{app="shop"} | json | level_extracted="error"`, []Ref{{
+			Matchers: app, Filters: []string{"level_extracted"},
+			StreamLabels: []string{"app", "level"}, Extracted: []string{"level_extracted"},
+		}}},
+		{"template index and multiline action", "{app=\"shop\"} | line_format `{{ index . \"level\" }} {{\n  .msg }}`", []Ref{{
+			Matchers: app, Filters: []string{"level", "msg"}, StreamLabels: []string{"app", "level", "msg"},
+		}}},
+		{"template reads the whole label set", `{app="shop"} | label_format all="{{ printf \"%v\" . }}"`, []Ref{{
+			Matchers: app, Created: []string{"all"}, StreamLabels: []string{"app"},
+			AllLabels: true, Assumed: true, Reasons: []string{"a template reads the whole label set"},
+		}}},
+		{"template dynamic index", `{app="shop"} | line_format "{{ index . $k }} {{ .ts | printf \"%.2f\" }}"`, []Ref{{
+			Matchers: app, Filters: []string{"ts"}, StreamLabels: []string{"app", "ts"},
+			AllLabels: true, Assumed: true, Reasons: []string{"a template reads the whole label set"},
 		}}},
 		{"line_format template", `{app="shop"} | line_format "{{.level}} {{ .msg | ToUpper }} {{ __line__ }}"`, []Ref{{
 			Matchers: app, Filters: []string{"level", "msg"}, StreamLabels: []string{"app", "level", "msg"},
@@ -134,8 +149,11 @@ func logqlCases() []logqlCase {
 			{Matchers: []Matcher{eq("app", "a")}, AllLabels: true, StreamLabels: []string{"app"}},
 			{Matchers: []Matcher{eq("app", "b")}, AllLabels: true, StreamLabels: []string{"app"}},
 		}},
-		{"label_replace output is not a stream label", `sum by (svc) (label_replace(rate({app="shop"}[1m]), "svc", "$1", "service", "(.*)"))`, []Ref{{
-			Matchers: app, Grouping: []string{"service", "svc"}, Created: []string{"svc"}, StreamLabels: []string{"app", "service"},
+		{"label_replace output keeps its input value when the regex misses", `sum by (svc) (label_replace(rate({app="shop"}[1m]), "svc", "$1", "service", "(.*)"))`, []Ref{{
+			Matchers: app, Grouping: []string{"service", "svc"}, Created: []string{"svc"}, StreamLabels: []string{"app", "service", "svc"},
+		}}},
+		{"label_replace in place reads its source", `label_replace(rate({app="shop"}[1m]), "service", "$1", "service", "(.*)")`, []Ref{{
+			Matchers: app, Grouping: []string{"service"}, Created: []string{"service"}, StreamLabels: []string{"app", "service"},
 		}}},
 		{"topk", `topk(5, sum by (pod) (rate({app="shop"}[1m])))`, []Ref{{
 			Matchers: app, Grouping: []string{"pod"}, StreamLabels: []string{"app", "pod"},
@@ -206,6 +224,7 @@ func TestLogQLParseFailure(t *testing.T) {
 		{`count_over_time({app="a"}[="5m])`, []string{`{app="a"}`}},
 		{`{app="a"} | addr = ip("10.0.0.0/8"`, []string{`{app="a"}`}},
 		{`rate({app="a"}[1m]) + rate({app="b"}[1m]) +`, []string{`{app="a"}`, `{app="b"}`}},
+		{`rate({app="a"}[1m]) + rate({app=~bad}[1m])`, []string{`{app="a"}`, ""}},
 	} {
 		refs, err := LogQL(tc.query)
 		if err == nil {

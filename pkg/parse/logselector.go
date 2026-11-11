@@ -10,7 +10,8 @@ import (
 // scanStreamSelectors finds the stream selectors in text without parsing
 // the rest, for LogQL's fallback when a query doesn't parse. It skips
 // quoted strings and # comments (so braces in a line_format template are
-// not selectors) and selectors it can't read.
+// not selectors). A selector it can't read comes back with no matchers,
+// meaning every stream.
 func scanStreamSelectors(query string) [][]Matcher {
 	var out [][]Matcher
 	for i := 0; i < len(query); {
@@ -30,6 +31,9 @@ func scanStreamSelectors(query string) [][]Matcher {
 		case '{':
 			ms, end, err := parseSelector(query, i)
 			if err != nil {
+				// Unreadable: a selector with no matchers, which stands
+				// for every stream.
+				out = append(out, nil)
 				i++
 				continue
 			}

@@ -214,6 +214,8 @@ func TestRedactLogQL(t *testing.T) {
 			"{app=\"redacted\"} | regexp `user=(?P<user>\\w+)` |~ \"redacted\" or \"redacted\" |= ip(\"192.0.2.0/24\")"},
 		{`sum by (svc) (label_replace(rate({app="a"}[1m]), "svc", "$1", "service", "(.*)")) # "kept"`,
 			`sum by (svc) (label_replace(rate({app="redacted"}[1m]), "svc", "$1", "service", "(.*)")) # "kept"`},
+		{"{app= # team\n\"acme-private\"} |= # why\n\"card\" != ip( # net\n\"10.0.0.0/8\")",
+			"{app= # team\n\"redacted\"} |= # why\n\"redacted\" != ip( # net\n\"192.0.2.0/24\")"},
 	} {
 		if got := corpus.RedactLogQL(tc.in); got != tc.want {
 			t.Errorf("RedactLogQL(%q)\n got %q\nwant %q", tc.in, got, tc.want)
