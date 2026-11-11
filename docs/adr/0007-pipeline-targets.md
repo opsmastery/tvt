@@ -1,6 +1,6 @@
 # 0007. Pipeline targets: declared pipelines, one owner per signal
 
-Date: 2026-11-09 · Status: proposed (finalize before Sprint 3)
+Date: 2026-11-09 · Status: accepted
 
 ## Context
 
