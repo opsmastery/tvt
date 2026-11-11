@@ -9,6 +9,8 @@ Last updated: November 2026.
 - **Read-only.** `tvt` never writes to your backends. Every change is a pull request a human reviews and merges.
 - **Fail closed.** If `tvt` can't prove a signal is unused, it keeps it. Alerts, recording rules, SLOs and viewed dashboards are hard keeps.
 - **Runs on your side.** A single binary. Reports and the usage graph stay on your machine; `tvt` talks only to the backends you configure and your Git host.
+- **Owners decide.** Every drop is a draft PR assigned to the signal's owner and moves forward only after they confirm. Drops are staged through a cheap archive first, with a revert ready. Rarely used is treated as dormant, not unused: the metric nobody touched all year may be the one you need at 3am.
+- **Evidence ranks.** Declared dependencies (an SLO, alert, recording rule or runbook step evaluates the signal) are strongest, then incident evidence (queried during an incident, promoted from postmortems), then observed usage (views, query logs). Only observed usage decays.
 - **Evidence, not guesses.** Every recommendation shows why: who reads the signal, how often, and what it costs. Gaps in the evidence are listed, not hidden.
 - **Open standards.** OpenTelemetry for `tvt`'s own traces, metrics and logs; OTel Collector, Alloy and Prometheus config for proposals.
 
@@ -25,12 +27,14 @@ The MVP covers the Grafana stack, self-hosted (OSS) and Grafana Cloud.
 
 MVP scope in more detail:
 
+- **Declared dependencies:** SLO definitions (Sloth, Pyrra, OpenSLO, Grafana SLO) and alert runbook links, including runbook steps that run a query, are hard keeps.
 - **Usage evidence:** PromQL and LogQL reference extraction (matchers, `by`/`without`, `on`/`ignoring`, recording-rule chains); Grafana-managed alert and recording rules; annotation queries; query logs.
 - **Grafana OSS and Grafana Cloud.** On OSS, dashboard views come from Grafana's router log and query use from Prometheus, Mimir and Loki query logs. On Grafana Cloud, the equivalents are Usage Insights, Adaptive Metrics usage data and the Mimir cardinality API. Where an edition can't provide a signal, `tvt` records the gap and keeps the data.
 - **Cost:** a price card you control (per series, per GB, per span), with vendor presets marked approximate.
 - **Logs:** stream-level volume and drops. Line-level reduction candidates are handed off to zeroreads.
 - **Alerts and rules:** each rule's cost per day, plus findings with a recommended fix: Grafana-managed alerts that bypass the datasource ruler, LogQL alerts that parse raw logs every interval, range windows far longer than the interval, broad selectors, duplicate rules, recording rules nobody reads, rules that silently return nothing, and rule groups slower than their interval. Report only; `tvt` never edits rules.
-- **Safety:** a protection manifest per pipeline repo, an error-pattern guard on every generated log rule, and a least-lossy action order (downsample or reroute before drop; never drop warn and above).
+- **Dormant, not unused:** unread signals that look incident-critical (error, latency and saturation signals, tier 0/1 services, runbook mentions) are labelled dormant and never ranked as drop candidates. Last-read dates are kept indefinitely.
+- **Safety:** a protection manifest per pipeline repo, an error-pattern guard on every generated log rule, a least-lossy action order (downsample or reroute before drop; never drop warn and above), owner confirmation recorded in the protection manifest before a drop PR leaves draft, staged drops (archive, then drop after a quiet period) and a generated revert PR.
 - **Supply chain:** signed, reproducible releases; govulncheck and gitleaks in CI.
 
 ## Next: continuous mode (target: Q2 2027)
@@ -40,7 +44,8 @@ MVP scope in more detail:
 - Cost by team or service from `team`/`service`/`namespace` labels and an ownership map.
 - Slack and webhook alerts.
 - `tvt verify`: re-check sources on a schedule and fail on a new reader of dropped data or on config drift.
-- SLO files (Sloth, Pyrra, OpenSLO) as hard keeps; AI agent and MCP query logs as usage evidence.
+- AI agent and MCP query logs as usage evidence.
+- Incident evidence: read incident timelines (PagerDuty, incident.io, Grafana IRM, Opsgenie) and postmortems, and promote anything queried during an incident into the protection manifest through a reviewed PR that links the postmortem. Protection doesn't expire.
 - A read-only MCP server over the usage graph (`why_kept`, `consumers_of`, `savings_if_dropped`).
 
 ## Later: more backends (target: mid 2027)
