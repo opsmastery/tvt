@@ -117,6 +117,9 @@ func TestPromQL(t *testing.T) {
 			Reasons: []string{"grouping label $group comes from variable $group"},
 		}}},
 		{"label_replace $1 is not a var", `label_replace(x, "a", "$1", "b", "(.*)")`, []Ref{{Metric: "x", Grouping: []string{"b"}, Created: []string{"a"}}}},
+		{"apostrophe in a comment", "# don't drop\nsum by (job) (x{a=\"$a\"})", []Ref{{
+			Metric: "x", Grouping: []string{"job"}, Matchers: []Matcher{{Label: "a", Op: MatchEqual, Value: "$a", Variable: true}},
+		}}},
 		{"regex dollar", `x{path=~"/api$"}`, []Ref{{Metric: "x", Matchers: []Matcher{re("path", "/api$")}}}},
 	}
 	for _, tt := range tests {
