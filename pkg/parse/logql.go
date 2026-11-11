@@ -105,6 +105,7 @@ type logQuery struct {
 	hasRange  bool
 	reasons   []string
 	allLabels bool
+	keeps     bool // a keep stage: only the labels it names survive
 }
 
 // use records a label the query reads at this point of the pipeline.
@@ -187,9 +188,12 @@ func (lq *logQuery) ref(pr Ref) Ref {
 		Without:   pr.Without,
 		Subquery:  pr.Subquery,
 		AllLabels: pr.AllLabels || lq.allLabels,
-		Filters:   sortedSet(lq.filters),
-		Extracted: sortedSet(final.extracted),
-		Reasons:   sortedSet(append(slices.Clone(pr.Reasons), lq.reasons...)),
+		// Stream and extracted labels survive the pipeline unless keep
+		// narrows them; the metric half decides the rest.
+		ResultLabels: pr.ResultLabels && !lq.keeps,
+		Filters:      sortedSet(lq.filters),
+		Extracted:    sortedSet(final.extracted),
+		Reasons:      sortedSet(append(slices.Clone(pr.Reasons), lq.reasons...)),
 	}
 	var created []string
 	created = append(created, pr.Created...)
@@ -458,6 +462,9 @@ func (lq *logQuery) stage(text string, i int, vars []grafanaVar) (int, error) {
 	case "label_format":
 		return lq.labelFormat(text, i, vars)
 	case "drop", "keep", "distinct":
+		if word == "keep" {
+			lq.keeps = true
+		}
 		return lq.labelList(text, i, vars)
 	case "unwrap":
 		k := i

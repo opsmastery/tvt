@@ -51,6 +51,13 @@ type Ref struct {
 	// on(...) (default, ignoring, and/or/unless), for a label name taken
 	// from a variable, and for every Ref from a query that didn't parse.
 	AllLabels bool
+	// ResultLabels: the selector's labels reach the query's result, except
+	// those in Without: no aggregation, one-to-one join on(...), the
+	// "one" side of group_left/right, the right side of and/unless,
+	// absent(), scalar() or LogQL keep stage removes them. up{job="x"} and
+	// rate(up[5m]) set it; sum by (job) (up) doesn't. It is not a read:
+	// whoever receives the result sees the labels, but needn't use them.
+	ResultLabels bool
 	// LogQL only. Filters are the labels the pipeline reads (label
 	// filters, unwrap, line_format/label_format, keep, drop). StreamLabels
 	// are labels read that can only be stream labels; Extracted are labels

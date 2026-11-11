@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -257,8 +258,12 @@ func TestBuildLogQLRules(t *testing.T) {
 	cons := consumers(out)
 	refs := map[string][]string{} // signal -> consumers
 	for _, r := range out.References {
-		if !r.Assumed {
-			t.Errorf("LogQL reference not marked assumed: %+v", r)
+		// Only the rule that didn't parse is a guess.
+		if broken := r.ConsumerID == "rule:loki:x.yml/x/Broken"; r.Assumed != broken || r.AllLabels != broken {
+			t.Errorf("reference %+v: assumed and all labels should be %v", r, broken)
+		}
+		if want := cons[r.ConsumerID].Kind.Evidence(); r.Evidence != want {
+			t.Errorf("reference %+v: evidence %s, want %s", r, r.Evidence, want)
 		}
 		if _, ok := cons[r.ConsumerID]; !ok {
 			t.Errorf("reference to unknown consumer %s", r.ConsumerID)
@@ -275,10 +280,13 @@ func TestBuildLogQLRules(t *testing.T) {
 	if got := refs["loki:stream:"+AllStreams]; len(got) != 1 || got[0] != "rule:loki:x.yml/x/Broken" {
 		t.Errorf("all-streams consumers = %v", got)
 	}
-	// PromQL rules get no references yet (Sprint 2).
+	// Label detail: the alert matches app and component on the stream.
 	for _, r := range out.References {
-		if strings.HasPrefix(r.ConsumerID, "rule:prometheus:") {
-			t.Errorf("unexpected PromQL reference %+v", r)
+		if r.SignalID == audit && r.ConsumerID == alert {
+			want := []graph.LabelRef{{Name: "app", Use: graph.LabelMatch}, {Name: "component", Use: graph.LabelMatch}}
+			if !reflect.DeepEqual(r.Labels, want) {
+				t.Errorf("alert labels = %+v, want %+v", r.Labels, want)
+			}
 		}
 	}
 }

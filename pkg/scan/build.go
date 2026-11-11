@@ -8,10 +8,17 @@
 //	<src>:metric:<name>                  metric signal (src = "prom" or "mimir")
 //	<src>:label:<metric>:<label>         label signal
 //	loki:stream:<selector>               log stream selector (canonical, see parse.CanonicalSelector)
-//	loki:stream:*                        every stream: a LogQL rule whose selectors couldn't be read
+//	loki:stream:*                        every stream: a LogQL query whose selectors couldn't be read
 //	rule:<source>:<namespace>/<group>/<name>
 //	panel:<org>:<dashboard uid>:<panel id>:<query index>
 //	var:<org>:<dashboard uid>:<variable name>
+//	annot:<org>:<dashboard uid>:<annotation name>
+//
+// References (see resolver) come from every consumer's query: rules,
+// panel targets, query variables and annotations. PromQL selectors resolve
+// to metric signals (and collected label signals), LogQL selectors to
+// stream signals; a recording rule's output is a metric signal, so readers
+// of it also reference the rule's inputs, with Via set to the rule.
 //
 // Two consumers that would share an ID (duplicate alert names in one group,
 // repeated panel IDs) get "#2", "#3"… in the order they were collected,
@@ -27,12 +34,11 @@ import (
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 )
 
 // AllStreams is the selector of the signal a LogQL consumer references when
-// its stream selectors can't be read: unknown means used, so it stands for
-// every stream in Loki.
+// its stream selectors can't be read, or a templated matcher left none:
+// unknown means used, so it stands for every stream in Loki.
 const AllStreams = "*"
 
 // Inputs is everything one scan collected.
@@ -58,9 +64,8 @@ type Inputs struct {
 type Output struct {
 	Signals   []graph.Signal
 	Consumers []graph.Consumer
-	// References are the dependencies resolved so far. Until the PromQL and
-	// LogQL extractors exist (Sprint 2) these are only LogQL rules' assumed
-	// references to the streams their selectors name.
+	// References link signals to the consumers whose queries read them,
+	// ordered by signal, consumer and via; each key appears once.
 	References []graph.Reference
 	Costs      []graph.Cost
 	Loads      []graph.DashboardLoad
@@ -105,8 +110,10 @@ func Build(in Inputs) (Output, error) {
 
 	ids := newIDSet()
 
-	// Rules.
-	streamIDs := map[string]bool{}
+	res := newResolver(in.MetricsSource, in.Metrics, in.Labels)
+	var queries []query
+
+	// Rules. A recording rule's output is a metric signal.
 	for _, r := range in.Rules {
 		kind := graph.ConsumerRecordingRule
 		if r.Kind == collect.RuleAlert {
@@ -119,19 +126,14 @@ func Build(in Inputs) (Output, error) {
 			Expr: r.Expr,
 		}
 		out.Consumers = append(out.Consumers, c)
-		if r.Language != "logql" {
-			continue
+		if kind == graph.ConsumerRecordingRule && r.Name != "" {
+			res.recordingRule(c.ID, r.Name)
 		}
-		for _, sel := range streamSelectors(r.Expr) {
-			id := "loki:stream:" + sel
-			if !streamIDs[id] {
-				streamIDs[id] = true
-				out.Signals = append(out.Signals, graph.Signal{ID: id, Kind: graph.KindStream, Name: sel, Source: "loki"})
-			}
-			// Assumed: the selector is known, but not which labels the rule
-			// filters or groups by, so it reads all of them.
-			out.References = append(out.References, graph.Reference{SignalID: id, ConsumerID: c.ID, Assumed: true})
+		lang := "promql"
+		if r.Language == "logql" {
+			lang = "logql"
 		}
+		queries = append(queries, query{consumer: c, expr: r.Expr, lang: lang})
 	}
 
 	// Views: the latest browser view per dashboard sets last_viewed, and
@@ -180,30 +182,60 @@ func Build(in Inputs) (Output, error) {
 		return !a.Browser && b.Browser
 	})
 
-	// Dashboards: one consumer per panel query and per query variable.
+	// Dashboards: one consumer per panel query, query variable and
+	// annotation query.
 	for _, d := range in.Dashboards {
 		viewed := lastViewed[d.UID]
+		vars := dashboardVars(d, res.metrics)
+		consume := func(c graph.Consumer, dsType string, variable bool, shows []string) {
+			out.Consumers = append(out.Consumers, c)
+			if lang, ok := queryLanguage(dsType); ok {
+				queries = append(queries, query{consumer: c, expr: c.Expr, lang: lang, variable: variable, vars: vars, shows: shows})
+			}
+		}
 		for _, p := range d.Panels {
 			for n, q := range p.Queries {
-				out.Consumers = append(out.Consumers, graph.Consumer{
+				consume(graph.Consumer{
 					ID:         ids.unique(fmt.Sprintf("panel:%s:%s:%d:%d", org, d.UID, p.ID, n)),
 					Kind:       graph.ConsumerDashboardPanel,
 					Name:       d.Title + " / " + p.Title,
 					Expr:       q.Expr,
 					LastViewed: viewed,
-				})
+				}, q.DatasourceType, false, shownLabels([]string{q.Legend}, ""))
 			}
 		}
 		for _, v := range d.Variables {
-			out.Consumers = append(out.Consumers, graph.Consumer{
+			if v.Type != "query" && v.Type != "" {
+				continue // custom, constant, textbox: values, not a query
+			}
+			consume(graph.Consumer{
 				ID:         ids.unique("var:" + org + ":" + d.UID + ":" + v.Name),
 				Kind:       graph.ConsumerDashboardVariable,
 				Name:       d.Title + " / $" + v.Name,
 				Expr:       v.Query,
 				LastViewed: viewed,
-			})
+			}, v.DatasourceType, true, nil)
+		}
+		for _, a := range d.Annotations {
+			consume(graph.Consumer{
+				ID:         ids.unique("annot:" + org + ":" + d.UID + ":" + a.Name),
+				Kind:       graph.ConsumerDashboardAnnotation,
+				Name:       d.Title + " / annotation " + a.Name,
+				Expr:       a.Expr,
+				LastViewed: viewed,
+			}, a.DatasourceType, false, shownLabels([]string{a.TitleFormat, a.TextFormat}, a.TagKeys))
 		}
 	}
+
+	// References: every query, then recording-rule chains, then the label
+	// signals each metric reference reads.
+	for _, q := range queries {
+		res.resolve(q)
+	}
+	res.chains()
+	res.labelRefs()
+	out.Signals = append(out.Signals, res.newSignals...)
+	out.References = res.sorted()
 
 	// Coverage.
 	seen := map[string]bool{}
@@ -231,24 +263,18 @@ func Build(in Inputs) (Output, error) {
 	return out, nil
 }
 
-// streamSelectors returns the canonical stream selectors a LogQL expression
-// names, deduplicated. A query that doesn't parse still yields the
-// selectors found in its text; one with none yields AllStreams.
-func streamSelectors(expr string) []string {
-	refs, _ := parse.LogQL(expr)
-	var out []string
-	seen := map[string]bool{}
-	for _, r := range refs {
-		sel := AllStreams
-		if len(r.Matchers) > 0 {
-			sel = parse.CanonicalSelector(r.Matchers)
-		}
-		if !seen[sel] {
-			seen[sel] = true
-			out = append(out, sel)
-		}
+// queryLanguage maps a datasource plugin type to the query language tvt
+// reads. An empty type (a datasource tvt couldn't resolve) is read as
+// PromQL; a LogQL query fails to parse as PromQL and then only resolves
+// against collected metrics, so it can't invent signals.
+func queryLanguage(dsType string) (string, bool) {
+	switch dsType {
+	case "prometheus", "":
+		return "promql", true
+	case "loki":
+		return "logql", true
 	}
-	return out
+	return "", false
 }
 
 // idSet hands out unique IDs, suffixing repeats with #2, #3, … Every ID

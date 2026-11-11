@@ -59,7 +59,7 @@ func TestLogQL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LogQL(%q): %v", tt.query, err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
+			if !reflect.DeepEqual(clearResultLabels(got), tt.want) {
 				t.Errorf("LogQL(%q)\n got %+v\nwant %+v", tt.query, got, tt.want)
 			}
 		})
@@ -244,6 +244,34 @@ func TestLogQLParseFailure(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%q: got %q, want %q", tc.query, got, tc.want)
+		}
+	}
+}
+
+func TestLogQLResultLabels(t *testing.T) {
+	tests := []struct {
+		query string
+		want  []bool
+	}{
+		{`{app="shop"}`, []bool{true}},
+		{`{app="shop"} | logfmt | level="error"`, []bool{true}},
+		{`{app="shop"} | logfmt | keep level`, []bool{false}},
+		{`{app="shop"} | drop pod`, []bool{true}},
+		{`rate({app="shop"}[5m])`, []bool{true}},
+		{`sum by (level) (rate({app="shop"}[5m]))`, []bool{false}},
+		{`sum by (level) (count_over_time({app="a"}[5m])) / on(level) sum by (level) (count_over_time({app="b"}[5m]))`, []bool{false, false}},
+	}
+	for _, tt := range tests {
+		refs, err := LogQL(tt.query)
+		if err != nil {
+			t.Fatalf("%s: %v", tt.query, err)
+		}
+		var got []bool
+		for _, r := range refs {
+			got = append(got, r.ResultLabels)
+		}
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("%s: ResultLabels %v, want %v", tt.query, got, tt.want)
 		}
 	}
 }
