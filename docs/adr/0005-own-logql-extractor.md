@@ -1,6 +1,6 @@
 # 0005. Write our own LogQL reference extractor
 
-Date: 2026-11-08 · Status: proposed
+Date: 2026-11-08 · Status: accepted
 
 ## Context
 
