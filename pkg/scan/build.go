@@ -232,16 +232,17 @@ func Build(in Inputs) (Output, error) {
 }
 
 // streamSelectors returns the canonical stream selectors a LogQL expression
-// names, deduplicated, or AllStreams when they can't be read.
+// names, deduplicated. A query that doesn't parse still yields the
+// selectors found in its text; one with none yields AllStreams.
 func streamSelectors(expr string) []string {
-	refs, err := parse.LogStreamSelectors(expr)
-	if err != nil {
-		return []string{AllStreams}
-	}
+	refs, _ := parse.LogQL(expr)
 	var out []string
 	seen := map[string]bool{}
 	for _, r := range refs {
-		sel := parse.CanonicalSelector(r.Matchers)
+		sel := AllStreams
+		if len(r.Matchers) > 0 {
+			sel = parse.CanonicalSelector(r.Matchers)
+		}
 		if !seen[sel] {
 			seen[sel] = true
 			out = append(out, sel)
