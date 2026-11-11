@@ -16,6 +16,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +28,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -136,6 +138,21 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			return err
 		}
 	}
+	if from < 3 {
+		for _, q := range []string{
+			`ALTER TABLE refs ADD COLUMN evidence TEXT NOT NULL DEFAULT '' CHECK (evidence IN ('', 'declared', 'incident', 'observed'))`,
+			`ALTER TABLE refs ADD COLUMN labels TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE refs ADD COLUMN all_labels INTEGER NOT NULL DEFAULT 0 CHECK (all_labels IN (0, 1))`,
+			`ALTER TABLE refs ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
+			// Before version 3 an assumed reference covered every label.
+			`UPDATE refs SET all_labels = assumed`,
+			`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -233,7 +250,7 @@ func (s *Store) Consumers(ctx context.Context, scanID int64) ([]graph.Consumer, 
 // signal, consumer and via.
 func (s *Store) References(ctx context.Context, scanID int64) ([]graph.Reference, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT signal_id, consumer_id, via, last_seen, actor, assumed FROM refs WHERE last_scan = ?
+		`SELECT signal_id, consumer_id, via, last_seen, actor, assumed, evidence, labels, all_labels, reason FROM refs WHERE last_scan = ?
 		 ORDER BY signal_id, consumer_id, via`, scanID)
 	if err != nil {
 		return nil, err
@@ -243,10 +260,17 @@ func (s *Store) References(ctx context.Context, scanID int64) ([]graph.Reference
 	for rows.Next() {
 		var r graph.Reference
 		var seen sql.NullInt64
-		if err := rows.Scan(&r.SignalID, &r.ConsumerID, &r.Via, &seen, &r.Actor, &r.Assumed); err != nil {
+		var evidence, labels, reasons string
+		if err := rows.Scan(&r.SignalID, &r.ConsumerID, &r.Via, &seen, &r.Actor, &r.Assumed,
+			&evidence, &labels, &r.AllLabels, &reasons); err != nil {
 			return nil, err
 		}
 		r.LastSeen = fromNullMillis(seen)
+		r.Evidence = graph.EvidenceClass(evidence)
+		if r.Labels, err = decodeLabels(labels); err != nil {
+			return nil, fmt.Errorf("reference %s -> %s: %w", r.SignalID, r.ConsumerID, err)
+		}
+		r.Reasons = decodeReasons(reasons)
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -386,12 +410,24 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 					WHEN excluded.last_viewed IS NULL THEN consumers.last_viewed
 					ELSE max(consumers.last_viewed, excluded.last_viewed) END,
 				last_scan = excluded.last_scan`},
-		{&sc.ref, `INSERT INTO refs (signal_id, consumer_id, via, last_seen, actor, assumed, last_scan)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+		{&sc.ref, `INSERT INTO refs (signal_id, consumer_id, via, last_seen, actor, assumed, evidence, labels, all_labels, reason, last_scan)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (signal_id, consumer_id, via) DO UPDATE SET
 				assumed = CASE
 					WHEN refs.last_scan = excluded.last_scan THEN max(refs.assumed, excluded.assumed)
 					ELSE excluded.assumed END,
+				all_labels = CASE
+					WHEN refs.last_scan = excluded.last_scan THEN max(refs.all_labels, excluded.all_labels)
+					ELSE excluded.all_labels END,
+				labels = CASE
+					WHEN refs.last_scan <> excluded.last_scan OR refs.labels = '' THEN excluded.labels
+					WHEN excluded.labels = '' OR excluded.labels = refs.labels THEN refs.labels
+					ELSE refs.labels || char(10) || excluded.labels END,
+				reason = CASE
+					WHEN refs.last_scan <> excluded.last_scan OR refs.reason = '' THEN excluded.reason
+					WHEN excluded.reason = '' OR excluded.reason = refs.reason THEN refs.reason
+					ELSE refs.reason || char(10) || excluded.reason END,
+				evidence = excluded.evidence,
 				actor = CASE
 					WHEN refs.last_seen IS NULL OR excluded.last_seen >= refs.last_seen THEN excluded.actor
 					ELSE refs.actor END,
@@ -459,8 +495,9 @@ func (sc *Scan) PutConsumer(ctx context.Context, c graph.Consumer) error {
 // PutReference records a reference seen in this scan. Repeats (the same
 // query many times in a log) keep the latest LastSeen and its Actor. The
 // signal and consumer may be put before or after; both must exist by Finish.
-// Within one scan, a reference put once as Assumed stays assumed: the
-// broader reading wins.
+// Within one scan the broader reading wins: a reference put once as
+// Assumed or AllLabels stays so, and its Labels and Reasons are the union
+// of every put. A later scan replaces them with its own reading.
 func (sc *Scan) PutReference(ctx context.Context, r graph.Reference) error {
 	if err := sc.check(); err != nil {
 		return err
@@ -468,7 +505,15 @@ func (sc *Scan) PutReference(ctx context.Context, r graph.Reference) error {
 	if r.SignalID == "" || r.ConsumerID == "" {
 		return errors.New("store: reference: SignalID and ConsumerID are required")
 	}
-	_, err := sc.ref.ExecContext(ctx, r.SignalID, r.ConsumerID, r.Via, nullMillis(r.LastSeen), r.Actor, boolInt(r.Assumed), sc.ID)
+	if !r.Evidence.Valid() {
+		return fmt.Errorf("store: reference %s -> %s: evidence %q, want declared, incident or observed", r.SignalID, r.ConsumerID, r.Evidence)
+	}
+	labels, err := encodeLabels(r.Labels)
+	if err != nil {
+		return fmt.Errorf("store: reference %s -> %s: %w", r.SignalID, r.ConsumerID, err)
+	}
+	_, err = sc.ref.ExecContext(ctx, r.SignalID, r.ConsumerID, r.Via, nullMillis(r.LastSeen), r.Actor, boolInt(r.Assumed),
+		string(r.Evidence), labels, boolInt(r.AllLabels), encodeReasons(r.Reasons), sc.ID)
 	return wrap("reference", r.SignalID+" -> "+r.ConsumerID, err)
 }
 
@@ -585,4 +630,74 @@ func fromNullMillis(n sql.NullInt64) time.Time {
 		return time.Time{}
 	}
 	return fromMillis(n.Int64)
+}
+
+// encodeLabels stores label uses one per line as "use:name", sorted. A name
+// that would break the format (a newline, or a leading quote) is quoted.
+func encodeLabels(ls []graph.LabelRef) (string, error) {
+	lines := make([]string, 0, len(ls))
+	for _, l := range ls {
+		if l.Name == "" || l.Use == "" || strings.ContainsAny(string(l.Use), ":\n") {
+			return "", fmt.Errorf("bad label use %+v", l)
+		}
+		name := l.Name
+		if strings.ContainsAny(name, "\n\r") || strings.HasPrefix(name, `"`) {
+			name = strconv.Quote(name)
+		}
+		lines = append(lines, string(l.Use)+":"+name)
+	}
+	sort.Strings(lines)
+	return strings.Join(slices.Compact(lines), "\n"), nil
+}
+
+// decodeLabels reads encodeLabels' format. Within one scan repeats are
+// appended (see PutReference), so it deduplicates.
+func decodeLabels(s string) ([]graph.LabelRef, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var out []graph.LabelRef
+	for _, line := range strings.Split(s, "\n") {
+		use, name, ok := strings.Cut(line, ":")
+		if !ok || use == "" || name == "" {
+			return nil, fmt.Errorf("bad label line %q", line)
+		}
+		if strings.HasPrefix(name, `"`) {
+			n, err := strconv.Unquote(name)
+			if err != nil {
+				return nil, fmt.Errorf("bad label line %q: %w", line, err)
+			}
+			name = n
+		}
+		out = append(out, graph.LabelRef{Name: name, Use: graph.LabelUse(use)})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Use < out[j].Use
+	})
+	return slices.Compact(out), nil
+}
+
+// encodeReasons stores reasons one per line; a newline inside a reason
+// becomes a space.
+func encodeReasons(rs []string) string {
+	lines := make([]string, 0, len(rs))
+	for _, r := range rs {
+		if r = strings.TrimSpace(strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(r)); r != "" {
+			lines = append(lines, r)
+		}
+	}
+	sort.Strings(lines)
+	return strings.Join(slices.Compact(lines), "\n")
+}
+
+func decodeReasons(s string) []string {
+	if s == "" {
+		return nil
+	}
+	out := strings.Split(s, "\n")
+	sort.Strings(out)
+	return slices.Compact(out)
 }

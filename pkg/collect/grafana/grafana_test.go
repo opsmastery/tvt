@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -97,7 +98,20 @@ const edgeDashboard = `{"dashboard":{"uid":"edge","title":"Edge cases",
   {"name":"ds","type":"datasource","query":"prometheus","current":{"value":"mimir"}},
   {"name":"anyprom","type":"datasource","query":"prometheus","current":{"value":"${DS_PROM}"}},
   {"name":"job","type":"query","datasource":"$ds","query":"label_values(up, job)"},
-  {"name":"step","type":"interval","query":"1m,5m"}
+  {"name":"step","type":"interval","query":"1m,5m"},
+  {"name":"env","type":"custom","query":"Production : prod, staging,a\\,b","includeAll":true,"allValue":".*"},
+  {"name":"region","type":"custom","query":"ignored","options":[{"value":"$__all"},{"value":"eu"},{"value":"us"}]},
+  {"name":"tenant","type":"constant","query":"acme"},
+  {"name":"free","type":"textbox","query":"x"},
+  {"name":"level","type":"query","datasource":{"type":"loki","uid":"loki"},"query":{"type":1,"label":"level","stream":"{app=\"shop\"}","refId":"LokiVariableQueryEditor-VariableQuery"}},
+  {"name":"lnames","type":"query","datasource":{"type":"loki","uid":"loki"},"query":{"type":0,"refId":"LokiVariableQueryEditor-VariableQuery"}},
+  {"name":"inst","type":"query","datasource":{"type":"prometheus","uid":"prometheus"},"query":{"qryType":1,"metric":"up","label":"instance","refId":"PrometheusVariableQueryEditor-VariableQuery"}}
+ ]},
+ "annotations":{"list":[
+  {"name":"Annotations & Alerts","builtIn":1,"datasource":{"type":"grafana","uid":"-- Grafana --"},"enable":true},
+  {"name":"Deploys","datasource":{"type":"prometheus","uid":"prometheus"},"enable":false,"expr":"changes(deploy_info[1m]) > 0"},
+  {"name":"Errors","datasource":{"type":"loki","uid":"loki"},"target":{"expr":"{app=\"shop\"} |= \"panic\""}},
+  {"name":"Empty","datasource":{"type":"prometheus","uid":"prometheus"}}
  ]},
  "panels":[
   {"id":1,"type":"row","collapsed":true,"panels":[
@@ -168,8 +182,29 @@ func TestDashboardEdgeCases(t *testing.T) {
 	if titles[8] != "Shared CPU" {
 		t.Errorf("library panel title = %q", titles[8])
 	}
-	if len(d.Variables) != 1 || d.Variables[0].DatasourceUID != "$ds" || d.Variables[0].DatasourceType != "prometheus" {
-		t.Errorf("variables = %+v", d.Variables)
+	// Query variables keep their datasource; custom and constant ones
+	// their values; datasource and interval variables are left out.
+	wantVars := []collect.Variable{
+		{Name: "job", Type: "query", Query: "label_values(up, job)", DatasourceUID: "$ds", DatasourceType: "prometheus"},
+		{Name: "env", Type: "custom", Query: `Production : prod, staging,a\,b`, Values: []string{"prod", "staging", "a,b"}, IncludeAll: true, AllValue: ".*"},
+		{Name: "region", Type: "custom", Query: "ignored", Values: []string{"eu", "us"}},
+		{Name: "tenant", Type: "constant", Query: "acme", Values: []string{"acme"}},
+		{Name: "free", Type: "textbox", Query: "x"},
+		{Name: "level", Type: "query", Query: `label_values({app="shop"}, level)`, DatasourceUID: "loki", DatasourceType: "loki"},
+		{Name: "lnames", Type: "query", DatasourceUID: "loki", DatasourceType: "loki"},
+		{Name: "inst", Type: "query", Query: "label_values(up, instance)", DatasourceUID: "prometheus", DatasourceType: "prometheus"},
+	}
+	if !reflect.DeepEqual(d.Variables, wantVars) {
+		t.Errorf("variables\n got  %+v\n want %+v", d.Variables, wantVars)
+	}
+	// Annotations: the built-in and the empty one are left out; a disabled
+	// one is kept (viewers can turn it on).
+	wantAnn := []collect.Annotation{
+		{Name: "Deploys", Expr: "changes(deploy_info[1m]) > 0", DatasourceUID: "prometheus", DatasourceType: "prometheus"},
+		{Name: "Errors", Expr: `{app="shop"} |= "panic"`, DatasourceUID: "loki", DatasourceType: "loki", Enabled: true},
+	}
+	if !reflect.DeepEqual(d.Annotations, wantAnn) {
+		t.Errorf("annotations\n got  %+v\n want %+v", d.Annotations, wantAnn)
 	}
 }
 

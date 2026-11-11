@@ -55,6 +55,23 @@ type rawVariable struct {
 	Type       string          `json:"type"`
 	Query      json.RawMessage `json:"query"`
 	Datasource json.RawMessage `json:"datasource"`
+	IncludeAll bool            `json:"includeAll"`
+	AllValue   string          `json:"allValue"`
+	Options    []struct {
+		Value json.RawMessage `json:"value"`
+	} `json:"options"`
+}
+
+type rawAnnotation struct {
+	Name       string          `json:"name"`
+	Datasource json.RawMessage `json:"datasource"`
+	Enable     *bool           `json:"enable"`
+	BuiltIn    int             `json:"builtIn"`
+	Expr       string          `json:"expr"`
+	Target     *struct {
+		Expr  string          `json:"expr"`
+		Query json.RawMessage `json:"query"`
+	} `json:"target"`
 }
 
 type rawDashboard struct {
@@ -65,6 +82,9 @@ type rawDashboard struct {
 		Templating struct {
 			List []rawVariable `json:"list"`
 		} `json:"templating"`
+		Annotations struct {
+			List []rawAnnotation `json:"list"`
+		} `json:"annotations"`
 	} `json:"dashboard"`
 }
 
@@ -173,18 +193,47 @@ func (c *Client) convert(ctx context.Context, raw rawDashboard, h searchHit, dss
 	}
 
 	for _, v := range db.Templating.List {
-		if v.Type != "query" {
+		cv := collect.Variable{Name: v.Name, Type: v.Type, Query: variableQuery(v.Query), IncludeAll: v.IncludeAll, AllValue: v.AllValue}
+		switch v.Type {
+		case "query":
+			ds := r.resolve(v.Datasource)
+			if ds.needsList {
+				return collect.Dashboard{}, fmt.Errorf("variable %q: datasource %s %w", v.Name, ds.describe(), errNoDatasourceList)
+			}
+			cv.DatasourceUID, cv.DatasourceType = ds.uid, ds.typ
+		case "custom", "constant":
+			cv.Values = variableValues(v)
+		case "textbox":
+		default:
+			continue // datasource, interval, adhoc: not a matcher value
+		}
+		d.Variables = append(d.Variables, cv)
+	}
+
+	for _, a := range db.Annotations.List {
+		if a.BuiltIn != 0 {
 			continue
 		}
-		ds := r.resolve(v.Datasource)
-		if ds.needsList {
-			return collect.Dashboard{}, fmt.Errorf("variable %q: datasource %s %w", v.Name, ds.describe(), errNoDatasourceList)
+		expr := a.Expr
+		if expr == "" && a.Target != nil {
+			expr = a.Target.Expr
+			if expr == "" {
+				expr = stringOrQuery(a.Target.Query)
+			}
 		}
-		d.Variables = append(d.Variables, collect.Variable{
-			Name:           v.Name,
-			Query:          stringOrQuery(v.Query),
-			DatasourceUID:  ds.uid,
-			DatasourceType: ds.typ,
+		if expr == "" {
+			continue
+		}
+		ds := r.resolve(a.Datasource)
+		if ds.skip || ds.mixed {
+			continue
+		}
+		if ds.needsList {
+			return collect.Dashboard{}, fmt.Errorf("annotation %q: datasource %s %w", a.Name, ds.describe(), errNoDatasourceList)
+		}
+		d.Annotations = append(d.Annotations, collect.Annotation{
+			Name: a.Name, Expr: expr, DatasourceUID: ds.uid, DatasourceType: ds.typ,
+			Enabled: a.Enable == nil || *a.Enable,
 		})
 	}
 
@@ -404,6 +453,95 @@ func stringOrQuery(raw json.RawMessage) string {
 	}
 	if json.Unmarshal(raw, &o) == nil {
 		return o.Query
+	}
+	return ""
+}
+
+// variableValues returns a custom or constant variable's values: its saved
+// options, else its query (constant: the value; custom: comma-separated,
+// "text : value" pairs, "\\," for a literal comma).
+func variableValues(v rawVariable) []string {
+	var out []string
+	for _, o := range v.Options {
+		var s string
+		if json.Unmarshal(o.Value, &s) == nil {
+			if s != "$__all" {
+				out = append(out, s)
+			}
+			continue
+		}
+		var ss []string
+		if json.Unmarshal(o.Value, &ss) == nil {
+			out = append(out, ss...)
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	q := stringOrQuery(v.Query)
+	if v.Type == "constant" {
+		return []string{q}
+	}
+	var cur strings.Builder
+	flush := func() {
+		item := strings.TrimSpace(cur.String())
+		cur.Reset()
+		if _, value, ok := strings.Cut(item, " : "); ok {
+			item = strings.TrimSpace(value)
+		}
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	for i := 0; i < len(q); i++ {
+		switch {
+		case q[i] == '\\' && i+1 < len(q) && q[i+1] == ',':
+			cur.WriteByte(',')
+			i++
+		case q[i] == ',':
+			flush()
+		default:
+			cur.WriteByte(q[i])
+		}
+	}
+	flush()
+	return out
+}
+
+// variableQuery reads a variable's query: a string, an object with a
+// "query" string, or the structured form newer variable editors save
+// without one. Loki: {"type": 1 | "labelValues", "label": "level",
+// "stream": "{app=\"shop\"}"} (type 0 / "labelNames" lists label names
+// and reads no stream). Prometheus: {"qryType": 1, "metric": "up",
+// "label": "job"} (label values). Both become the label_values() text
+// the string form would hold; anything else is returned as stringOrQuery
+// reads it.
+func variableQuery(raw json.RawMessage) string {
+	if q := stringOrQuery(raw); q != "" {
+		return q
+	}
+	var o struct {
+		Type    json.RawMessage `json:"type"`
+		QryType *int            `json:"qryType"`
+		Label   string          `json:"label"`
+		Stream  string          `json:"stream"`
+		Metric  string          `json:"metric"`
+	}
+	if json.Unmarshal(raw, &o) != nil || o.Label == "" {
+		return ""
+	}
+	t := strings.Trim(strings.TrimSpace(string(o.Type)), `"`)
+	switch {
+	case t == "1" || t == "labelValues":
+		if o.Stream != "" {
+			return "label_values(" + o.Stream + ", " + o.Label + ")"
+		}
+		return "label_values(" + o.Label + ")"
+	case o.QryType != nil && *o.QryType == 1:
+		if o.Metric != "" {
+			return "label_values(" + o.Metric + ", " + o.Label + ")"
+		}
+		return "label_values(" + o.Label + ")"
 	}
 	return ""
 }
