@@ -19,7 +19,7 @@ To regenerate, download those files from `manifests/` at a pinned commit into
 a directory and run:
 
 ```sh
-go run ./pkg/parse/internal/corpusgen <dir> > pkg/parse/testdata/promql-corpus/kube-prometheus.json
+go run ./pkg/parse/internal/corpusgen kube-prometheus <dir> > pkg/parse/testdata/promql-corpus/kube-prometheus.json
 ```
 
 Update the commit above when you do.
