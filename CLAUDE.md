@@ -25,7 +25,7 @@ make race      # tests with -race
 - `check` fails closed: a config it can't evaluate is a failure.
 - Commits are authored as Jason Vance.
 
-## Status (Nov 10, 2026)
+## Status (Nov 11, 2026)
 
 Done:
 - CLI skeleton.
@@ -57,6 +57,9 @@ Sprint 1 (Dec 1-12, started early):
 
 Sprint 1 is closed: PRs #1-#10 merged, CI green, and `v0.0.1-rc.1` released (6 archives, `checksums.txt` verified with `cosign verify-blob`).
 
-Next: Sprint 2 (`docs/tasks/2026-11-sprint2.md`), starting with the PromQL extractor.
+Sprint 2 (`docs/tasks/2026-11-sprint2.md`):
+1. Done Nov 11: PromQL extractor in `pkg/parse/promql.go` (`parse.PromQL`, upstream parser with experimental functions on). One `Ref` per selector with matchers, `Grouping` (by, on, group_left/right includes, label_replace/label_join sources, sort_by_label, `le` under histogram_quantile), `Without` (without, ignoring), `Created`, `Subquery`, `AllLabels` (vector match without `on()`, variable label names, parse failures). An aggregation that keeps only `by()` labels stops outer needs from reaching below it; `without` and topk/bottomk/limitk pass them through. Grafana variables are substituted first: built-in time variables and ranges/offsets become `5m`; a variable in a metric or label name makes the Ref `Assumed` with a reason; one in a matcher value only sets `Matcher.Variable`. A parse failure returns the error plus an assumed `AllLabels` Ref for every name that could be a metric. Corpus test over kube-prometheus rules and dashboards plus the lab (`pkg/parse/testdata/promql-corpus`, baseline 1.0); `FuzzPromQL`.
+
+Next: item 2, the LogQL extractor.
 
 Run `scripts/capture-fixtures.sh` against the lab first and build against those fixtures.
