@@ -45,9 +45,10 @@ type rawPanel struct {
 }
 
 type rawTarget struct {
-	Datasource json.RawMessage `json:"datasource"`
-	Expr       string          `json:"expr"`
-	Query      json.RawMessage `json:"query"`
+	Datasource   json.RawMessage `json:"datasource"`
+	Expr         string          `json:"expr"`
+	Query        json.RawMessage `json:"query"`
+	LegendFormat string          `json:"legendFormat"`
 }
 
 type rawVariable struct {
@@ -56,6 +57,7 @@ type rawVariable struct {
 	Query      json.RawMessage `json:"query"`
 	Datasource json.RawMessage `json:"datasource"`
 	IncludeAll bool            `json:"includeAll"`
+	Multi      bool            `json:"multi"`
 	AllValue   string          `json:"allValue"`
 	Options    []struct {
 		Value json.RawMessage `json:"value"`
@@ -68,7 +70,12 @@ type rawAnnotation struct {
 	Enable     *bool           `json:"enable"`
 	BuiltIn    int             `json:"builtIn"`
 	Expr       string          `json:"expr"`
-	Target     *struct {
+	// Prometheus and Loki annotations: templates and label names shown on
+	// each annotation.
+	TitleFormat string `json:"titleFormat"`
+	TextFormat  string `json:"textFormat"`
+	TagKeys     string `json:"tagKeys"`
+	Target      *struct {
 		Expr  string          `json:"expr"`
 		Query json.RawMessage `json:"query"`
 	} `json:"target"`
@@ -193,7 +200,7 @@ func (c *Client) convert(ctx context.Context, raw rawDashboard, h searchHit, dss
 	}
 
 	for _, v := range db.Templating.List {
-		cv := collect.Variable{Name: v.Name, Type: v.Type, Query: variableQuery(v.Query), IncludeAll: v.IncludeAll, AllValue: v.AllValue}
+		cv := collect.Variable{Name: v.Name, Type: v.Type, Query: variableQuery(v.Query), IncludeAll: v.IncludeAll, Multi: v.Multi, AllValue: v.AllValue}
 		switch v.Type {
 		case "query":
 			ds := r.resolve(v.Datasource)
@@ -233,7 +240,8 @@ func (c *Client) convert(ctx context.Context, raw rawDashboard, h searchHit, dss
 		}
 		d.Annotations = append(d.Annotations, collect.Annotation{
 			Name: a.Name, Expr: expr, DatasourceUID: ds.uid, DatasourceType: ds.typ,
-			Enabled: a.Enable == nil || *a.Enable,
+			Enabled:     a.Enable == nil || *a.Enable,
+			TitleFormat: a.TitleFormat, TextFormat: a.TextFormat, TagKeys: a.TagKeys,
 		})
 	}
 
@@ -328,7 +336,7 @@ func (r *resolver) panelQueries(p rawPanel) ([]collect.PanelQuery, error) {
 		if ds.needsList {
 			return nil, fmt.Errorf("datasource %s %w", ds.describe(), errNoDatasourceList)
 		}
-		out = append(out, collect.PanelQuery{DatasourceUID: ds.uid, DatasourceType: ds.typ, Expr: expr})
+		out = append(out, collect.PanelQuery{DatasourceUID: ds.uid, DatasourceType: ds.typ, Expr: expr, Legend: t.LegendFormat})
 	}
 	return out, nil
 }

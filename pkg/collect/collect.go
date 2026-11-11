@@ -113,6 +113,9 @@ type PanelQuery struct {
 	DatasourceUID  string
 	DatasourceType string // "prometheus", "loki", ...
 	Expr           string
+	// Legend is the target's legendFormat: {{label}} templates name the
+	// labels the panel shows.
+	Legend string
 }
 
 // Variable is a dashboard template variable. A query variable's query can
@@ -131,6 +134,10 @@ type Variable struct {
 	// value (often ".*"), which can match values Values doesn't list.
 	IncludeAll bool
 	AllValue   string
+	// Multi: several values can be selected at once. Grafana's Prometheus
+	// and Loki datasources regex-escape the values of a Multi or IncludeAll
+	// variable by default.
+	Multi bool
 }
 
 // Annotation is one annotation query on a dashboard.
@@ -140,6 +147,9 @@ type Annotation struct {
 	DatasourceUID  string
 	DatasourceType string
 	Enabled        bool
+	// TitleFormat and TextFormat are {{label}} templates; TagKeys is a
+	// comma-separated list of label names shown as tags.
+	TitleFormat, TextFormat, TagKeys string
 }
 
 // DashboardView is one load of a dashboard's JSON.

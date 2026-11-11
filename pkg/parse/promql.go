@@ -67,6 +67,9 @@ type scope struct {
 	grouping, without, created []string
 	reasons                    []string
 	subquery, allLabels        bool
+	// reduced: this selector's labels don't all reach the result (see
+	// Ref.ResultLabels).
+	reduced bool
 }
 
 func (s scope) with(f func(*scope)) scope {
@@ -115,13 +118,13 @@ func (w *promWalker) walk(node parser.Node, s scope) {
 	case *parser.NumberLiteral, *parser.StringLiteral:
 	case *parser.AggregateExpr:
 		// A parameter (topk's k, quantile's φ) is evaluated on its own,
-		// outside the grouping.
-		w.walk(n.Param, s)
+		// outside the grouping, and none of its labels reach the result.
+		w.walk(n.Param, s.with(func(s *scope) { s.reduced = true }))
 		inner := s
 		if !n.Without && !keepsInputLabels(n.Op) {
 			// Only the by(...) labels survive this aggregation, so what
 			// enclosing expressions need can't reach below it.
-			inner = scope{subquery: s.subquery}
+			inner = scope{subquery: s.subquery, reduced: true}
 		}
 		w.walk(n.Expr, inner.with(func(s *scope) {
 			labels := w.labelNames(s, n.Grouping, "grouping")
@@ -154,12 +157,21 @@ func (w *promWalker) walk(node parser.Node, s scope) {
 			lhs, rhs = both, both
 			include := func(s *scope) {
 				s.grouping = append(s.grouping, w.labelNames(s, vm.Include, "group_left/group_right")...)
+				s.reduced = true // only the included labels reach the result
 			}
-			switch vm.Card {
-			case parser.CardManyToOne: // group_left: labels come from the right
+			reduce := func(s *scope) { s.reduced = true }
+			switch {
+			case vm.Card == parser.CardManyToOne: // group_left: labels come from the right
 				rhs = both.with(include)
-			case parser.CardOneToMany: // group_right: from the left
+			case vm.Card == parser.CardOneToMany: // group_right: from the left
 				lhs = both.with(include)
+			case n.Op == parser.LOR: // both sides' series are returned
+			case n.Op == parser.LAND || n.Op == parser.LUNLESS:
+				rhs = both.with(reduce) // only filters the left side
+			case vm.On: // one-to-one on(...): the result keeps only those labels
+				lhs, rhs = both.with(reduce), both.with(reduce)
+			default: // one-to-one: the result carries the left side's labels
+				rhs = both.with(reduce)
 			}
 		}
 		w.walk(n.LHS, lhs)
@@ -203,6 +215,14 @@ func (w *promWalker) walkCall(n *parser.Call, s scope) {
 			}
 		})
 		w.walk(n.Args[0], inner)
+		return
+	case name == "absent" || name == "absent_over_time" || name == "scalar":
+		// The result's labels come from the selector's equality matchers
+		// (absent) or there are none (scalar).
+		inner := s.with(func(s *scope) { s.reduced = true })
+		for _, a := range n.Args {
+			w.walk(a, inner)
+		}
 		return
 	case name == "info" && len(n.Args) >= 1:
 		w.walkInfo(n, s)
@@ -314,6 +334,7 @@ func (w *promWalker) selectorRef(vs *parser.VectorSelector, s scope) Ref {
 	r.Without = sortedSet(s.without)
 	r.Created = sortedSet(s.created)
 	r.AllLabels = allLabels
+	r.ResultLabels = !s.reduced
 	r.Reasons = sortedSet(reasons)
 	r.Assumed = len(r.Reasons) > 0
 	return r

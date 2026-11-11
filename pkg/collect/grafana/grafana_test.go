@@ -100,7 +100,7 @@ const edgeDashboard = `{"dashboard":{"uid":"edge","title":"Edge cases",
   {"name":"job","type":"query","datasource":"$ds","query":"label_values(up, job)"},
   {"name":"step","type":"interval","query":"1m,5m"},
   {"name":"env","type":"custom","query":"Production : prod, staging,a\\,b","includeAll":true,"allValue":".*"},
-  {"name":"region","type":"custom","query":"ignored","options":[{"value":"$__all"},{"value":"eu"},{"value":"us"}]},
+  {"name":"region","type":"custom","query":"ignored","multi":true,"options":[{"value":"$__all"},{"value":"eu"},{"value":"us"}]},
   {"name":"tenant","type":"constant","query":"acme"},
   {"name":"free","type":"textbox","query":"x"},
   {"name":"level","type":"query","datasource":{"type":"loki","uid":"loki"},"query":{"type":1,"label":"level","stream":"{app=\"shop\"}","refId":"LokiVariableQueryEditor-VariableQuery"}},
@@ -109,13 +109,13 @@ const edgeDashboard = `{"dashboard":{"uid":"edge","title":"Edge cases",
  ]},
  "annotations":{"list":[
   {"name":"Annotations & Alerts","builtIn":1,"datasource":{"type":"grafana","uid":"-- Grafana --"},"enable":true},
-  {"name":"Deploys","datasource":{"type":"prometheus","uid":"prometheus"},"enable":false,"expr":"changes(deploy_info[1m]) > 0"},
+  {"name":"Deploys","datasource":{"type":"prometheus","uid":"prometheus"},"enable":false,"expr":"changes(deploy_info[1m]) > 0","titleFormat":"Deploy {{ version }}","textFormat":"{{job}}","tagKeys":"job,instance"},
   {"name":"Errors","datasource":{"type":"loki","uid":"loki"},"target":{"expr":"{app=\"shop\"} |= \"panic\""}},
   {"name":"Empty","datasource":{"type":"prometheus","uid":"prometheus"}}
  ]},
  "panels":[
   {"id":1,"type":"row","collapsed":true,"panels":[
-    {"id":2,"title":"in row, default ds","datasource":null,"targets":[{"expr":"up"}]}]},
+    {"id":2,"title":"in row, default ds","datasource":null,"targets":[{"expr":"up","legendFormat":"{{instance}}"}]}]},
   {"id":3,"title":"legacy name","datasource":"Loki","targets":[{"expr":"{app=\"x\"}"}]},
   {"id":4,"title":"mixed","datasource":{"uid":"-- Mixed --"},"targets":[
     {"datasource":{"type":"loki","uid":"loki"},"expr":"{app=\"y\"}"},
@@ -179,6 +179,9 @@ func TestDashboardEdgeCases(t *testing.T) {
 	if _, ok := panels[1]; ok {
 		t.Error("row kept as a panel")
 	}
+	if l := d.Panels[0].Queries[0].Legend; d.Panels[0].ID != 2 || l != "{{instance}}" {
+		t.Errorf("panel 2 legend = %q", l)
+	}
 	if titles[8] != "Shared CPU" {
 		t.Errorf("library panel title = %q", titles[8])
 	}
@@ -187,7 +190,7 @@ func TestDashboardEdgeCases(t *testing.T) {
 	wantVars := []collect.Variable{
 		{Name: "job", Type: "query", Query: "label_values(up, job)", DatasourceUID: "$ds", DatasourceType: "prometheus"},
 		{Name: "env", Type: "custom", Query: `Production : prod, staging,a\,b`, Values: []string{"prod", "staging", "a,b"}, IncludeAll: true, AllValue: ".*"},
-		{Name: "region", Type: "custom", Query: "ignored", Values: []string{"eu", "us"}},
+		{Name: "region", Type: "custom", Query: "ignored", Values: []string{"eu", "us"}, Multi: true},
 		{Name: "tenant", Type: "constant", Query: "acme", Values: []string{"acme"}},
 		{Name: "free", Type: "textbox", Query: "x"},
 		{Name: "level", Type: "query", Query: `label_values({app="shop"}, level)`, DatasourceUID: "loki", DatasourceType: "loki"},
@@ -200,7 +203,8 @@ func TestDashboardEdgeCases(t *testing.T) {
 	// Annotations: the built-in and the empty one are left out; a disabled
 	// one is kept (viewers can turn it on).
 	wantAnn := []collect.Annotation{
-		{Name: "Deploys", Expr: "changes(deploy_info[1m]) > 0", DatasourceUID: "prometheus", DatasourceType: "prometheus"},
+		{Name: "Deploys", Expr: "changes(deploy_info[1m]) > 0", DatasourceUID: "prometheus", DatasourceType: "prometheus",
+			TitleFormat: "Deploy {{ version }}", TextFormat: "{{job}}", TagKeys: "job,instance"},
 		{Name: "Errors", Expr: `{app="shop"} |= "panic"`, DatasourceUID: "loki", DatasourceType: "loki", Enabled: true},
 	}
 	if !reflect.DeepEqual(d.Annotations, wantAnn) {
