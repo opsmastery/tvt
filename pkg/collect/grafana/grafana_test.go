@@ -65,7 +65,7 @@ func TestDashboardsFixture(t *testing.T) {
 	}
 
 	shop := m["shop-overview"]
-	if shop.Title != "Shop Overview" || shop.Folder != "tvt-lab" || len(shop.Panels) != 6 {
+	if shop.Title != "Shop Overview" || shop.Folder != "tvt-lab" || len(shop.Panels) != 8 {
 		t.Fatalf("shop-overview = %+v", shop)
 	}
 	p1 := shop.Panels[0].Queries[0]
@@ -476,5 +476,36 @@ func TestOrgID(t *testing.T) {
 	id, err := New(srv.URL, "").OrgID(context.Background())
 	if err != nil || id != 3 {
 		t.Errorf("OrgID = %d, %v", id, err)
+	}
+}
+
+// Lines stamped after now (clock skew, or a log newer than the scan's start)
+// must not make coverage negative or above 1.
+func TestRouterLogCoverageIgnoresFutureLines(t *testing.T) {
+	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	line := func(at time.Time) string {
+		return `logger=context userId=1 orgId=1 uname=admin t=` + at.Format(time.RFC3339Nano) +
+			` level=info msg="Request Completed" method=GET path=/api/health status=200 referer= handler=/api/health` + "\n"
+	}
+	path := filepath.Join(t.TempDir(), "grafana.log")
+	since := now.Add(-10 * time.Hour)
+	for name, lines := range map[string][]time.Time{
+		"only future lines":    {now.Add(time.Hour), now.Add(2 * time.Hour)},
+		"half the window":      {now.Add(-5 * time.Hour), now.Add(time.Hour)},
+		"future first in file": {now.Add(3 * time.Hour), now.Add(-5 * time.Hour)},
+	} {
+		var b strings.Builder
+		for _, at := range lines {
+			b.WriteString(line(at))
+		}
+		if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rl := &RouterLog{Paths: []string{path}, Now: func() time.Time { return now }}
+		got, err := rl.Coverage(context.Background(), since)
+		want := map[string]float64{"only future lines": 0, "half the window": 0.5, "future first in file": 0.5}[name]
+		if err != nil || got != want {
+			t.Errorf("%s: coverage = %v, %v; want %v", name, got, err, want)
+		}
 	}
 }
