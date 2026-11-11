@@ -14,6 +14,13 @@ type Expr struct {
 // datasource (its own, or the nearest enclosing one) isn't Loki or another
 // non-Prometheus type.
 func DashboardExprs(source string, v any) []Expr {
+	return DashboardExprsOfType(source, v, "prometheus")
+}
+
+// DashboardExprsOfType is DashboardExprs for another datasource type. An
+// expression with no datasource type anywhere above it counts as
+// Prometheus.
+func DashboardExprsOfType(source string, v any, want string) []Expr {
 	var out []Expr
 	var walk func(v any, path string, dsType string)
 	walk = func(v any, path string, dsType string) {
@@ -24,7 +31,7 @@ func DashboardExprs(source string, v any) []Expr {
 					dsType = t
 				}
 			}
-			if e, ok := n["expr"].(string); ok && e != "" && (dsType == "" || dsType == "prometheus") {
+			if e, ok := n["expr"].(string); ok && e != "" && (dsType == want || (dsType == "" && want == "prometheus")) {
 				out = append(out, Expr{Source: source + path, Expr: e})
 			}
 			for k, c := range n {

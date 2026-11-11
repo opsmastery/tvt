@@ -1,32 +1,25 @@
 package parse
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-// LogStreamSelectors returns the stream selectors ({app="shop", ...}) in a
-// LogQL query, one Ref per selector with only Matchers set.
-//
-// It is a stopgap until the LogQL extractor (ADR 0005) exists: it finds
-// selectors but not the labels a query filters, groups or formats by, so a
-// caller must treat each Ref as reading every label of its streams. It skips
-// quoted strings and # comments, so the braces in a line_format template
-// are not mistaken for selectors.
-//
-// A query with no selector, or with a selector it can't read, is an error;
-// the caller must then assume the query reads every stream.
-func LogStreamSelectors(query string) ([]Ref, error) {
-	var refs []Ref
+// scanStreamSelectors finds the stream selectors in text without parsing
+// the rest, for LogQL's fallback when a query doesn't parse. It skips
+// quoted strings and # comments (so braces in a line_format template are
+// not selectors). A selector it can't read comes back with no matchers,
+// meaning every stream.
+func scanStreamSelectors(query string) [][]Matcher {
+	var out [][]Matcher
 	for i := 0; i < len(query); {
-		switch c := query[i]; c {
+		switch query[i] {
 		case '"', '`':
 			end, err := skipString(query, i)
 			if err != nil {
-				return nil, err
+				return out
 			}
 			i = end
 		case '#':
@@ -38,20 +31,19 @@ func LogStreamSelectors(query string) ([]Ref, error) {
 		case '{':
 			ms, end, err := parseSelector(query, i)
 			if err != nil {
-				return nil, err
+				// Unreadable: a selector with no matchers, which stands
+				// for every stream.
+				out = append(out, nil)
+				i++
+				continue
 			}
-			refs = append(refs, Ref{Matchers: ms})
+			out = append(out, ms)
 			i = end
-		case '}':
-			return nil, fmt.Errorf("logql: unexpected '}' at offset %d", i)
 		default:
 			i++
 		}
 	}
-	if len(refs) == 0 {
-		return nil, errors.New("logql: no stream selector")
-	}
-	return refs, nil
+	return out
 }
 
 // CanonicalSelector formats matchers as a stream selector with matchers
@@ -151,9 +143,21 @@ func skipString(q string, i int) (int, error) {
 	return 0, fmt.Errorf("logql: unterminated string at offset %d", i)
 }
 
+// skipSpace skips whitespace and # comments.
 func skipSpace(q string, i int) int {
-	for i < len(q) && (q[i] == ' ' || q[i] == '\t' || q[i] == '\n' || q[i] == '\r') {
-		i++
+	for i < len(q) {
+		switch q[i] {
+		case ' ', '\t', '\n', '\r':
+			i++
+		case '#':
+			nl := strings.IndexByte(q[i:], '\n')
+			if nl < 0 {
+				return len(q)
+			}
+			i += nl + 1
+		default:
+			return i
+		}
 	}
 	return i
 }
