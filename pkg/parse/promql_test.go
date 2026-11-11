@@ -88,7 +88,7 @@ func TestPromQL(t *testing.T) {
 			Metric: "x", Matchers: []Matcher{{Label: "job", Op: MatchEqual, Value: "[[job]]", Variable: true}},
 		}}},
 		{"bracket var as whole query", `[[metric]]`, []Ref{{
-			Matchers: []Matcher{re("__name__", ".*")},
+			Matchers: []Matcher{{Label: "__name__", Op: MatchEqual, Value: "[[metric]]", Variable: true}},
 			Assumed:  true, Reasons: []string{"metric name [[metric]] comes from variable [[metric]]"},
 		}}},
 		{"bracket var grouping", `sum by ([[label]]) (up)`, []Ref{{
@@ -101,15 +101,15 @@ func TestPromQL(t *testing.T) {
 			Reasons: []string{"matcher label $label comes from variable $label"},
 		}}},
 		{"metric name var", `rate(${prefix}_requests_total[5m])`, []Ref{{
-			Matchers: []Matcher{re("__name__", ".*_requests_total")},
+			Matchers: []Matcher{{Label: "__name__", Op: MatchEqual, Value: "${prefix}_requests_total", Variable: true}},
 			Assumed:  true, Reasons: []string{"metric name ${prefix}_requests_total comes from variable ${prefix}"},
 		}}},
 		{"empty-able prefix", `${prefix}requests_total`, []Ref{{
-			Matchers: []Matcher{re("__name__", ".*requests_total")},
+			Matchers: []Matcher{{Label: "__name__", Op: MatchEqual, Value: "${prefix}requests_total", Variable: true}},
 			Assumed:  true, Reasons: []string{"metric name ${prefix}requests_total comes from variable ${prefix}"},
 		}}},
 		{"empty-able suffix", `node_cpu$suffix`, []Ref{{
-			Matchers: []Matcher{re("__name__", "node_cpu.*")},
+			Matchers: []Matcher{{Label: "__name__", Op: MatchEqual, Value: "node_cpu$suffix", Variable: true}},
 			Assumed:  true, Reasons: []string{"metric name node_cpu$suffix comes from variable $suffix"},
 		}}},
 		{"grouping var", `sum by ($group) (x)`, []Ref{{

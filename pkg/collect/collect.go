@@ -87,12 +87,15 @@ type Rule struct {
 
 // Dashboard is a Grafana dashboard.
 type Dashboard struct {
-	UID        string
-	Title      string
-	Folder     string
-	Panels     []Panel
-	Variables  []Variable
-	LastViewed time.Time // zero when the edition doesn't expose view stats
+	UID       string
+	Title     string
+	Folder    string
+	Panels    []Panel
+	Variables []Variable
+	// Annotations are the dashboard's annotation queries against a backend
+	// (built-in Grafana annotations are left out).
+	Annotations []Annotation
+	LastViewed  time.Time // zero when the edition doesn't expose view stats
 }
 
 // Panel is one dashboard panel and the queries behind it.
@@ -112,12 +115,31 @@ type PanelQuery struct {
 	Expr           string
 }
 
-// Variable is a dashboard template variable; its query can reference signals too.
+// Variable is a dashboard template variable. A query variable's query can
+// reference signals too; the others are collected for the values a
+// matcher like {route=~"$route"} can take.
 type Variable struct {
 	Name           string
+	Type           string // "query", "custom", "constant", "textbox", ...
 	Query          string
 	DatasourceUID  string
 	DatasourceType string
+	// Values are the values a custom or constant variable offers. Empty for
+	// other types, whose values come from a backend or the viewer.
+	Values []string
+	// IncludeAll: the variable has an "All" option. AllValue is its custom
+	// value (often ".*"), which can match values Values doesn't list.
+	IncludeAll bool
+	AllValue   string
+}
+
+// Annotation is one annotation query on a dashboard.
+type Annotation struct {
+	Name           string
+	Expr           string
+	DatasourceUID  string
+	DatasourceType string
+	Enabled        bool
 }
 
 // DashboardView is one load of a dashboard's JSON.

@@ -179,7 +179,11 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		for _, p := range d.Panels {
 			queries += len(p.Queries)
 		}
-		vars += len(d.Variables)
+		for _, v := range d.Variables {
+			if v.Type == "query" {
+				vars++ // custom, constant and textbox variables are values, not consumers
+			}
+		}
 	}
 	fmt.Fprintf(out, "%-12s %s, %s, %s (org %d, as %s)\n", "grafana",
 		plural(len(in.Dashboards), "dashboard", "dashboards"), plural(queries, "panel query", "panel queries"),
@@ -234,8 +238,8 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "scan %d written to %s: %d signals, %d consumers, %d dashboard loads, log coverage %s\n",
-		id, o.DB, len(g.Signals), len(g.Consumers), loads(g), percent(g.LogCoverage))
+	fmt.Fprintf(out, "scan %d written to %s: %d signals, %d consumers, %d references, %d dashboard loads, log coverage %s\n",
+		id, o.DB, len(g.Signals), len(g.Consumers), len(g.References), loads(g), percent(g.LogCoverage))
 	return nil
 }
 
