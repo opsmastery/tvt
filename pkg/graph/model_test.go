@@ -25,3 +25,25 @@ func TestHardKeep(t *testing.T) {
 		}
 	}
 }
+
+func TestEvidence(t *testing.T) {
+	want := map[ConsumerKind]EvidenceClass{
+		ConsumerAlertRule: EvidenceDeclared, ConsumerRecordingRule: EvidenceDeclared,
+		ConsumerSLO: EvidenceDeclared, ConsumerExternal: EvidenceDeclared,
+		ConsumerDashboardPanel: EvidenceObserved, ConsumerDashboardVariable: EvidenceObserved,
+		ConsumerDashboardAnnotation: EvidenceObserved, ConsumerAdhocQuery: EvidenceObserved, ConsumerAgentQuery: EvidenceObserved,
+	}
+	for k, e := range want {
+		if got := k.Evidence(); got != e {
+			t.Errorf("%s.Evidence() = %s, want %s", k, got, e)
+		}
+	}
+	for e, decays := range map[EvidenceClass]bool{EvidenceDeclared: false, EvidenceIncident: false, EvidenceObserved: true} {
+		if !e.Valid() || e.Decays() != decays {
+			t.Errorf("%s: valid %v, decays %v", e, e.Valid(), e.Decays())
+		}
+	}
+	if EvidenceClass("").Valid() || EvidenceClass("seen").Valid() {
+		t.Error("unknown evidence class is valid")
+	}
+}

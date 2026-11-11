@@ -113,7 +113,7 @@ func TestScanLab(t *testing.T) {
 		t.Fatalf("scan: %v\n%s", err, out.String())
 	}
 	t.Log("\n" + out.String())
-	for _, want := range []string{"prom ", "5 rules", "loki         1 rule (", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "19 dashboard loads (19 in a browser)", ", 19 dashboard loads,"} {
+	for _, want := range []string{"prom ", "5 rules", "loki         1 rule (", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "19 dashboard loads (19 in a browser)", ", 19 dashboard loads,", " references, "} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -185,12 +185,23 @@ func TestScanLab(t *testing.T) {
 	}
 	assertDashboards(t, g, "1", gt)
 	assertHardKeepStreams(t, g, gt.Streams)
-	// Until the LogQL extractor exists, every stream reference is assumed:
-	// it covers all the stream's labels.
+	// Sprint 2 item 3: references resolve to the right signals, and every
+	// lab query parses, so none is a guess. No query creates a metric the
+	// scan didn't collect (all the lab's names exist).
+	assertReferences(t, g, "prom", gt)
 	for _, r := range g.refs {
-		if g.signals[r.SignalID].Kind == graph.KindStream && !r.Assumed {
-			t.Errorf("stream reference %+v is not marked assumed", r)
+		if r.Assumed {
+			t.Errorf("lab reference %+v is assumed: %v", r, r.Reasons)
 		}
+	}
+	var metricSignals int
+	for _, s := range g.signals {
+		if s.Kind == graph.KindMetric {
+			metricSignals++
+		}
+	}
+	if metricSignals != len(tsdb.Data.SeriesCountByMetricName) {
+		t.Errorf("%d metric signals, want the %d collected", metricSignals, len(tsdb.Data.SeriesCountByMetricName))
 	}
 
 	// tvt's own fetches (its login, sa-1-tvt) are not loads.
@@ -339,6 +350,8 @@ func TestScanLabMimir(t *testing.T) {
 	}
 	assertDashboards(t, g, "1", gt)
 	assertHardKeepStreams(t, g, gt.Streams)
+	// The metric only Mimir's ruler reads is protected by it.
+	assertHardKeepMetrics(t, g, "mimir", gt.Mimir.Metrics)
 }
 
 // A Mimir without cardinality analysis fails the scan with the setting to
