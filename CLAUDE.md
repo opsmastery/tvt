@@ -17,7 +17,7 @@ make race      # tests with -race
 
 ## Conventions
 
-- Go 1.26 (ADR 0004: track a supported Go release). Module: `github.com/Opsmastery-Summit/tvt`. Single static binary (`CGO_ENABLED=0`).
+- Go 1.26 minimum, built with the go1.27 toolchain (ADR 0004: the `go` directive tracks a supported release; `toolchain` tracks the newest patch). Module: `github.com/Opsmastery-Summit/tvt`. Single static binary (`CGO_ENABLED=0`).
 - Standard library first (ADR 0004). Expected dependencies: Prometheus `promql/parser`, Loki LogQL syntax (or a vendored subset), `modernc.org/sqlite`, a YAML library, and GitHub/GitLab clients.
 - Read-only against every backend. Credentials come only from env vars (`TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `TVT_LOKI_TOKEN`, `GITHUB_TOKEN`), never flags, and are never logged.
 - Collectors implement the interfaces in `pkg/collect` and are tested against recorded fixtures in `testdata/`, never a live stack.
@@ -32,7 +32,7 @@ Done:
 - Scoring and cost models with tests.
 - Graph model and SQLite schema.
 - Collector and parser interfaces.
-- CI (lint, race, build, `goreleaser check`, govulncheck, gitleaks) and a tag-triggered release workflow (goreleaser, cosign keyless signing of `checksums.txt`; `-rc.N` tags are pre-releases). `go.mod` pins `toolchain go1.26.11` for govulncheck.
+- CI (lint, race, build, `goreleaser check`, govulncheck, gitleaks) and a tag-triggered release workflow (goreleaser, cosign keyless signing of `checksums.txt`; `-rc.N` tags are pre-releases). `go.mod` pins `toolchain go1.27.4`, which CI, govulncheck and releases use.
 - Lab running on Jason's Mac since Nov 8, so 30 days of history arrives around Dec 8.
 
 Phase 0 spike findings:
