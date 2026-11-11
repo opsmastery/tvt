@@ -2,7 +2,7 @@ module github.com/Opsmastery-Summit/tvt
 
 go 1.26.7
 
-toolchain go1.26.11
+toolchain go1.27.4
 
 require (
 	github.com/prometheus/prometheus v0.316.0
