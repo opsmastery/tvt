@@ -437,6 +437,12 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 
 	// Streams: keep_high is read by a viewed dashboard; route_cold by
 	// nothing.
+	for key := range groundTruthConflicts {
+		e, ok := gt.Streams[key]
+		if !ok || e.Class != "route_cold" {
+			t.Errorf("groundTruthConflicts stream %s is no longer route_cold: remove it from groundTruthConflicts", key)
+		}
+	}
 	for key, e := range gt.Streams {
 		labels := streamLabels(t, key)
 		var viewed, read bool
