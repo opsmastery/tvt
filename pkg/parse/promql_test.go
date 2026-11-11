@@ -2,6 +2,7 @@ package parse
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -88,7 +89,7 @@ func TestPromQL(t *testing.T) {
 			Metric: "x", Matchers: []Matcher{{Label: "job", Op: MatchEqual, Value: "[[job]]", Variable: true}},
 		}}},
 		{"bracket var as whole query", `[[metric]]`, []Ref{{
-			Matchers: []Matcher{re("__name__", ".*")},
+			Matchers: []Matcher{{Label: "__name__", Op: MatchEqual, Value: "[[metric]]", Variable: true}},
 			Assumed:  true, Reasons: []string{"metric name [[metric]] comes from variable [[metric]]"},
 		}}},
 		{"bracket var grouping", `sum by ([[label]]) (up)`, []Ref{{
@@ -101,15 +102,15 @@ func TestPromQL(t *testing.T) {
 			Reasons: []string{"matcher label $label comes from variable $label"},
 		}}},
 		{"metric name var", `rate(${prefix}_requests_total[5m])`, []Ref{{
-			Matchers: []Matcher{re("__name__", ".*_requests_total")},
+			Matchers: []Matcher{{Label: "__name__", Op: MatchEqual, Value: "${prefix}_requests_total", Variable: true}},
 			Assumed:  true, Reasons: []string{"metric name ${prefix}_requests_total comes from variable ${prefix}"},
 		}}},
 		{"empty-able prefix", `${prefix}requests_total`, []Ref{{
-			Matchers: []Matcher{re("__name__", ".*requests_total")},
+			Matchers: []Matcher{{Label: "__name__", Op: MatchEqual, Value: "${prefix}requests_total", Variable: true}},
 			Assumed:  true, Reasons: []string{"metric name ${prefix}requests_total comes from variable ${prefix}"},
 		}}},
 		{"empty-able suffix", `node_cpu$suffix`, []Ref{{
-			Matchers: []Matcher{re("__name__", "node_cpu.*")},
+			Matchers: []Matcher{{Label: "__name__", Op: MatchEqual, Value: "node_cpu$suffix", Variable: true}},
 			Assumed:  true, Reasons: []string{"metric name node_cpu$suffix comes from variable $suffix"},
 		}}},
 		{"grouping var", `sum by ($group) (x)`, []Ref{{
@@ -128,7 +129,7 @@ func TestPromQL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("PromQL(%q): %v", tt.query, err)
 			}
-			if !reflect.DeepEqual(got, tt.want) {
+			if !reflect.DeepEqual(clearResultLabels(got), tt.want) {
 				t.Errorf("PromQL(%q)\n got %+v\nwant %+v", tt.query, got, tt.want)
 			}
 		})
@@ -235,6 +236,59 @@ func TestSubstituteGrafanaVars(t *testing.T) {
 		got, _ := substituteGrafanaVars(tt.in)
 		if got != tt.want {
 			t.Errorf("substitute(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// clearResultLabels drops ResultLabels so the extractor tables can leave
+// it out; TestPromQLResultLabels and TestLogQLResultLabels cover it.
+func clearResultLabels(refs []Ref) []Ref {
+	out := slices.Clone(refs)
+	for i := range out {
+		out[i].ResultLabels = false
+	}
+	return out
+}
+
+func TestPromQLResultLabels(t *testing.T) {
+	tests := []struct {
+		query string
+		want  map[string]bool // metric -> ResultLabels
+	}{
+		{`up{job="shop"}`, map[string]bool{"up": true}},
+		{`rate(up[5m])`, map[string]bool{"up": true}},
+		{`sum by (job) (up)`, map[string]bool{"up": false}},
+		{`sum without (instance) (up)`, map[string]bool{"up": true}},
+		{`topk(3, up)`, map[string]bool{"up": true}},
+		{`topk(scalar(k), up)`, map[string]bool{"up": true, "k": false}},
+		{`histogram_quantile(0.9, rate(b[5m]))`, map[string]bool{"b": true}},
+		{`label_replace(up, "a", "$1", "b", "(.*)")`, map[string]bool{"up": true}},
+		{`a / b`, map[string]bool{"a": true, "b": false}},
+		{`a / ignoring(x) b`, map[string]bool{"a": true, "b": false}},
+		{`a / on(job) b`, map[string]bool{"a": false, "b": false}},
+		{`a * on(job) group_left(team) b`, map[string]bool{"a": true, "b": false}},
+		{`a * on(job) group_right(team) b`, map[string]bool{"a": false, "b": true}},
+		{`a and b`, map[string]bool{"a": true, "b": false}},
+		{`a unless on(job) b`, map[string]bool{"a": true, "b": false}},
+		{`a or b`, map[string]bool{"a": true, "b": true}},
+		{`a > 0.5`, map[string]bool{"a": true}},
+		{`absent(up{job="x"})`, map[string]bool{"up": false}},
+		{`scalar(up)`, map[string]bool{"up": false}},
+		{`max_over_time(up[1h:5m])`, map[string]bool{"up": true}},
+		{`sum(rate(a[5m])) / sum(rate(b[5m]))`, map[string]bool{"a": false, "b": false}},
+		{`info(up)`, map[string]bool{"up": true, "target_info": true}},
+	}
+	for _, tt := range tests {
+		refs, err := PromQL(tt.query)
+		if err != nil {
+			t.Fatalf("%s: %v", tt.query, err)
+		}
+		got := map[string]bool{}
+		for _, r := range refs {
+			got[r.Metric] = r.ResultLabels
+		}
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("%s: ResultLabels %v, want %v", tt.query, got, tt.want)
 		}
 	}
 }
