@@ -6,7 +6,7 @@
 - **Price it.** Attaches ingest and storage cost to every series and stream, using your own price card.
 - **Act on it.** Generates OTel Collector or Prometheus relabel config as a PR. `tvt check` blocks any change that would break an alert, SLO or viewed dashboard.
 
-> Status: pre-alpha. `tvt scan` collects Prometheus cardinality and rules, Grafana dashboards and dashboard views into a SQLite usage graph. Query matching (Sprint 2), Loki (Sprint 3), report, propose and check are not built yet. See [docs/architecture.md](docs/architecture.md).
+> Status: pre-alpha (Sprint 1). `tvt scan` collects Prometheus or Mimir cardinality and rules, Loki rules, Grafana dashboards and dashboard views into a SQLite usage graph. Query matching (Sprint 2), Loki stream volume (Sprint 3), report, propose and check are not built yet. See [docs/architecture.md](docs/architecture.md).
 
 ## Commands
 
@@ -25,6 +25,7 @@ Credentials come from the environment (`TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `T
 ```sh
 export TVT_GRAFANA_TOKEN=glsa_...   # Grafana service account, Viewer role (plus datasources:read)
 tvt scan --grafana https://grafana.example.com --prom https://prometheus.example.com \
+  --loki https://loki.example.com \
   --grafana-log '/var/lib/grafana/logs/grafana.log*' \
   --prom-query-log /prometheus/query.log
 ```
@@ -32,7 +33,8 @@ tvt scan --grafana https://grafana.example.com --prom https://prometheus.example
 | Flag | Default | What |
 | --- | --- | --- |
 | `--grafana` | (required) | Grafana base URL |
-| `--prom` / `--mimir` | (one required) | Metrics backend. Mimir has no TSDB status endpoint, so for now scan the Prometheus that writes to it |
+| `--prom` / `--mimir` | (one required) | Metrics backend. `--mimir` reads Mimir's cardinality API, which needs `limits.cardinality_analysis_enabled: true`; `/prometheus` is appended if missing |
+| `--loki` | | Loki base URL. Its alert and recording rules become consumers and protect the streams they select. Stream volume comes in Sprint 3 |
 | `--grafana-log` | | Grafana log with `GF_SERVER_ROUTER_LOGGING=true`; repeatable, globs and `.gz` allowed. Without it no dashboard counts as viewed |
 | `--prom-query-log` | | Prometheus query log; repeatable. Recorded for coverage now, matched against signals from Sprint 2 |
 | `--label-top` | 50 | Per-label cardinality for this many of the largest metrics |
@@ -50,11 +52,19 @@ make            # lint, test, build -> bin/tvt
 make race       # tests with the race detector
 ```
 
+Collector tests run against recorded API responses in `testdata/lab/` through `internal/testutil`, which fails any test that sends a write or a query. The golden tests in `cmd/tvt` check scan output against tvt-lab's `ground-truth.yaml`. CI also runs `goreleaser check`, govulncheck and gitleaks.
+
+To scan Mimir instead, start the lab with `make up-mimir` and pass `--mimir http://localhost:9009` in place of `--prom`.
+
+### Releases
+
+A `v*` tag builds archives for Linux, macOS and Windows (amd64 and arm64) with goreleaser and signs `checksums.txt` with cosign (keyless). Tags with a suffix such as `v0.0.1-rc.1` publish a pre-release. The verify command is in `.goreleaser.yaml`.
+
 Run it against [tvt-lab](../tvt-lab), a Podman Grafana stack seeded with known waste and known dependencies:
 
 ```sh
 (cd ../tvt-lab && make export-logs)   # copies query.log and grafana.log* to ../tvt-lab/lab-logs
-./bin/tvt scan --grafana http://localhost:3000 --prom http://localhost:9090 \
+./bin/tvt scan --grafana http://localhost:3000 --prom http://localhost:9090 --loki http://localhost:3100 \
   --prom-query-log ../tvt-lab/lab-logs/query.log --grafana-log '../tvt-lab/lab-logs/grafana.log*'
 ```
 
