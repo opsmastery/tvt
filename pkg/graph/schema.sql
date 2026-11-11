@@ -70,11 +70,13 @@ CREATE TABLE IF NOT EXISTS refs (
     -- Schema version 3. evidence: declared, incident or observed ('' for
     -- rows from before version 3). labels: one "use:name" per line, the
     -- labels the consumer reads. all_labels: it may depend on every label.
-    -- reason: why it is assumed, one reason per line.
+    -- reason: why it is assumed, one reason per line. result_labels: the
+    -- signal's labels survive into the consumer's result (not a read).
     evidence    TEXT NOT NULL DEFAULT '' CHECK (evidence IN ('', 'declared', 'incident', 'observed')),
     labels      TEXT NOT NULL DEFAULT '',
     all_labels  INTEGER NOT NULL DEFAULT 0 CHECK (all_labels IN (0, 1)),
     reason      TEXT NOT NULL DEFAULT '',
+    result_labels INTEGER NOT NULL DEFAULT 0 CHECK (result_labels IN (0, 1)),
     last_scan   INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (signal_id, consumer_id, via)
 );

@@ -187,10 +187,10 @@ func Build(in Inputs) (Output, error) {
 	for _, d := range in.Dashboards {
 		viewed := lastViewed[d.UID]
 		vars := dashboardVars(d, res.metrics)
-		consume := func(c graph.Consumer, dsType string, variable bool) {
+		consume := func(c graph.Consumer, dsType string, variable bool, shows []string) {
 			out.Consumers = append(out.Consumers, c)
 			if lang, ok := queryLanguage(dsType); ok {
-				queries = append(queries, query{consumer: c, expr: c.Expr, lang: lang, variable: variable, vars: vars})
+				queries = append(queries, query{consumer: c, expr: c.Expr, lang: lang, variable: variable, vars: vars, shows: shows})
 			}
 		}
 		for _, p := range d.Panels {
@@ -201,7 +201,7 @@ func Build(in Inputs) (Output, error) {
 					Name:       d.Title + " / " + p.Title,
 					Expr:       q.Expr,
 					LastViewed: viewed,
-				}, q.DatasourceType, false)
+				}, q.DatasourceType, false, shownLabels([]string{q.Legend}, ""))
 			}
 		}
 		for _, v := range d.Variables {
@@ -214,7 +214,7 @@ func Build(in Inputs) (Output, error) {
 				Name:       d.Title + " / $" + v.Name,
 				Expr:       v.Query,
 				LastViewed: viewed,
-			}, v.DatasourceType, true)
+			}, v.DatasourceType, true, nil)
 		}
 		for _, a := range d.Annotations {
 			consume(graph.Consumer{
@@ -223,7 +223,7 @@ func Build(in Inputs) (Output, error) {
 				Name:       d.Title + " / annotation " + a.Name,
 				Expr:       a.Expr,
 				LastViewed: viewed,
-			}, a.DatasourceType, false)
+			}, a.DatasourceType, false, shownLabels([]string{a.TitleFormat, a.TextFormat}, a.TagKeys))
 		}
 	}
 

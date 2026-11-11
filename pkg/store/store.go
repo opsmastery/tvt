@@ -144,6 +144,7 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			`ALTER TABLE refs ADD COLUMN labels TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE refs ADD COLUMN all_labels INTEGER NOT NULL DEFAULT 0 CHECK (all_labels IN (0, 1))`,
 			`ALTER TABLE refs ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE refs ADD COLUMN result_labels INTEGER NOT NULL DEFAULT 0 CHECK (result_labels IN (0, 1))`,
 			// Before version 3 an assumed reference covered every label.
 			`UPDATE refs SET all_labels = assumed`,
 			`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
@@ -250,7 +251,7 @@ func (s *Store) Consumers(ctx context.Context, scanID int64) ([]graph.Consumer, 
 // signal, consumer and via.
 func (s *Store) References(ctx context.Context, scanID int64) ([]graph.Reference, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT signal_id, consumer_id, via, last_seen, actor, assumed, evidence, labels, all_labels, reason FROM refs WHERE last_scan = ?
+		`SELECT signal_id, consumer_id, via, last_seen, actor, assumed, evidence, labels, all_labels, reason, result_labels FROM refs WHERE last_scan = ?
 		 ORDER BY signal_id, consumer_id, via`, scanID)
 	if err != nil {
 		return nil, err
@@ -262,7 +263,7 @@ func (s *Store) References(ctx context.Context, scanID int64) ([]graph.Reference
 		var seen sql.NullInt64
 		var evidence, labels, reasons string
 		if err := rows.Scan(&r.SignalID, &r.ConsumerID, &r.Via, &seen, &r.Actor, &r.Assumed,
-			&evidence, &labels, &r.AllLabels, &reasons); err != nil {
+			&evidence, &labels, &r.AllLabels, &reasons, &r.ResultLabels); err != nil {
 			return nil, err
 		}
 		r.LastSeen = fromNullMillis(seen)
@@ -410,8 +411,8 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 					WHEN excluded.last_viewed IS NULL THEN consumers.last_viewed
 					ELSE max(consumers.last_viewed, excluded.last_viewed) END,
 				last_scan = excluded.last_scan`},
-		{&sc.ref, `INSERT INTO refs (signal_id, consumer_id, via, last_seen, actor, assumed, evidence, labels, all_labels, reason, last_scan)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		{&sc.ref, `INSERT INTO refs (signal_id, consumer_id, via, last_seen, actor, assumed, evidence, labels, all_labels, reason, result_labels, last_scan)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (signal_id, consumer_id, via) DO UPDATE SET
 				assumed = CASE
 					WHEN refs.last_scan = excluded.last_scan THEN max(refs.assumed, excluded.assumed)
@@ -419,6 +420,9 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 				all_labels = CASE
 					WHEN refs.last_scan = excluded.last_scan THEN max(refs.all_labels, excluded.all_labels)
 					ELSE excluded.all_labels END,
+				result_labels = CASE
+					WHEN refs.last_scan = excluded.last_scan THEN max(refs.result_labels, excluded.result_labels)
+					ELSE excluded.result_labels END,
 				labels = CASE
 					WHEN refs.last_scan <> excluded.last_scan OR refs.labels = '' THEN excluded.labels
 					WHEN excluded.labels = '' OR excluded.labels = refs.labels THEN refs.labels
@@ -496,7 +500,7 @@ func (sc *Scan) PutConsumer(ctx context.Context, c graph.Consumer) error {
 // query many times in a log) keep the latest LastSeen and its Actor. The
 // signal and consumer may be put before or after; both must exist by Finish.
 // Within one scan the broader reading wins: a reference put once as
-// Assumed or AllLabels stays so, and its Labels and Reasons are the union
+// Assumed, AllLabels or ResultLabels stays so, and its Labels and Reasons are the union
 // of every put. A later scan replaces them with its own reading.
 func (sc *Scan) PutReference(ctx context.Context, r graph.Reference) error {
 	if err := sc.check(); err != nil {
@@ -513,7 +517,7 @@ func (sc *Scan) PutReference(ctx context.Context, r graph.Reference) error {
 		return fmt.Errorf("store: reference %s -> %s: %w", r.SignalID, r.ConsumerID, err)
 	}
 	_, err = sc.ref.ExecContext(ctx, r.SignalID, r.ConsumerID, r.Via, nullMillis(r.LastSeen), r.Actor, boolInt(r.Assumed),
-		string(r.Evidence), labels, boolInt(r.AllLabels), encodeReasons(r.Reasons), sc.ID)
+		string(r.Evidence), labels, boolInt(r.AllLabels), encodeReasons(r.Reasons), boolInt(r.ResultLabels), sc.ID)
 	return wrap("reference", r.SignalID+" -> "+r.ConsumerID, err)
 }
 

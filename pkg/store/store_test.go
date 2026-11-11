@@ -410,6 +410,7 @@ func versionOneDB(t *testing.T, path string) *Store {
 		`ALTER TABLE refs DROP COLUMN labels`,
 		`ALTER TABLE refs DROP COLUMN all_labels`,
 		`ALTER TABLE refs DROP COLUMN reason`,
+		`ALTER TABLE refs DROP COLUMN result_labels`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -476,8 +477,8 @@ func TestReferenceLabelDetail(t *testing.T) {
 	sig := graph.Signal{ID: "m", Kind: graph.KindMetric, Name: "m", Source: "prom"}
 	con := graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}
 	a := graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: graph.EvidenceDeclared,
-		Labels:  []graph.LabelRef{{Name: "route", Use: graph.LabelGroup}, {Name: "job", Use: graph.LabelMatch}},
-		Assumed: true, Reasons: []string{"matcher value from $x"}}
+		Labels:  []graph.LabelRef{{Name: "route", Use: graph.LabelGroup}, {Name: "job", Use: graph.LabelMatch}, {Name: "instance", Use: graph.LabelLegend}},
+		Assumed: true, ResultLabels: true, Reasons: []string{"matcher value from $x"}}
 	b := graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: graph.EvidenceDeclared,
 		Labels:    []graph.LabelRef{{Name: "job", Use: graph.LabelMatch}, {Name: "odd\nname", Use: graph.LabelWithout}},
 		AllLabels: true, Reasons: []string{"query did not parse:\nline 2"}}
@@ -494,8 +495,8 @@ func TestReferenceLabelDetail(t *testing.T) {
 	must(t, err)
 	want := graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: graph.EvidenceDeclared,
 		Labels: []graph.LabelRef{
-			{Name: "job", Use: graph.LabelMatch}, {Name: "odd\nname", Use: graph.LabelWithout}, {Name: "route", Use: graph.LabelGroup}},
-		AllLabels: true, Assumed: true,
+			{Name: "instance", Use: graph.LabelLegend}, {Name: "job", Use: graph.LabelMatch}, {Name: "odd\nname", Use: graph.LabelWithout}, {Name: "route", Use: graph.LabelGroup}},
+		AllLabels: true, Assumed: true, ResultLabels: true,
 		Reasons: []string{"matcher value from $x", "query did not parse: line 2"}}
 	if len(refs) != 1 || !reflect.DeepEqual(refs[0], want) {
 		t.Errorf("merged ref\n got  %+v\n want %+v", refs, want)
@@ -509,7 +510,7 @@ func TestReferenceLabelDetail(t *testing.T) {
 	})
 	refs, err = s.References(ctx, id)
 	must(t, err)
-	if len(refs) != 1 || refs[0].Labels != nil || refs[0].AllLabels || refs[0].Assumed || refs[0].Reasons != nil {
+	if len(refs) != 1 || refs[0].Labels != nil || refs[0].AllLabels || refs[0].Assumed || refs[0].ResultLabels || refs[0].Reasons != nil {
 		t.Errorf("later scan: refs = %+v, want plain", refs)
 	}
 
@@ -544,6 +545,7 @@ func TestUpgradeFromVersion2(t *testing.T) {
 		`ALTER TABLE refs DROP COLUMN labels`,
 		`ALTER TABLE refs DROP COLUMN all_labels`,
 		`ALTER TABLE refs DROP COLUMN reason`,
+		`ALTER TABLE refs DROP COLUMN result_labels`,
 		`UPDATE meta SET value = '2' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {

@@ -1,7 +1,9 @@
 package scan
 
 import (
+	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -385,7 +387,7 @@ func TestExpandVars(t *testing.T) {
 		"$c":               nil,
 		"$missing":         nil,
 	} {
-		got, ok := expandVars(value, vars)
+		got, ok := expandVars(value, vars, false)
 		if ok != (want != nil) || !reflect.DeepEqual(got, want) {
 			t.Errorf("expandVars(%q) = %v, %v; want %v", value, got, ok, want)
 		}
@@ -403,7 +405,12 @@ func TestVarPattern(t *testing.T) {
 	}{
 		{parse.MatchEqual, "shop-$env", "shop-.*", true},
 		{parse.MatchEqual, "a.b${x}", `a\.b.*`, true},
-		{parse.MatchRegexp, "api|$extra", "api|.*", true},
+		{parse.MatchRegexp, "shop-$env", "shop-.*", true},
+		// Regex syntax in the literal text: "[.*]" would match one "." or
+		// "*", not the value (Copilot on #20).
+		{parse.MatchRegexp, "[$env]", "", false},
+		{parse.MatchRegexp, "api|$extra", "", false},
+		{parse.MatchRegexp, "(a|$x)", "", false},
 		{parse.MatchEqual, "$x", "", false},
 		{parse.MatchRegexp, "${x}${y}", "", false},
 		{parse.MatchNotEqual, "shop-$env", "", false},
@@ -483,5 +490,149 @@ func TestAddDoesNotAlias(t *testing.T) {
 	}
 	if reasons[:2][1] != "" || labels[:2][1] != (graph.LabelRef{}) {
 		t.Error("add wrote into the caller's backing arrays")
+	}
+}
+
+// Rules that each read the previous two outputs share inputs on every
+// path; following each path separately is Fibonacci work (Copilot on #20).
+func TestRecordingRuleChainSharedInputs(t *testing.T) {
+	const n = 40
+	in := Inputs{Start: start, Window: 30 * 24 * time.Hour, MetricsSource: "prom", OrgID: 1,
+		Metrics: []collect.MetricCardinality{{Metric: "base_a", ActiveSeries: 1}, {Metric: "base_b", ActiveSeries: 1}}}
+	name := func(i int) string {
+		switch i {
+		case 0:
+			return "base_a"
+		case 1:
+			return "base_b"
+		}
+		return fmt.Sprintf("level:%d", i)
+	}
+	for i := 2; i <= n; i++ {
+		in.Rules = append(in.Rules, collect.Rule{Source: "prometheus", Namespace: "r.yml", Group: "g", Name: name(i),
+			Kind: collect.RuleRecord, Language: "promql", Expr: fmt.Sprintf("sum by (job) (%s) + sum by (job) (%s)", name(i-1), name(i-2))})
+	}
+	in.Rules = append(in.Rules, collect.Rule{Source: "prometheus", Namespace: "r.yml", Group: "a", Name: "Top",
+		Kind: collect.RuleAlert, Language: "promql", Expr: name(n) + ` > 0`})
+	done := make(chan Output, 1)
+	go func() {
+		out, err := Build(in)
+		if err != nil {
+			t.Error(err)
+		}
+		done <- out
+	}()
+	var out Output
+	select {
+	case out = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Build did not finish: shared rule inputs are followed once per path")
+	}
+	idx := refIndex(out)
+	top := "rule:prometheus:r.yml/a/Top"
+	for _, k := range []string{
+		"prom:metric:base_a <- " + top + " via rule:prometheus:r.yml/g/level:2",
+		"prom:metric:base_b <- " + top + " via rule:prometheus:r.yml/g/level:3",
+	} {
+		if _, ok := idx[k]; !ok {
+			t.Errorf("missing %s", k)
+		}
+	}
+}
+
+// Copilot on #20: ${var.field} and Grafana's formats. A field or a format
+// tvt doesn't model is unknown; :regex, and the default for multi-value or
+// "All" variables, regex-escape each value; a regex literal around an
+// unknown variable doesn't narrow.
+func TestVariableFormats(t *testing.T) {
+	in := baseInputs()
+	stream := func(ms ...parse.Matcher) string { return "loki:stream:" + parse.CanonicalSelector(ms) }
+	in.Dashboards = []collect.Dashboard{{UID: "d", Title: "D",
+		Variables: []collect.Variable{
+			{Name: "env", Type: "custom", Values: []string{"prod"}},
+			{Name: "app", Type: "custom", Values: []string{"api(v2)"}},
+			{Name: "svc", Type: "custom", Values: []string{"a.b", "c"}, Multi: true},
+			{Name: "free", Type: "textbox"},
+		},
+		Panels: []collect.Panel{{ID: 1, Title: "logs", Queries: []collect.PanelQuery{
+			{DatasourceType: "loki", Expr: `{job="f", env="${env.text}"}`},
+			{DatasourceType: "loki", Expr: `{job="r", app=~"${app:regex}"}`},
+			{DatasourceType: "loki", Expr: `{job="w", app=~"$app"}`},
+			{DatasourceType: "loki", Expr: `{job="m", svc=~"$svc"}`},
+			{DatasourceType: "loki", Expr: `{job="c", svc=~"${svc:csv}"}`},
+			{DatasourceType: "loki", Expr: `{job="t", app=~"[$free]"}`},
+		}}}}}
+	out, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := refIndex(out)
+	eq := func(l, v string) parse.Matcher { return parse.Matcher{Label: l, Op: parse.MatchEqual, Value: v} }
+	re := func(l, v string) parse.Matcher { return parse.Matcher{Label: l, Op: parse.MatchRegexp, Value: v} }
+	for _, tc := range []struct {
+		name, signal string
+		consumer     int
+		assumed      bool
+	}{
+		{"field is unknown", stream(eq("job", "f")), 0, true},
+		{":regex escapes", stream(eq("job", "r"), re("app", `api\(v2\)`)), 1, false},
+		{"single value is raw", stream(eq("job", "w"), re("app", "api(v2)")), 2, false},
+		{"multi escapes", stream(eq("job", "m"), re("svc", `a\.b`)), 3, false},
+		{"multi, second value", stream(eq("job", "m"), re("svc", "c")), 3, false},
+		{"csv is unknown", stream(eq("job", "c")), 4, true},
+		{"regex literal doesn't narrow", stream(eq("job", "t")), 5, true},
+	} {
+		k := fmt.Sprintf("%s <- panel:1:d:1:%d", tc.signal, tc.consumer)
+		r, ok := idx[k]
+		if !ok || r.Assumed != tc.assumed {
+			var have []string
+			for _, r := range out.References {
+				if strings.HasSuffix(r.ConsumerID, fmt.Sprintf(":%d", tc.consumer)) && r.ConsumerID[:7] == "panel:1" {
+					have = append(have, r.SignalID)
+				}
+			}
+			t.Errorf("%s: %s: found %v, assumed %v; consumer has %v", tc.name, k, ok, r.Assumed, have)
+		}
+	}
+}
+
+// Copilot on #20: a label a panel's legend or an annotation shows is read
+// (legend), and whether a selector's labels reach the result is recorded
+// (ResultLabels) without counting them as read.
+func TestShownLabelsAndResultLabels(t *testing.T) {
+	in := baseInputs()
+	in.Labels = append(in.Labels, collect.LabelCardinality{Metric: "shop_cart_operations_total", Label: "instance", Values: 2, ActiveSeries: 5091})
+	in.Dashboards = []collect.Dashboard{{UID: "d", Title: "D",
+		Panels: []collect.Panel{{ID: 1, Title: "ops", Queries: []collect.PanelQuery{
+			{DatasourceType: "prometheus", Expr: `shop_cart_operations_total{op="add"}`, Legend: "{{ instance }}"},
+			{DatasourceType: "prometheus", Expr: `sum by (op) (shop_cart_operations_total)`},
+		}}},
+		Annotations: []collect.Annotation{{Name: "a", DatasourceType: "prometheus", Expr: `shop_http_requests_total > 0`,
+			TitleFormat: "{{route}}", TagKeys: "job, pod"}},
+	}}
+	out, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := refIndex(out)
+	cart := "prom:metric:shop_cart_operations_total"
+	raw, sum := idx[cart+" <- panel:1:d:1:0"], idx[cart+" <- panel:1:d:1:1"]
+	if !slices.Contains(raw.Labels, graph.LabelRef{Name: "instance", Use: graph.LabelLegend}) || !raw.ResultLabels {
+		t.Errorf("raw panel ref = %+v, want legend instance and ResultLabels", raw)
+	}
+	if sum.ResultLabels {
+		t.Errorf("sum by panel ref = %+v, want no ResultLabels", sum)
+	}
+	if _, ok := idx["prom:label:shop_cart_operations_total:instance <- panel:1:d:1:0"]; !ok {
+		t.Error("legend label has no label-signal reference")
+	}
+	if _, ok := idx["prom:label:shop_cart_operations_total:user_id <- panel:1:d:1:0"]; ok {
+		t.Error("ResultLabels counted user_id as read")
+	}
+	annot := idx["prom:metric:shop_http_requests_total <- annot:1:d:a"]
+	for _, l := range []string{"job", "pod", "route"} {
+		if !slices.Contains(annot.Labels, graph.LabelRef{Name: l, Use: graph.LabelLegend}) {
+			t.Errorf("annotation ref %+v: missing legend %s", annot, l)
+		}
 	}
 }
