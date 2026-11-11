@@ -1,6 +1,6 @@
 # Task brief: Sprint 1 remainder and testing groundwork
 
-Written Nov 10, 2026 for a Claude Code session on Jason's Mac. That session has Go, module downloads and the live tvt-lab, which this brief's author didn't. Work in this order, **one branch and one PR per numbered item, each with `--base main`**. Read `CLAUDE.md`, `docs/ROADMAP.md`, `docs/query-logs.md` and the [testing strategy](https://claude.ai/artifact/KLacfcEbfNS9WmaXZHEdWk) first.
+Written Nov 10, 2026. That session has Go, module downloads and the live tvt-lab, which this brief's author didn't. Work in this order, **one branch and one PR per numbered item, each with `--base main`**. Read `CLAUDE.md`, `docs/ROADMAP.md`, `docs/query-logs.md` and the [testing strategy](https://claude.ai/artifact/KLacfcEbfNS9WmaXZHEdWk) first.
 
 Already written, but uncommitted in the working tree when you start (commit them all on item 0's branch): ADR 0008 and the ADR 0004 exception note, the partner-guide link in `docs/query-logs.md`, this brief, and the CI and release changes, namely `.github/workflows/ci.yml` (adds `goreleaser check`, `govulncheck` and `gitleaks` jobs), `.github/workflows/release.yml` (tag-triggered goreleaser with cosign keyless signing) and a `signs:` block in `.goreleaser.yaml`. None of them has run yet. Item 0 is to prove they work.
 
