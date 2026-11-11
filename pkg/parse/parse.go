@@ -1,6 +1,6 @@
 // Package parse extracts which signals a query touches. PromQL uses the
-// upstream Prometheus parser; LogQL gets tvt's own extractor (ADR 0005), and
-// until then LogStreamSelectors finds only stream selectors.
+// upstream Prometheus parser (PromQL); LogQL gets tvt's own extractor
+// (ADR 0005), and until then LogStreamSelectors finds only stream selectors.
 //
 // Label-level detail matters: dropping a label breaks queries that match on
 // it, group by it or join on it, and silently changes queries that use
@@ -22,6 +22,11 @@ type Matcher struct {
 	Label string
 	Op    MatchOp
 	Value string
+	// Variable: Value holds a Grafana template variable (as written, e.g.
+	// "$cluster"), so the series it selects aren't known. The metric and
+	// label are still read exactly, so this alone doesn't make a Ref
+	// Assumed.
+	Variable bool
 }
 
 // Ref is one selector in a query and the labels the query depends on.
@@ -35,6 +40,21 @@ type Ref struct {
 	// Without are labels in without(...) or ignoring(...). Dropping one of
 	// these changes the result without an error.
 	Without []string
+	// Created are labels label_replace, label_join or count_values write
+	// over this selector's series. Grouping can name one of them; such a
+	// label need not exist on the stored series.
+	Created []string
+	// Subquery is set when the selector is evaluated inside a subquery.
+	Subquery bool
+	// AllLabels: the result may depend on every label of the series, so
+	// dropping any of them can change it. Set for a vector match without
+	// on(...) (default, ignoring, and/or/unless), for a label name taken
+	// from a variable, and for every Ref from a query that didn't parse.
+	AllLabels bool
+	// Assumed: the reference is a guess, not read exactly from the query.
+	// Reasons says why (a variable, a parse error).
+	Assumed bool
+	Reasons []string
 }
 
 // Extractor parses a query and returns every selector it references.
