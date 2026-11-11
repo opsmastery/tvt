@@ -1,9 +1,11 @@
 package parse
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
@@ -38,8 +40,16 @@ func PromQL(query string) ([]Ref, error) {
 		return nil, nil
 	}
 	text, vars := substituteGrafanaVars(query)
-	p := parser.NewParser(parser.Options{EnableExperimentalFunctions: true})
-	expr, err := p.ParseExpr(text)
+	var expr parser.Expr
+	var err error
+	if utf8.ValidString(query) {
+		p := parser.NewParser(parser.Options{EnableExperimentalFunctions: true})
+		expr, err = p.ParseExpr(text)
+	} else {
+		// The parser would decode invalid bytes to U+FFFD and report names
+		// that aren't in the query. Dashboards and rules are UTF-8 text.
+		err = errors.New("query is not valid UTF-8")
+	}
 	if err != nil {
 		ptext, pvars := placeholderVars(query)
 		return fallbackRefs(ptext, pvars, err), fmt.Errorf("promql: %w", err)
@@ -191,6 +201,9 @@ func (w *promWalker) walkCall(n *parser.Call, s scope) {
 		})
 		w.walk(n.Args[0], inner)
 		return
+	case name == "info" && len(n.Args) >= 1:
+		w.walkInfo(n, s)
+		return
 	case name == "histogram_quantile" && len(n.Args) == 2:
 		w.walk(n.Args[0], s)
 		w.walk(n.Args[1], s.with(func(s *scope) { s.grouping = append(s.grouping, "le") }))
@@ -208,6 +221,42 @@ func keepsInputLabels(op parser.ItemType) bool {
 		return true
 	}
 	return false
+}
+
+// walkInfo handles info(v [, data-label selector]): it joins v with an
+// info metric (target_info unless the selector names another) on the
+// identifying labels job and instance, and copies the info metric's data
+// labels onto the result: all of them with no selector, else only the
+// ones the selector names.
+func (w *promWalker) walkInfo(n *parser.Call, s scope) {
+	id := func(s *scope) { s.grouping = append(s.grouping, "instance", "job") }
+	w.walk(n.Args[0], s.with(id))
+	infoScope := s.with(id)
+	if len(n.Args) < 2 {
+		w.refs = append(w.refs, w.selectorRef(&parser.VectorSelector{
+			Name:          "target_info",
+			LabelMatchers: []*labels.Matcher{labels.MustNewMatcher(labels.MatchEqual, labels.MetricName, "target_info")},
+		}, infoScope.with(func(s *scope) { s.allLabels = true })))
+		return
+	}
+	arg := n.Args[1]
+	for {
+		if p, ok := arg.(*parser.ParenExpr); ok {
+			arg = p.Expr
+			continue
+		}
+		break
+	}
+	vs, ok := arg.(*parser.VectorSelector)
+	if !ok {
+		w.walk(n.Args[1], infoScope)
+		return
+	}
+	r := w.selectorRef(vs, infoScope)
+	if r.Metric == "" && !slices.ContainsFunc(r.Matchers, func(m Matcher) bool { return m.Label == labels.MetricName }) {
+		r.Metric = "target_info"
+	}
+	w.refs = append(w.refs, r)
 }
 
 func stringArg(e parser.Node) (string, bool) {
@@ -284,9 +333,19 @@ func varTexts(vs []grafanaVar) string {
 	return strings.Join(sortedSet(t), ", ")
 }
 
-// PromQL keywords, aggregators and literals that look like names but
-// never name a metric when a query is scanned without parsing.
-var promqlWords = map[string]bool{
+// Words that can never name a metric in the pinned parser: modifiers that
+// only appear between operands, and number literals. Other keywords (and,
+// by, offset, range, start, ...) are valid metric names in some positions,
+// so the fallback keeps them as candidates; a candidate that names no real
+// metric matches nothing.
+var neverMetric = map[string]bool{
+	"on": true, "ignoring": true, "group_left": true, "group_right": true,
+	"bool": true, "atan2": true, "inf": true, "nan": true,
+}
+
+// PromQL keywords. A {...} right after one of these is a selector with no
+// name in front of it (see followsName).
+var promqlKeywords = map[string]bool{
 	"by": true, "without": true, "on": true, "ignoring": true, "group_left": true, "group_right": true,
 	"bool": true, "offset": true, "and": true, "or": true, "unless": true, "atan2": true,
 	"inf": true, "nan": true, "start": true, "end": true, "step": true, "range": true,
@@ -318,13 +377,59 @@ func fallbackRefs(text string, vars []grafanaVar, perr error) []Ref {
 		}
 		refs = append(refs, r)
 	}
+	addWildcard := func(why string) {
+		if seen["*"] {
+			return
+		}
+		seen["*"] = true
+		refs = append(refs, Ref{
+			Matchers:  []Matcher{{Label: labels.MetricName, Op: MatchRegexp, Value: ".+"}},
+			AllLabels: true, Assumed: true,
+			Reasons: []string{reason + " (" + why + ")"},
+		})
+	}
+	addRegex := func(op MatchOp, value string) {
+		if op != MatchRegexp {
+			addWildcard("a selector excludes metric names, so any other metric")
+			return
+		}
+		if seen["=~"+value] {
+			return
+		}
+		seen["=~"+value] = true
+		refs = append(refs, Ref{
+			Matchers:  []Matcher{{Label: labels.MetricName, Op: MatchRegexp, Value: value}},
+			AllLabels: true, Assumed: true, Reasons: []string{reason},
+		})
+	}
 	for i := 0; i < len(text); {
 		c := text[i]
 		switch {
 		case c == '"' || c == '\'' || c == '`':
 			i = stringEnd(text, i)
 		case c == '{':
-			i = skipOrStep(text, i, '}')
+			next := skipOrStep(text, i, '}')
+			if next > i+1 && !followsName(text, i) {
+				// A selector with no name before it names its metric, if
+				// at all, inside the braces.
+				ms, _, err := parseSelector(text, i)
+				name, op := "", MatchOp("")
+				for _, m := range ms {
+					if m.Label == labels.MetricName {
+						name, op = m.Value, m.Op
+						break
+					}
+				}
+				switch {
+				case err != nil || name == "" || !utf8.ValidString(text):
+					addWildcard("a selector names no metric, so any metric")
+				case op == MatchEqual:
+					add(name)
+				default:
+					addRegex(op, name)
+				}
+			}
+			i = next
 		case c == '[':
 			i = skipOrStep(text, i, ']')
 		case c == '#':
@@ -351,7 +456,7 @@ func fallbackRefs(text string, vars []grafanaVar, perr error) []Ref {
 			switch {
 			case labelListWords[word] && next < len(text) && text[next] == '(':
 				i = skipTo(text, next, ')')
-			case promqlWords[strings.ToLower(word)]:
+			case neverMetric[strings.ToLower(word)]:
 			case next < len(text) && text[next] == '(' && !strings.Contains(word, placeholderPrefix):
 				// function or aggregator call
 			default:
@@ -362,13 +467,24 @@ func fallbackRefs(text string, vars []grafanaVar, perr error) []Ref {
 		}
 	}
 	if len(refs) == 0 {
-		refs = append(refs, Ref{
-			Matchers:  []Matcher{{Label: labels.MetricName, Op: MatchRegexp, Value: ".+"}},
-			AllLabels: true, Assumed: true,
-			Reasons: []string{reason + " (no metric name found, so any metric)"},
-		})
+		addWildcard("no metric name found, so any metric")
 	}
 	return refs
+}
+
+// followsName: the byte at i comes right after a name (spaces allowed)
+// that isn't a PromQL keyword, as in foo{...} or foo {...}.
+func followsName(s string, i int) bool {
+	j := i
+	for j > 0 && (s[j-1] == ' ' || s[j-1] == '\t' || s[j-1] == '\n') {
+		j--
+	}
+	k := j
+	for k > 0 && isIdentByte(s[k-1]) {
+		k--
+	}
+	word := s[k:j]
+	return word != "" && !(word[0] >= '0' && word[0] <= '9') && !promqlKeywords[strings.ToLower(word)]
 }
 
 // skipTo returns the index just past the first close after i that is not

@@ -57,6 +57,18 @@ func TestPromQL(t *testing.T) {
 		{"count_values", `count_values("version", build_info)`, []Ref{{Metric: "build_info", Created: []string{"version"}}}},
 		{"histogram_quantile", `histogram_quantile(0.99, sum by (le) (rate(h_bucket[5m])))`, []Ref{{Metric: "h_bucket", Grouping: []string{"le"}}}},
 		{"histogram_quantile adds le", `histogram_quantile(0.9, rate(h_bucket[5m]))`, []Ref{{Metric: "h_bucket", Grouping: []string{"le"}}}},
+		{"info default", `info(rate(http_requests_total[5m]))`, []Ref{
+			{Metric: "http_requests_total", Grouping: []string{"instance", "job"}},
+			{Metric: "target_info", Grouping: []string{"instance", "job"}, AllLabels: true},
+		}},
+		{"info data-label selector", `info(up, {k8s_cluster_name=~".+"})`, []Ref{
+			{Metric: "up", Grouping: []string{"instance", "job"}},
+			{Metric: "target_info", Matchers: []Matcher{re("k8s_cluster_name", ".+")}, Grouping: []string{"instance", "job"}},
+		}},
+		{"info other metric", `info(up, {__name__="build_info", version=~".+"})`, []Ref{
+			{Metric: "up", Grouping: []string{"instance", "job"}},
+			{Metric: "build_info", Matchers: []Matcher{re("version", ".+")}, Grouping: []string{"instance", "job"}},
+		}},
 		{"offset and @", `x offset 1h + x @ 1700000000`, []Ref{{Metric: "x", AllLabels: true}, {Metric: "x", AllLabels: true}}},
 		{"recording rule name", `job:http_requests:rate5m{job="a"}`, []Ref{{Metric: "job:http_requests:rate5m", Matchers: []Matcher{eq("job", "a")}}}},
 
@@ -75,13 +87,30 @@ func TestPromQL(t *testing.T) {
 		{"bracket var", `x{job="[[job]]"}`, []Ref{{
 			Metric: "x", Matchers: []Matcher{{Label: "job", Op: MatchEqual, Value: "[[job]]", Variable: true}},
 		}}},
+		{"bracket var as whole query", `[[metric]]`, []Ref{{
+			Matchers: []Matcher{re("__name__", ".*")},
+			Assumed:  true, Reasons: []string{"metric name [[metric]] comes from variable [[metric]]"},
+		}}},
+		{"bracket var grouping", `sum by ([[label]]) (up)`, []Ref{{
+			Metric: "up", AllLabels: true, Assumed: true,
+			Reasons: []string{"grouping label [[label]] comes from variable [[label]]"},
+		}}},
+		{"bracket var as range", `rate(x[[[win]]])`, []Ref{{Metric: "x"}}},
 		{"label name var", `x{$label="a"}`, []Ref{{
 			Metric: "x", AllLabels: true, Assumed: true,
 			Reasons: []string{"matcher label $label comes from variable $label"},
 		}}},
 		{"metric name var", `rate(${prefix}_requests_total[5m])`, []Ref{{
-			Matchers: []Matcher{re("__name__", ".+_requests_total")},
+			Matchers: []Matcher{re("__name__", ".*_requests_total")},
 			Assumed:  true, Reasons: []string{"metric name ${prefix}_requests_total comes from variable ${prefix}"},
+		}}},
+		{"empty-able prefix", `${prefix}requests_total`, []Ref{{
+			Matchers: []Matcher{re("__name__", ".*requests_total")},
+			Assumed:  true, Reasons: []string{"metric name ${prefix}requests_total comes from variable ${prefix}"},
+		}}},
+		{"empty-able suffix", `node_cpu$suffix`, []Ref{{
+			Matchers: []Matcher{re("__name__", "node_cpu.*")},
+			Assumed:  true, Reasons: []string{"metric name node_cpu$suffix comes from variable $suffix"},
 		}}},
 		{"grouping var", `sum by ($group) (x)`, []Ref{{
 			Metric: "x", AllLabels: true, Assumed: true,
@@ -119,8 +148,13 @@ func TestPromQLParseFailure(t *testing.T) {
 	}{
 		{`sum(rate(http_requests_total{job="a"}[5m]) by (code)`, []string{"http_requests_total"}},
 		{`a + on(job) group_left(team) b +`, []string{"a", "b"}},
-		{`rate(foo[5m]) / bar{x="y" ) unless baz`, []string{"foo", "bar", "x", "baz"}}, // unclosed {: label names count too,
+		{`rate(foo[5m]) / bar{x="y" ) unless baz`, []string{"foo", "bar", "x", "unless", "baz"}}, // unclosed {: label names and keywords count too,
 		{`$var +`, nil},
+		{`{__name__="up"} + down +`, []string{"up", "down"}},
+		{`foo{__name__="bar"} +`, []string{"foo"}},
+		{`range + up +`, []string{"range", "up"}},
+		{`start * end offset 5m +`, []string{"start", "end", "offset"}},
+		{`a + on (job) group_left (t) b > bool 1 +`, []string{"a", "b"}},
 		{`)`, nil},
 	}
 	for _, tt := range tests {
@@ -148,6 +182,39 @@ func TestPromQLParseFailure(t *testing.T) {
 	}
 }
 
+// Selectors that name no metric, or name it by regex, in a query that
+// doesn't parse.
+func TestPromQLParseFailureSelectors(t *testing.T) {
+	tests := []struct {
+		query string
+		want  []string // metric, or "re:<regex>" for a __name__ matcher
+	}{
+		{`{job="api"} + down +`, []string{"re:.+", "down"}},
+		{`{__name__=~"node_.+"} + down +`, []string{"re:node_.+", "down"}},
+		{`{__name__!="up"} +`, []string{"re:.+"}},
+		{`{job="a"} + {job="b"} +`, []string{"re:.+"}},
+		{`sum(x{job="a"}) +`, []string{"x"}},
+		{`a and {job="b"} +`, []string{"a", "and", "re:.+"}},
+	}
+	for _, tt := range tests {
+		refs, err := PromQL(tt.query)
+		if err == nil {
+			t.Fatalf("%q parsed", tt.query)
+		}
+		var got []string
+		for _, r := range refs {
+			if r.Metric != "" {
+				got = append(got, r.Metric)
+			} else {
+				got = append(got, "re:"+r.Matchers[0].Value)
+			}
+		}
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("%q: got %v, want %v", tt.query, got, tt.want)
+		}
+	}
+}
+
 func TestSubstituteGrafanaVars(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{`rate(x[$__rate_interval])`, `rate(x[5m])`},
@@ -156,6 +223,8 @@ func TestSubstituteGrafanaVars(t *testing.T) {
 		{`x @ ${__to:date:seconds}`, `x @ 0`},
 		{`x{a="$a"}`, `x{a="__tvtvar0__"}`},
 		{`$m{a="[[b:csv]]"}`, `__tvtvar0__{a="__tvtvar1__"}`},
+		{`[[metric]]`, `__tvtvar0__`},
+		{`rate(x[[[win]]])`, `rate(x[5m])`},
 		{`label_replace(x, "a", "$1", "b", "(.*)")`, `label_replace(x, "a", "$1", "b", "(.*)")`},
 		{`my_offset_$var`, `my_offset___tvtvar0__`},
 	}
