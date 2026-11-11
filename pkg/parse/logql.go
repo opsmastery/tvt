@@ -122,10 +122,30 @@ func (lq *logQuery) use(label string, vars []grafanaVar, filter bool) {
 	}
 	switch {
 	case lq.formatted[label]:
-	case lq.anyParser || lq.parsed[label] || (lq.hasParser && strings.HasSuffix(label, "_extracted")):
+	case lq.hasParser && strings.HasSuffix(label, "_extracted"):
+		// A parser names a field x_extracted only when the stream already
+		// has a label x, so the stream label is read too.
+		lq.extracted = append(lq.extracted, label)
+		if base := strings.TrimSuffix(label, "_extracted"); base != "" {
+			lq.stream = append(lq.stream, base)
+		}
+	case lq.anyParser || lq.parsed[label]:
 		lq.extracted = append(lq.extracted, label)
 	default:
 		lq.stream = append(lq.stream, label)
+	}
+}
+
+// useTemplate records the labels a line_format or label_format template
+// reads.
+func (lq *logQuery) useTemplate(tmpl string, vars []grafanaVar) {
+	fields, whole := templateFields(tmpl)
+	for _, f := range fields {
+		lq.use(f, vars, true)
+	}
+	if whole {
+		lq.allLabels = true
+		lq.reasons = append(lq.reasons, "a template reads the whole label set")
 	}
 }
 
@@ -148,17 +168,15 @@ func isInternalLabel(l string) bool {
 // ref merges the log half with what the PromQL walker found for the
 // placeholder.
 func (lq *logQuery) ref(pr Ref) Ref {
-	// Grouping and without apply after the whole pipeline; label_replace
-	// output is neither a stream nor a parsed label.
+	// Grouping and without apply after the whole pipeline. A label_replace
+	// output still counts as a read: when its regex doesn't match, the
+	// label keeps whatever value the stream or parser gave it.
 	final := *lq
 	final.stream = slices.Clone(lq.stream)
 	final.extracted = slices.Clone(lq.extracted)
 	final.formatted = map[string]bool{}
 	for k := range lq.formatted {
 		final.formatted[k] = true
-	}
-	for _, c := range pr.Created {
-		final.formatted[c] = true
 	}
 	for _, l := range append(slices.Clone(pr.Grouping), pr.Without...) {
 		final.use(l, nil, false)
@@ -435,9 +453,7 @@ func (lq *logQuery) stage(text string, i int, vars []grafanaVar) (int, error) {
 		if err != nil {
 			return 0, fmt.Errorf("logql: line_format: %w", err)
 		}
-		for _, f := range templateFields(s) {
-			lq.use(f, vars, true)
-		}
+		lq.useTemplate(s, vars)
 		return end, nil
 	case "label_format":
 		return lq.labelFormat(text, i, vars)
@@ -541,9 +557,7 @@ func (lq *logQuery) labelFormat(text string, i int, vars []grafanaVar) (int, err
 			if err != nil {
 				return 0, err
 			}
-			for _, f := range templateFields(s) {
-				lq.use(f, vars, true)
-			}
+			lq.useTemplate(s, vars)
 			k = end
 		} else {
 			m := k
@@ -712,22 +726,42 @@ func stringAt(s string, i int) (string, int, error) {
 }
 
 var (
-	templateActionRe = regexp.MustCompile(`\{\{(.*?)\}\}`)
+	templateActionRe = regexp.MustCompile(`(?s)\{\{(.*?)\}\}`)
 	templateFieldRe  = regexp.MustCompile(`\.([A-Za-z_][A-Za-z0-9_]*)`)
+	templateIndexRe  = regexp.MustCompile(`\bindex\s+\.\s*("(?:[^"\\]|\\.)*"|` + "`[^`]*`" + `)`)
+	templateStringRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|` + "`[^`]*`")
 	patternCaptureRe = regexp.MustCompile(`<([A-Za-z_][A-Za-z0-9_]*)>`)
 	namedGroupRe     = regexp.MustCompile(`\(\?P?<([A-Za-z_][A-Za-z0-9_]*)>`)
 )
 
 // templateFields returns the labels a line_format or label_format template
-// reads ({{.name}}).
-func templateFields(tmpl string) []string {
-	var out []string
+// reads: fields ({{.name}}) and static indexes ({{index . "name"}}). whole
+// is true when an action reads the whole label set ({{.}}, {{index . $k}},
+// {{range .}}), so any label can change the output.
+func templateFields(tmpl string) (fields []string, whole bool) {
 	for _, a := range templateActionRe.FindAllStringSubmatch(tmpl, -1) {
-		for _, f := range templateFieldRe.FindAllStringSubmatch(a[1], -1) {
-			out = append(out, f[1])
+		act := templateIndexRe.ReplaceAllStringFunc(a[1], func(m string) string {
+			sub := templateIndexRe.FindStringSubmatch(m)
+			if v, err := strconv.Unquote(sub[1]); err == nil {
+				fields = append(fields, v)
+			}
+			return " "
+		})
+		act = templateStringRe.ReplaceAllString(act, `""`)
+		for _, f := range templateFieldRe.FindAllStringSubmatch(act, -1) {
+			fields = append(fields, f[1])
+		}
+		for i := 0; i < len(act); i++ {
+			if act[i] != '.' || (i > 0 && act[i-1] >= '0' && act[i-1] <= '9') {
+				continue
+			}
+			if i+1 < len(act) && isIdent(act[i+1], true) {
+				continue
+			}
+			whole = true
 		}
 	}
-	return out
+	return fields, whole
 }
 
 func patternNames(p string) []string {
