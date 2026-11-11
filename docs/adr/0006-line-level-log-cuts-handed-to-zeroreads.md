@@ -1,6 +1,6 @@
 # 0006. Line-level log cuts are handed to zeroreads
 
-Date: 2026-11-09 · Status: proposed
+Date: 2026-11-09 · Status: accepted
 
 ## Context
 

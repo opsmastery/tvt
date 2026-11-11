@@ -3,7 +3,7 @@
 A Go CLI that finds telemetry (metrics, labels, log streams, span attributes) that costs money but nobody uses, and opens PRs that drop, downsample or reroute it. A `tvt check` CI gate blocks any change that would break an alert, SLO or viewed dashboard.
 
 - Product spec: `../Spec Telemetry Value Tracker.md`
-- Development plan (phases, sprints, spike results): `docs/plan.md`
+- Roadmap: `docs/ROADMAP.md`. Sprint task lists: `docs/tasks/`
 - Architecture: `docs/architecture.md`. Decisions: `docs/adr/`
 - Test lab: `../tvt-lab` (Podman Grafana stack; `ground-truth.yaml` there is the expected output)
 
@@ -55,8 +55,8 @@ Sprint 1 (Dec 1-12, started early):
 6. Done Nov 10: Mimir cardinality in `pkg/collect/mimir` (`/prometheus/api/v1/cardinality/label_values` on `__name__`, `label_names` plus `label_values?limit=0` per metric). Mimir caps `limit` at 500, so metric names are partitioned by prefix (`{__name__=~"p.*"}`) until each partition is complete; an uncompletable one is `ErrTruncated`. Analysis disabled → `ErrDisabled`, naming `limits.cardinality_analysis_enabled`. `tvt scan --mimir` uses it, with rules from `prometheus.Client` (`Source: "mimir"`). The lab's `mimir-rules` service loads rules into Mimir's ruler; fixtures in `testdata/lab/mimir/` (`SECTIONS=mimir ./scripts/capture-fixtures.sh`). `internal/testutil.MimirNames` fakes the partitioned API from the capture.
 7. Done Nov 10: testing groundwork (PR #9). `internal/testutil` is the only fixture server: any non-GET request or query/proxy endpoint fails the test, enforcing read-only. `cmd/tvt/groundtruth_test.go` asserts the vendored `testdata/lab/ground-truth.yaml` (metrics, rules per source, dashboard viewed state, hard-keep streams, `mimir:`). Fuzz targets: `internal/logfmt`, the Prometheus query-log and Grafana router-log line and file parsers, `parse.LogStreamSelectors`; garbage must give an error, never an empty "unused" result.
 
-Sprint 1 scope is merged (PRs #1-#9, CI green). Before closing it: cut `v0.0.1-rc.1` and verify the signed release (`docs/tasks/2026-11-sprint1-remainder-and-test-groundwork.md`, item 0).
+Sprint 1 is closed: PRs #1-#10 merged, CI green, and `v0.0.1-rc.1` released (6 archives, `checksums.txt` verified with `cosign verify-blob`).
 
-Next: Sprint 2, the PromQL extractor and references (panel/rule expressions and the query log to signals).
+Next: Sprint 2 (`docs/tasks/2026-11-sprint2.md`), starting with the PromQL extractor.
 
 Run `scripts/capture-fixtures.sh` against the lab first and build against those fixtures.
