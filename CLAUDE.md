@@ -25,14 +25,14 @@ make race      # tests with -race
 - `check` fails closed: a config it can't evaluate is a failure.
 - Commits are authored as Jason Vance.
 
-## Status (Nov 9, 2026)
+## Status (Nov 10, 2026)
 
 Done:
 - CLI skeleton.
 - Scoring and cost models with tests.
 - Graph model and SQLite schema.
 - Collector and parser interfaces.
-- CI and goreleaser.
+- CI (lint, race, build, `goreleaser check`, govulncheck, gitleaks) and a tag-triggered release workflow (goreleaser, cosign keyless signing of `checksums.txt`; `-rc.N` tags are pre-releases). `go.mod` pins `toolchain go1.26.11` for govulncheck.
 - Lab running on Jason's Mac since Nov 8, so 30 days of history arrives around Dec 8.
 
 Phase 0 spike findings:
@@ -53,6 +53,9 @@ Sprint 1 (Dec 1-12, started early):
 4. Done Nov 9: `tvt scan` wired (`cmd/tvt/scan.go`). `pkg/scan.Build` is the I/O-free mapping from collector output to graph rows and owns the ID scheme (`prom:metric:<name>`, `rule:<source>:<ns>/<group>/<name>`, `panel:<org>:<uid>:<panel>:<n>`, `var:<org>:<uid>:<name>`; collisions get `#2`). Collection runs before the store is opened, so a failed scan never creates or touches the DB. Views come from `--grafana-log` (lab: `make export-logs` in tvt-lab); every evidence source is stored in `scan_sources` with its coverage, unconfigured ones at 0. Mimir 2.16 has no `/api/v1/status/tsdb` (404); see item 6. References still need the PromQL extractor (Sprint 2). Golden test: `cmd/tvt/scan_test.go` against `testdata/lab` (use `grafana/grafana.log`, not `router.log`, which holds a spike-1 Legacy Queue view).
 5. Done Nov 10: Loki rules collector in `pkg/collect/loki` (YAML from `/loki/api/v1/rules` via `go.yaml.in/yaml/v3`; 404 `no rule groups found` is zero rules; every request sends `X-Query-Tags: Source=tvt`). `tvt scan --loki` adds them as consumers. Until the LogQL extractor exists, `parse.LogStreamSelectors` (a stopgap) pulls stream selectors out of each rule, and `scan.Build` writes a `loki:stream:<canonical selector>` signal with an **assumed** reference (`refs.assumed`, schema v2: covers every label of the stream). An unreadable selector references `loki:stream:*` (every stream).
 6. Done Nov 10: Mimir cardinality in `pkg/collect/mimir` (`/prometheus/api/v1/cardinality/label_values` on `__name__`, `label_names` plus `label_values?limit=0` per metric). Mimir caps `limit` at 500, so metric names are partitioned by prefix (`{__name__=~"p.*"}`) until each partition is complete; an uncompletable one is `ErrTruncated`. Analysis disabled → `ErrDisabled`, naming `limits.cardinality_analysis_enabled`. `tvt scan --mimir` uses it, with rules from `prometheus.Client` (`Source: "mimir"`). The lab's `mimir-rules` service loads rules into Mimir's ruler; fixtures in `testdata/lab/mimir/` (`SECTIONS=mimir ./scripts/capture-fixtures.sh`). `internal/testutil.MimirNames` fakes the partitioned API from the capture.
+7. Done Nov 10: testing groundwork (PR #9). `internal/testutil` is the only fixture server: any non-GET request or query/proxy endpoint fails the test, enforcing read-only. `cmd/tvt/groundtruth_test.go` asserts the vendored `testdata/lab/ground-truth.yaml` (metrics, rules per source, dashboard viewed state, hard-keep streams, `mimir:`). Fuzz targets: `internal/logfmt`, the Prometheus query-log and Grafana router-log line and file parsers, `parse.LogStreamSelectors`; garbage must give an error, never an empty "unused" result.
+
+Sprint 1 scope is merged (PRs #1-#9, CI green). Before closing it: cut `v0.0.1-rc.1` and verify the signed release (`docs/tasks/2026-11-sprint1-remainder-and-test-groundwork.md`, item 0).
 
 Next: Sprint 2, the PromQL extractor and references (panel/rule expressions and the query log to signals).
 
