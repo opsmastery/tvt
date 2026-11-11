@@ -16,7 +16,10 @@ import (
 //
 // Grafana template variables are substituted first (see
 // substituteGrafanaVars). A variable in a metric name or label name makes
-// that Ref Assumed, with the reason. A variable in a matcher value only
+// that Ref Assumed, with the reason; a templated metric name becomes a
+// __name__ matcher holding the name as written, with Variable set, so a
+// caller that knows the variable's values can resolve it. A variable in a
+// matcher value only
 // sets Matcher.Variable: the metric and label are still exact, and an
 // assumed Ref covers every label, which would blind label-level analysis
 // on every templated dashboard. Built-in time variables ($__interval,
@@ -296,7 +299,7 @@ func (w *promWalker) selectorRef(vs *parser.VectorSelector, s scope) Ref {
 			if strings.Contains(m.Value, placeholderPrefix) {
 				restored, found := restoreVars(m.Value, w.vars)
 				reasons = append(reasons, fmt.Sprintf("metric name %s comes from variable %s", restored, varTexts(found)))
-				r.Matchers = append(r.Matchers, Matcher{Label: labels.MetricName, Op: MatchRegexp, Value: nameRegex(m.Value)})
+				r.Matchers = append(r.Matchers, Matcher{Label: labels.MetricName, Op: MatchEqual, Value: restored, Variable: true})
 				continue
 			}
 			if r.Metric == "" {

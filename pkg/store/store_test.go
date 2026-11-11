@@ -60,7 +60,7 @@ func TestRoundTrip(t *testing.T) {
 	con := graph.Consumer{ID: "panel:shop-overview:4", Kind: graph.ConsumerDashboardPanel,
 		Name: "Shop Overview / Cart operations by type", Expr: "sum by (op) (rate(shop_cart_operations_total[$__rate_interval]))",
 		LastViewed: t0.Add(-time.Hour)}
-	ref := graph.Reference{SignalID: sig.ID, ConsumerID: con.ID, LastSeen: t0.Add(-30 * time.Minute), Actor: "admin"}
+	ref := graph.Reference{Evidence: graph.EvidenceObserved, SignalID: sig.ID, ConsumerID: con.ID, LastSeen: t0.Add(-30 * time.Minute), Actor: "admin"}
 	cost := graph.Cost{SignalID: sig.ID, ActiveSeries: 5091, DistinctValues: 2000, MonthlyCost: 12.5}
 
 	id := scan(t, s, t0, func(sc *Scan) {
@@ -113,7 +113,7 @@ func TestAcrossScans(t *testing.T) {
 		must(t, sc.PutSignal(ctx, sig))
 		must(t, sc.PutConsumer(ctx, keep))
 		must(t, sc.PutConsumer(ctx, dash))
-		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "panel:d:1", LastSeen: t0, Actor: "ann"}))
+		must(t, sc.PutReference(ctx, graph.Reference{Evidence: graph.EvidenceObserved, SignalID: "m", ConsumerID: "panel:d:1", LastSeen: t0, Actor: "ann"}))
 		must(t, sc.PutCost(ctx, graph.Cost{SignalID: "m", ActiveSeries: 100}))
 	})
 
@@ -157,9 +157,9 @@ func TestLatestEvidenceWins(t *testing.T) {
 	s, _ := open(t)
 	sig := graph.Signal{ID: "m", Kind: graph.KindMetric, Name: "m", Source: "prom"}
 	con := graph.Consumer{ID: "adhoc:10.0.0.1", Kind: graph.ConsumerAdhocQuery, Name: "10.0.0.1"}
-	old := graph.Reference{SignalID: "m", ConsumerID: con.ID, LastSeen: t0.Add(-time.Hour), Actor: "old"}
-	newer := graph.Reference{SignalID: "m", ConsumerID: con.ID, LastSeen: t0, Actor: "new"}
-	unknown := graph.Reference{SignalID: "m", ConsumerID: con.ID, Actor: "unknown-time"}
+	old := graph.Reference{Evidence: graph.EvidenceObserved, SignalID: "m", ConsumerID: con.ID, LastSeen: t0.Add(-time.Hour), Actor: "old"}
+	newer := graph.Reference{Evidence: graph.EvidenceObserved, SignalID: "m", ConsumerID: con.ID, LastSeen: t0, Actor: "new"}
+	unknown := graph.Reference{Evidence: graph.EvidenceObserved, SignalID: "m", ConsumerID: con.ID, Actor: "unknown-time"}
 
 	for name, order := range map[string][]graph.Reference{
 		"old first":     {old, newer, unknown},
@@ -225,7 +225,7 @@ func TestDanglingReferenceFailsFinish(t *testing.T) {
 	sc, err := s.BeginScan(ctx, t0, 30)
 	must(t, err)
 	must(t, sc.PutSignal(ctx, graph.Signal{ID: "m", Kind: graph.KindMetric, Name: "m", Source: "prom"}))
-	must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "missing"}))
+	must(t, sc.PutReference(ctx, graph.Reference{Evidence: graph.EvidenceObserved, SignalID: "m", ConsumerID: "missing"}))
 	err = sc.Finish(ctx, 1)
 	if err == nil || !strings.Contains(err.Error(), "missing signal or consumer") {
 		t.Fatalf("err = %v", err)
@@ -254,7 +254,7 @@ func TestValidation(t *testing.T) {
 		"no signal id":   sc.PutSignal(ctx, graph.Signal{Kind: graph.KindMetric, Name: "x", Source: "prom"}),
 		"no source":      sc.PutSignal(ctx, graph.Signal{ID: "x", Kind: graph.KindMetric, Name: "x"}),
 		"no consumer id": sc.PutConsumer(ctx, graph.Consumer{Kind: graph.ConsumerAlertRule}),
-		"no ref ends":    sc.PutReference(ctx, graph.Reference{SignalID: "x"}),
+		"no ref ends":    sc.PutReference(ctx, graph.Reference{Evidence: graph.EvidenceObserved, SignalID: "x"}),
 		"no cost signal": sc.PutCost(ctx, graph.Cost{}),
 	}
 	for name, err := range bad {
@@ -360,8 +360,8 @@ func TestAssumedReferences(t *testing.T) {
 	s, _ := open(t)
 	sig := graph.Signal{ID: "loki:stream:{app=\"shop\"}", Kind: graph.KindStream, Name: `{app="shop"}`, Source: "loki"}
 	con := graph.Consumer{ID: "rule:loki:a/b/c", Kind: graph.ConsumerAlertRule, Name: "c"}
-	exact := graph.Reference{SignalID: sig.ID, ConsumerID: con.ID}
-	assumed := graph.Reference{SignalID: sig.ID, ConsumerID: con.ID, Assumed: true}
+	exact := graph.Reference{Evidence: graph.EvidenceObserved, SignalID: sig.ID, ConsumerID: con.ID}
+	assumed := graph.Reference{Evidence: graph.EvidenceObserved, SignalID: sig.ID, ConsumerID: con.ID, Assumed: true}
 
 	// Within a scan the broader, assumed reading wins whatever the order.
 	for name, order := range map[string][]graph.Reference{
@@ -402,10 +402,14 @@ func versionOneDB(t *testing.T, path string) *Store {
 	scan(t, s, t0, func(sc *Scan) {
 		must(t, sc.PutSignal(ctx, graph.Signal{ID: "m", Kind: graph.KindMetric, Name: "m", Source: "prom"}))
 		must(t, sc.PutConsumer(ctx, graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}))
-		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c"}))
+		must(t, sc.PutReference(ctx, graph.Reference{Evidence: graph.EvidenceObserved, SignalID: "m", ConsumerID: "c"}))
 	})
 	for _, q := range []string{
 		`ALTER TABLE refs DROP COLUMN assumed`,
+		`ALTER TABLE refs DROP COLUMN evidence`,
+		`ALTER TABLE refs DROP COLUMN labels`,
+		`ALTER TABLE refs DROP COLUMN all_labels`,
+		`ALTER TABLE refs DROP COLUMN reason`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -426,8 +430,8 @@ func TestUpgradeFromVersion1(t *testing.T) {
 	defer s.Close()
 	var v string
 	must(t, s.db.QueryRow(`SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&v))
-	if v != "2" {
-		t.Errorf("schema_version = %s, want 2", v)
+	if v != "3" {
+		t.Errorf("schema_version = %s, want 3", v)
 	}
 	info, err := s.LatestScan(ctx)
 	must(t, err)
@@ -440,7 +444,7 @@ func TestUpgradeFromVersion1(t *testing.T) {
 	scan(t, s, t0.Add(time.Hour), func(sc *Scan) {
 		must(t, sc.PutSignal(ctx, graph.Signal{ID: "m", Kind: graph.KindMetric, Name: "m", Source: "prom"}))
 		must(t, sc.PutConsumer(ctx, graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}))
-		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c", Assumed: true}))
+		must(t, sc.PutReference(ctx, graph.Reference{Evidence: graph.EvidenceObserved, SignalID: "m", ConsumerID: "c", Assumed: true}))
 	})
 }
 
@@ -464,5 +468,98 @@ func TestUpgradeInterrupted(t *testing.T) {
 	must(t, err)
 	if len(refs) != 1 {
 		t.Errorf("refs = %+v, want the old reference", refs)
+	}
+}
+
+func TestReferenceLabelDetail(t *testing.T) {
+	s, _ := open(t)
+	sig := graph.Signal{ID: "m", Kind: graph.KindMetric, Name: "m", Source: "prom"}
+	con := graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}
+	a := graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: graph.EvidenceDeclared,
+		Labels:  []graph.LabelRef{{Name: "route", Use: graph.LabelGroup}, {Name: "job", Use: graph.LabelMatch}},
+		Assumed: true, Reasons: []string{"matcher value from $x"}}
+	b := graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: graph.EvidenceDeclared,
+		Labels:    []graph.LabelRef{{Name: "job", Use: graph.LabelMatch}, {Name: "odd\nname", Use: graph.LabelWithout}},
+		AllLabels: true, Reasons: []string{"query did not parse:\nline 2"}}
+
+	// Within a scan, repeats merge: union of labels and reasons, and the
+	// broader flags.
+	id := scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutConsumer(ctx, con))
+		must(t, sc.PutReference(ctx, a))
+		must(t, sc.PutReference(ctx, b))
+	})
+	refs, err := s.References(ctx, id)
+	must(t, err)
+	want := graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: graph.EvidenceDeclared,
+		Labels: []graph.LabelRef{
+			{Name: "job", Use: graph.LabelMatch}, {Name: "odd\nname", Use: graph.LabelWithout}, {Name: "route", Use: graph.LabelGroup}},
+		AllLabels: true, Assumed: true,
+		Reasons: []string{"matcher value from $x", "query did not parse: line 2"}}
+	if len(refs) != 1 || !reflect.DeepEqual(refs[0], want) {
+		t.Errorf("merged ref\n got  %+v\n want %+v", refs, want)
+	}
+
+	// A later scan replaces the detail with its own reading.
+	id = scan(t, s, t0.Add(time.Hour), func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutConsumer(ctx, con))
+		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: graph.EvidenceDeclared}))
+	})
+	refs, err = s.References(ctx, id)
+	must(t, err)
+	if len(refs) != 1 || refs[0].Labels != nil || refs[0].AllLabels || refs[0].Assumed || refs[0].Reasons != nil {
+		t.Errorf("later scan: refs = %+v, want plain", refs)
+	}
+
+	// Evidence is required.
+	scan(t, s, t0.Add(2*time.Hour), func(sc *Scan) {
+		if err := sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c"}); err == nil {
+			t.Error("reference without evidence accepted")
+		}
+		if err := sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: "seen"}); err == nil {
+			t.Error("reference with evidence \"seen\" accepted")
+		}
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutConsumer(ctx, con))
+	})
+}
+
+// A version 2 database: its assumed references covered every label, so the
+// upgrade sets all_labels from assumed.
+func TestUpgradeFromVersion2(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v2.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, graph.Signal{ID: "m", Kind: graph.KindMetric, Name: "m", Source: "prom"}))
+		must(t, sc.PutConsumer(ctx, graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}))
+		must(t, sc.PutConsumer(ctx, graph.Consumer{ID: "d", Kind: graph.ConsumerAlertRule, Name: "d"}))
+		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: graph.EvidenceDeclared, Assumed: true}))
+		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "d", Evidence: graph.EvidenceDeclared}))
+	})
+	for _, q := range []string{
+		`ALTER TABLE refs DROP COLUMN evidence`,
+		`ALTER TABLE refs DROP COLUMN labels`,
+		`ALTER TABLE refs DROP COLUMN all_labels`,
+		`ALTER TABLE refs DROP COLUMN reason`,
+		`UPDATE meta SET value = '2' WHERE key = 'schema_version'`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	info, err := s.LatestScan(ctx)
+	must(t, err)
+	refs, err := s.References(ctx, info.ID)
+	must(t, err)
+	if len(refs) != 2 || !refs[0].Assumed || !refs[0].AllLabels || refs[0].Evidence != "" || refs[1].AllLabels {
+		t.Errorf("refs after upgrade = %+v, want c assumed and all labels, d neither, evidence unknown", refs)
 	}
 }
