@@ -219,7 +219,7 @@ func assertHardKeepStreams(t *testing.T, g scanGraph, streams map[string]gtEntry
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		refs, err := parse.LogStreamSelectors(key)
+		refs, err := parse.LogQL(key)
 		if err != nil || len(refs) != 1 {
 			t.Fatalf("ground-truth stream %s: %v", key, err)
 		}
@@ -248,8 +248,8 @@ func selectorMatches(t *testing.T, sel string, labels map[string]string) bool {
 	if sel == scan.AllStreams {
 		return true
 	}
-	refs, err := parse.LogStreamSelectors(sel)
-	if err != nil {
+	refs, err := parse.LogQL(sel)
+	if err != nil || len(refs) != 1 {
 		t.Fatalf("stream signal %q: %v", sel, err)
 	}
 	for _, m := range refs[0].Matchers {

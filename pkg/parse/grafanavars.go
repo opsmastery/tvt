@@ -119,8 +119,9 @@ const (
 	ctxName     // directly after a name character: part of that name
 )
 
-// scanContexts labels each byte of a query as code, string or duration
-// (inside [...]); contextAt refines code positions after offset or @.
+// scanContexts labels each byte of a query as code, string (strings and
+// # comments) or duration (inside [...]); contextAt refines code positions
+// after offset or @.
 func scanContexts(q string) []textCtx {
 	ctx := make([]textCtx, len(q)+1)
 	// [[var]] tokens are variables, not range brackets: they take the
@@ -143,6 +144,16 @@ func scanContexts(q string) []textCtx {
 			continue
 		}
 		switch c := q[i]; c {
+		case '#': // comment to end of line; treated like a string
+			end := len(q)
+			if nl := strings.IndexByte(q[i:], '\n'); nl >= 0 {
+				end = i + nl
+			}
+			for j := i; j < end; j++ {
+				ctx[j] = ctxString
+			}
+			i = end - 1
+			continue
 		case '"', '\'', '`':
 			end := stringEnd(q, i)
 			for j := i; j < end; j++ {

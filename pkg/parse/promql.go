@@ -488,23 +488,33 @@ func followsName(s string, i int) bool {
 }
 
 // skipTo returns the index just past the first close after i that is not
-// inside a string, or len(s).
+// inside a string, or len(s) when there is none (an unterminated string
+// counts as none).
 func skipTo(s string, i int, close byte) int {
+	j, _ := closeAfter(s, i, close)
+	return j
+}
+
+func closeAfter(s string, i int, close byte) (int, bool) {
 	for j := i + 1; j < len(s); j++ {
 		switch s[j] {
 		case '"', '\'', '`':
-			j = stringEnd(s, j) - 1
+			end := stringEnd(s, j)
+			if end == len(s) && (end-j < 2 || s[end-1] != s[j]) {
+				return len(s), false // unterminated
+			}
+			j = end - 1
 		case close:
-			return j + 1
+			return j + 1, true
 		}
 	}
-	return len(s)
+	return len(s), false
 }
 
 // skipOrStep skips a {...} or [...] group; an unclosed one skips only its
 // opening byte, so the names after it are still candidates.
 func skipOrStep(s string, i int, close byte) int {
-	if j := skipTo(s, i, close); j <= len(s) && s[j-1] == close {
+	if j, ok := closeAfter(s, i, close); ok {
 		return j
 	}
 	return i + 1
