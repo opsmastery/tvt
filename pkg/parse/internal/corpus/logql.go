@@ -154,6 +154,7 @@ var (
 // redaction can't change how a query parses. Review the output before
 // committing: comments and kept strings can still hold literal text.
 func RedactLogQL(q string) string {
+	code := blankComments(q)
 	var b strings.Builder
 	last := 0
 	for i := 0; i < len(q); i++ {
@@ -173,9 +174,9 @@ func RedactLogQL(q string) string {
 		lit := q[i:end]
 		b.WriteString(q[last:i])
 		switch {
-		case ipPosition.MatchString(q[:i]):
+		case ipPosition.MatchString(code[:i]):
 			b.WriteString(`"192.0.2.0/24"`)
-		case valuePosition.MatchString(q[:i]) && !strings.Contains(lit, "{{"):
+		case valuePosition.MatchString(code[:i]) && !strings.Contains(lit, "{{"):
 			b.WriteString(`"redacted` + strings.Join(grafanaVar.FindAllString(lit, -1), "") + `"`)
 		default:
 			b.WriteString(lit)
@@ -185,6 +186,24 @@ func RedactLogQL(q string) string {
 	}
 	b.WriteString(q[last:])
 	return b.String()
+}
+
+// blankComments returns q with each # comment replaced by spaces, so a
+// comment between an operator and its value still leaves the value in a
+// value position. Offsets are unchanged.
+func blankComments(q string) string {
+	b := []byte(q)
+	for i := 0; i < len(b); i++ {
+		switch b[i] {
+		case '"', '`':
+			i = stringEnd(q, i) - 1
+		case '#':
+			for ; i < len(b) && b[i] != '\n'; i++ {
+				b[i] = ' '
+			}
+		}
+	}
+	return string(b)
 }
 
 // stringEnd returns the index just past the string literal at s[i], or
