@@ -123,8 +123,25 @@ const (
 // (inside [...]); contextAt refines code positions after offset or @.
 func scanContexts(q string) []textCtx {
 	ctx := make([]textCtx, len(q)+1)
+	// [[var]] tokens are variables, not range brackets: they take the
+	// context around them and leave the bracket depth alone.
+	bracketVars := map[int]int{}
+	for _, loc := range grafanaVarRe.FindAllStringIndex(q, -1) {
+		if strings.HasPrefix(q[loc[0]:], "[[") {
+			bracketVars[loc[0]] = loc[1]
+		}
+	}
 	brackets := 0
 	for i := 0; i < len(q); i++ {
+		if end, ok := bracketVars[i]; ok {
+			if brackets > 0 {
+				for j := i; j < end; j++ {
+					ctx[j] = ctxDuration
+				}
+			}
+			i = end - 1
+			continue
+		}
 		switch c := q[i]; c {
 		case '"', '\'', '`':
 			end := stringEnd(q, i)
@@ -206,11 +223,12 @@ func restoreVars(s string, vars []grafanaVar) (string, []grafanaVar) {
 }
 
 // nameRegex turns a name containing placeholders into a regex over the
-// names it could be: literal parts quoted, each variable ".+".
+// names it could be: literal parts quoted, each variable ".*" (a variable
+// can be empty: ${prefix}requests_total may select requests_total).
 func nameRegex(s string) string {
 	parts := placeholderRe.Split(s, -1)
 	for i, p := range parts {
 		parts[i] = regexp.QuoteMeta(p)
 	}
-	return strings.Join(parts, ".+")
+	return strings.Join(parts, ".*")
 }
