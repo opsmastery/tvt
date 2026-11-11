@@ -22,6 +22,7 @@ type query struct {
 	lang     string // "promql" or "logql"
 	variable bool   // a dashboard variable's query (label_values() etc.)
 	vars     map[string]varValues
+	shows    []string // labels a panel legend or annotation template shows
 }
 
 // varValues are the values a dashboard variable can take. any: it can take
@@ -30,6 +31,10 @@ type query struct {
 type varValues struct {
 	values []string
 	any    bool
+	// escaped: Grafana's Prometheus and Loki datasources regex-escape the
+	// values by default (a multi-value or "All" variable), so in a regex
+	// matcher they match only themselves.
+	escaped bool
 }
 
 // refKey identifies one graph reference.
@@ -104,6 +109,13 @@ func (r *resolver) recordingRule(consumerID, metric string) {
 // add records a reference, merging with an existing one for the same key:
 // the union of labels and reasons, and the broader flags.
 func (r *resolver) add(ref graph.Reference) refKey {
+	k, _ := r.merge(ref)
+	return k
+}
+
+// merge is add that also reports whether the stored reference changed (a
+// new key, or new labels, reasons or flags).
+func (r *resolver) merge(ref graph.Reference) (refKey, bool) {
 	k := refKey{ref.SignalID, ref.ConsumerID, ref.Via}
 	cur := r.refs[k]
 	// Fresh slices every time: callers copy references built from others,
@@ -112,13 +124,18 @@ func (r *resolver) add(ref graph.Reference) refKey {
 		ref.Labels = sortLabels(append([]graph.LabelRef(nil), ref.Labels...))
 		ref.Reasons = sortStrings(append([]string(nil), ref.Reasons...))
 		r.refs[k] = &ref
-		return k
+		return k, true
 	}
+	before := *cur
 	cur.Labels = sortLabels(append(append([]graph.LabelRef(nil), cur.Labels...), ref.Labels...))
 	cur.Reasons = sortStrings(append(append([]string(nil), cur.Reasons...), ref.Reasons...))
 	cur.AllLabels = cur.AllLabels || ref.AllLabels
 	cur.Assumed = cur.Assumed || ref.Assumed
-	return k
+	cur.ResultLabels = cur.ResultLabels || ref.ResultLabels
+	// Unions only grow, so equal lengths mean nothing new.
+	changed := len(cur.Labels) != len(before.Labels) || len(cur.Reasons) != len(before.Reasons) ||
+		cur.AllLabels != before.AllLabels || cur.Assumed != before.Assumed || cur.ResultLabels != before.ResultLabels
+	return k, changed
 }
 
 // resolve parses one query and adds its direct references.
@@ -152,12 +169,13 @@ func (r *resolver) resolve(q query) {
 // resolveMetric adds the references of one PromQL selector.
 func (r *resolver) resolveMetric(q query, pr parse.Ref, failed bool) {
 	base := graph.Reference{
-		ConsumerID: q.consumer.ID,
-		Evidence:   q.consumer.Kind.Evidence(),
-		Labels:     promLabels(pr),
-		AllLabels:  pr.AllLabels,
-		Assumed:    pr.Assumed,
-		Reasons:    pr.Reasons,
+		ConsumerID:   q.consumer.ID,
+		Evidence:     q.consumer.Kind.Evidence(),
+		Labels:       appendUses(promLabels(pr), q.shows, graph.LabelLegend),
+		AllLabels:    pr.AllLabels,
+		ResultLabels: pr.ResultLabels,
+		Assumed:      pr.Assumed,
+		Reasons:      pr.Reasons,
 	}
 	names := []string{pr.Metric}
 	if pr.Metric == "" {
@@ -225,7 +243,7 @@ func (r *resolver) namesMatch(name string, ms []parse.Matcher, vars map[string]v
 		}
 		op, values := m.Op, []string{m.Value}
 		if m.Variable {
-			vs, ok := expandVars(m.Value, vars)
+			vs, ok := expandVars(m.Value, vars, isRegex(m.Op))
 			if !ok {
 				pop, pattern, narrows := varPattern(m.Op, m.Value)
 				if !narrows {
@@ -294,12 +312,13 @@ func (r *resolver) matches(op parse.MatchOp, pattern, v string) (bool, error) {
 // value), assumed. A selector left with no matchers is AllStreams.
 func (r *resolver) resolveStream(q query, pr parse.Ref) {
 	base := graph.Reference{
-		ConsumerID: q.consumer.ID,
-		Evidence:   q.consumer.Kind.Evidence(),
-		Labels:     logLabels(pr),
-		AllLabels:  pr.AllLabels,
-		Assumed:    pr.Assumed,
-		Reasons:    pr.Reasons,
+		ConsumerID:   q.consumer.ID,
+		Evidence:     q.consumer.Kind.Evidence(),
+		Labels:       appendUses(logLabels(pr), q.shows, graph.LabelLegend),
+		AllLabels:    pr.AllLabels,
+		ResultLabels: pr.ResultLabels,
+		Assumed:      pr.Assumed,
+		Reasons:      pr.Reasons,
 	}
 	sels := [][]parse.Matcher{nil}
 	for _, m := range pr.Matchers {
@@ -310,7 +329,7 @@ func (r *resolver) resolveStream(q query, pr parse.Ref) {
 			continue
 		}
 		op, values := m.Op, []string(nil)
-		vs, ok := expandVars(m.Value, q.vars)
+		vs, ok := expandVars(m.Value, q.vars, isRegex(m.Op))
 		if ok && len(sels)*len(vs) <= maxVarExpansions {
 			values = vs
 		} else {
@@ -350,12 +369,39 @@ func (r *resolver) resolveStream(q query, pr parse.Ref) {
 	}
 }
 
-var varRefRe = regexp.MustCompile(`\$\{(\w+)(?::[^}]*)?\}|\[\[(\w+)(?::[^\]]*)?\]\]|\$(\w+)`)
+// varRefRe is Grafana's interpolation syntax, as parse accepts it: $var,
+// [[var]] / [[var:format]] and ${var} / ${var.field} / ${var:format}.
+var varRefRe = regexp.MustCompile(`\$(\w+)|\[\[(\w+?)(?::(\w+))?\]\]|\$\{(\w+)(?:\.([^:^}]+))?(?::([^}]+))?\}`)
+
+// varRef is one variable reference in a matcher value.
+type varRef struct{ name, field, format string }
+
+func varRefAt(value string, loc []int) varRef {
+	g := func(i int) string {
+		if loc[2*i] < 0 {
+			return ""
+		}
+		return value[loc[2*i]:loc[2*i+1]]
+	}
+	switch {
+	case loc[2] >= 0:
+		return varRef{name: g(1)}
+	case loc[4] >= 0:
+		return varRef{name: g(2), format: g(3)}
+	}
+	return varRef{name: g(4), field: g(5), format: g(6)}
+}
+
+func isRegex(op parse.MatchOp) bool { return op == parse.MatchRegexp || op == parse.MatchNotRegex }
 
 // expandVars returns every text value can take with each variable replaced
-// by one of its values. ok is false when a variable is unknown, can take
-// values tvt doesn't know, or the expansion is too large.
-func expandVars(value string, vars map[string]varValues) ([]string, bool) {
+// by one of its values, formatted as Grafana interpolates it into a regex
+// matcher (regex) or an equality matcher. ok is false when a variable is
+// unknown, can take values tvt doesn't know, uses a field (${var.text}) or
+// a format tvt doesn't model (csv, json, ...), or the expansion is too
+// large. Each value of a multi-value variable is expanded on its own:
+// Grafana's (a|b) matches exactly the union.
+func expandVars(value string, vars map[string]varValues, regex bool) ([]string, bool) {
 	locs := varRefRe.FindAllStringSubmatchIndex(value, -1)
 	if len(locs) == 0 {
 		return []string{value}, true
@@ -363,20 +409,28 @@ func expandVars(value string, vars map[string]varValues) ([]string, bool) {
 	out := []string{""}
 	last := 0
 	for _, loc := range locs {
-		name := ""
-		for g := 1; g <= 3; g++ {
-			if loc[2*g] >= 0 {
-				name = value[loc[2*g]:loc[2*g+1]]
-			}
+		ref := varRefAt(value, loc)
+		vv, ok := vars[ref.name]
+		if !ok || vv.any || len(vv.values) == 0 || len(out)*len(vv.values) > maxVarExpansions || ref.field != "" {
+			return nil, false
 		}
-		vv, ok := vars[name]
-		if !ok || vv.any || len(vv.values) == 0 || len(out)*len(vv.values) > maxVarExpansions {
+		var escape bool
+		switch ref.format {
+		case "":
+			escape = vv.escaped
+		case "regex":
+			escape = true
+		case "raw", "pipe": // pipe joins raw values with |: the union again
+		default:
 			return nil, false
 		}
 		lit := value[last:loc[0]]
 		var next []string
 		for _, o := range out {
 			for _, v := range vv.values {
+				if regex && escape {
+					v = regexp.QuoteMeta(v)
+				}
 				next = append(next, o+lit+v)
 			}
 		}
@@ -392,27 +446,29 @@ func expandVars(value string, vars map[string]varValues) ([]string, bool) {
 // into the regex it can still promise: literal text stays, each variable
 // becomes ".*" (it can be empty). narrows is false when that says nothing
 // (only variables, or a negative matcher, which could exclude anything or
-// nothing), so the matcher matches every value.
+// nothing) or can't be trusted: in a regex matcher, literal text with
+// regex syntax (as in "[$env]") can mean something else once the variable
+// is replaced, so the matcher matches every value.
 func varPattern(op parse.MatchOp, value string) (parse.MatchOp, string, bool) {
 	if op != parse.MatchEqual && op != parse.MatchRegexp {
 		return op, "", false
 	}
-	var b strings.Builder
+	var lits []string
 	last := 0
 	for _, loc := range varRefRe.FindAllStringIndex(value, -1) {
-		lit := value[last:loc[0]]
-		if op == parse.MatchEqual {
-			lit = regexp.QuoteMeta(lit)
-		}
-		b.WriteString(lit + ".*")
+		lits = append(lits, value[last:loc[0]])
 		last = loc[1]
 	}
-	lit := value[last:]
-	if op == parse.MatchEqual {
-		lit = regexp.QuoteMeta(lit)
+	lits = append(lits, value[last:])
+	for i, lit := range lits {
+		if regexp.QuoteMeta(lit) != lit {
+			if op == parse.MatchRegexp {
+				return op, "", false
+			}
+			lits[i] = regexp.QuoteMeta(lit)
+		}
 	}
-	b.WriteString(lit)
-	pattern := b.String()
+	pattern := strings.Join(lits, ".*")
 	if strings.Trim(pattern, ".*") == "" {
 		return op, "", false
 	}
@@ -440,6 +496,7 @@ func dashboardVars(d collect.Dashboard, metrics []string) map[string]varValues {
 		if v.IncludeAll && v.AllValue != "" {
 			vv.any = true // a custom "All" value (often .*) can match anything
 		}
+		vv.escaped = v.Multi || v.IncludeAll
 		out[v.Name] = vv
 	}
 	return out
@@ -484,17 +541,21 @@ func (r *resolver) chains() {
 	sort.Strings(consumers)
 	for _, c := range consumers {
 		for _, k := range append([]refKey(nil), r.direct[c]...) {
-			r.follow(c, *r.refs[k], map[string]bool{c: true})
+			r.follow(c, *r.refs[k])
 		}
 	}
 }
 
-func (r *resolver) follow(consumer string, out graph.Reference, seen map[string]bool) {
+// follow adds the references through each rule writing out's signal and
+// goes on from each one only when that changed what is stored: an input
+// shared by several rules is walked again only to carry labels, reasons or
+// flags it hasn't seen, so the work is bounded by what can be merged, not
+// by the number of paths, and cycles end once a lap adds nothing.
+func (r *resolver) follow(consumer string, out graph.Reference) {
 	for _, rule := range r.recordedBy[out.SignalID] {
-		if seen[rule] {
-			continue
+		if rule == consumer {
+			continue // a rule reading its own output depends on nothing new
 		}
-		seen[rule] = true
 		for _, k := range r.direct[rule] {
 			in := *r.refs[k]
 			ref := graph.Reference{
@@ -505,12 +566,15 @@ func (r *resolver) follow(consumer string, out graph.Reference, seen map[string]
 				Labels:     append(append([]graph.LabelRef(nil), in.Labels...), out.Labels...),
 				AllLabels:  in.AllLabels || out.AllLabels,
 				Assumed:    in.Assumed || out.Assumed,
-				Reasons:    append(append([]string(nil), in.Reasons...), out.Reasons...),
+				// A rule's input labels reach the reader only if they
+				// survive both the rule and the reader.
+				ResultLabels: in.ResultLabels && out.ResultLabels,
+				Reasons:      append(append([]string(nil), in.Reasons...), out.Reasons...),
 			}
-			r.add(ref)
-			r.follow(consumer, ref, seen)
+			if k, changed := r.merge(ref); changed {
+				r.follow(consumer, *r.refs[k])
+			}
 		}
-		delete(seen, rule)
 	}
 }
 
@@ -630,4 +694,24 @@ func sortStrings(s []string) []string {
 		}
 	}
 	return out
+}
+
+var templateLabelRe = regexp.MustCompile(`\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`)
+
+// shownLabels returns the label names {{label}} templates (a panel's
+// legendFormat, an annotation's title and text) and comma-separated tag
+// keys show.
+func shownLabels(templates []string, tagKeys string) []string {
+	var out []string
+	for _, t := range templates {
+		for _, m := range templateLabelRe.FindAllStringSubmatch(t, -1) {
+			out = append(out, m[1])
+		}
+	}
+	for _, k := range strings.Split(tagKeys, ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			out = append(out, k)
+		}
+	}
+	return sortStrings(out)
 }

@@ -37,6 +37,7 @@ func PromVariable(query string) ([]Ref, error) {
 		refs, err := PromQL(args[0])
 		for i := range refs {
 			refs[i].AllLabels = true
+			refs[i].ResultLabels = false // the variable holds names, not series
 		}
 		return refs, err
 	}
@@ -76,9 +77,11 @@ func LogVariable(query string) ([]Ref, error) {
 
 // readLabel records that a label_values() variable reads label on each Ref:
 // as grouping for PromQL, as a stream label for LogQL. A label name from a
-// variable could be any label, so the Refs then depend on all of them.
+// variable could be any label, so the Refs then depend on all of them. No
+// other label reaches the variable, so ResultLabels is cleared.
 func readLabel(refs []Ref, label string, stream bool) {
 	for i := range refs {
+		refs[i].ResultLabels = false // the variable holds one label's values
 		switch {
 		case label == "" || label == "__name__":
 		case strings.ContainsAny(label, "$["):
