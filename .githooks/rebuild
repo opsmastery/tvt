@@ -1,0 +1,11 @@
+#!/bin/sh
+# Shared by post-checkout and post-merge: keep bin/tvt in step with the
+# source. Never fails the git command; skipped mid-rebase.
+for d in rebase-merge rebase-apply; do
+	[ -d "$(git rev-parse --git-path "$d")" ] && exit 0
+done
+cd "$(git rev-parse --show-toplevel)" || exit 0
+if ! make build >/dev/null 2>&1; then
+	echo "warning: make build failed; bin/tvt is stale" >&2
+fi
+exit 0

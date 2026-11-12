@@ -7,7 +7,7 @@ LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.Commit=$(COMMIT) \
 	-X $(MODULE)/internal/version.Date=$(DATE)
 
-.PHONY: all build test race vet fmt fmt-check lint clean
+.PHONY: all build test race vet fmt fmt-check lint clean hooks
 
 all: lint test build
 
@@ -30,6 +30,12 @@ fmt-check:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
 lint: fmt-check vet
+
+# Git hooks in .githooks: pre-commit (blocked files, gofmt, vet, go mod
+# tidy, schema tests, gitleaks), pre-push (go test), post-checkout and
+# post-merge (rebuild bin/tvt).
+hooks:
+	git config core.hooksPath .githooks
 
 clean:
 	rm -rf bin dist

@@ -1,0 +1,53 @@
+#!/bin/sh
+# tvt pre-commit: fast checks on what is staged. Enable with `make hooks`.
+# Skip once with `git commit --no-verify` (CI runs the same checks).
+set -eu
+
+fail() { printf 'pre-commit: %s\n' "$*" >&2; exit 1; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -n "$staged" ] || exit 0
+
+# 1. Files that must never be committed: internal planning, scan databases,
+#    local configs and price cards (negotiated prices), env files and keys.
+#    .gitignore covers most of these; this also catches `git add -f`.
+blocked=$(printf '%s\n' "$staged" | grep -E \
+	'^docs/plan\.md$|\.db$|\.db-(journal|shm|wal)$|^tvt\.yaml$|^pricecard\.yaml$|(^|/)\.env(\..*)?$|\.key$' || true)
+[ -z "$blocked" ] || fail "these files must not be committed:
+$blocked"
+
+go_files=$(printf '%s\n' "$staged" | grep -E '\.go$' || true)
+
+# 2. gofmt, on the staged content rather than the working tree.
+if [ -n "$go_files" ]; then
+	unformatted=""
+	for f in $go_files; do
+		if [ -n "$(git show ":$f" | gofmt -l 2>&1)" ]; then
+			unformatted="$unformatted
+$f"
+		fi
+	done
+	[ -z "$unformatted" ] || fail "gofmt needed (run make fmt, then git add):$unformatted"
+fi
+
+# 3. go vet.
+if [ -n "$go_files" ]; then
+	go vet ./... || fail "go vet failed"
+fi
+
+# 4. go.mod and go.sum tidy.
+if printf '%s\n' "$staged" | grep -qE '^go\.(mod|sum)$'; then
+	go mod tidy -diff >/dev/null || fail "go.mod/go.sum not tidy (run go mod tidy)"
+fi
+
+# 5. Schema changes: a new SchemaVersion, upgrade step and frozen copy.
+if printf '%s\n' "$staged" | grep -qE '^pkg/graph/schema\.sql$|^pkg/store/'; then
+	go test -count=1 -run 'Schema|Upgrade' ./pkg/store >/dev/null ||
+		fail "store schema tests failed (go test -run 'Schema|Upgrade' ./pkg/store)"
+fi
+
+# 6. Secrets in the staged diff, before they reach GitHub.
+command -v gitleaks >/dev/null 2>&1 ||
+	fail "gitleaks not installed (brew install gitleaks); it keeps tokens out of commits"
+gitleaks git --pre-commit --staged --redact --no-banner --log-level warn ||
+	fail "gitleaks found a possible secret in the staged changes"
