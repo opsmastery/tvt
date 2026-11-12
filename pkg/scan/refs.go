@@ -3,6 +3,7 @@ package scan
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +36,10 @@ type query struct {
 	// collectedOnly: resolve only against collected metrics, as for a
 	// query that didn't parse (runbook steps: prose can look like PromQL).
 	collectedOnly bool
+	// unparsed: the query runs on a datasource tvt doesn't parse; it is
+	// read as PromQL against collected metrics only, and every reference
+	// is assumed and reads every label, with this as the reason.
+	unparsed string
 }
 
 // varValues are the values a dashboard variable can take. any: it can take
@@ -182,6 +187,16 @@ func (r *resolver) resolve(q query) {
 	failed := err != nil || q.collectedOnly
 	for _, pr := range refs {
 		pr.AllLabels = pr.AllLabels || q.allLabels
+		if q.unparsed != "" {
+			// Only names the query spells out: a wildcard from another
+			// language's syntax (TraceQL's { .service.name = "x" }) would
+			// otherwise protect every metric.
+			if pr.Metric == "" {
+				continue
+			}
+			pr.Assumed, pr.AllLabels = true, true
+			pr.Reasons = append(slices.Clone(pr.Reasons), q.unparsed)
+		}
 		if q.lang == "logql" {
 			r.resolveStream(q, pr)
 		} else {

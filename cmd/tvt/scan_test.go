@@ -289,16 +289,18 @@ func TestScanLab(t *testing.T) {
 	// The Grafana and Prometheus logs are configured, the probe proved the
 	// query log, and each covers part of the window; Loki's query log is
 	// recorded as not configured. SLO definitions and runbooks are read in
-	// full: the Sloth SLO and the ShopPaymentQueueBacklog runbook.
+	// full: the Sloth SLO and the ShopPaymentQueueBacklog runbook. So are
+	// the datasources of every dashboard and Grafana rule query.
 	srcs, err := st.Sources(ctx, info.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(srcs) != 5 || l.probes.Load() != 1 {
+	if len(srcs) != 6 || l.probes.Load() != 1 {
 		t.Fatalf("sources = %+v, probes %d", srcs, l.probes.Load())
 	}
 	for _, s := range srcs {
-		if s.Source == scan.SourceSLOs || s.Source == scan.SourceRunbooks {
+		// Every lab dashboard and Grafana rule query is Prometheus or Loki.
+		if s.Source == scan.SourceSLOs || s.Source == scan.SourceRunbooks || s.Source == scan.SourceDatasources {
 			if !s.Configured || s.Coverage != 1 || s.Gap != "" {
 				t.Errorf("source %+v", s)
 			}

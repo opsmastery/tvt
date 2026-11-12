@@ -2,6 +2,7 @@ package scan
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
@@ -147,4 +148,50 @@ func definitionSource(name string, configured bool, total, bad int, gaps []strin
 	}
 	s.Gap = strings.Join(gaps, "\n")
 	return s
+}
+
+// dsQueries turns dashboard and Grafana-managed rule queries into resolver
+// queries and counts those on datasources tvt doesn't parse (Sprint 2 item
+// 19). Such a query is read as PromQL against collected metrics only
+// (Prometheus-compatible plugins then still resolve; anything else matches
+// nothing it doesn't name), every reference assumed, and its consumer's
+// Unparsed says why: it reads something tvt can't see, so its dashboard
+// must never look unused.
+type dsQueries struct {
+	total, unknown int
+	byType         map[string][]string // datasource type -> consumer names
+}
+
+func (d *dsQueries) query(c *graph.Consumer, dsType, expr, name string) query {
+	d.total++
+	if lang, ok := queryLanguage(dsType); ok {
+		return query{expr: expr, lang: lang}
+	}
+	d.unknown++
+	if d.byType == nil {
+		d.byType = map[string][]string{}
+	}
+	d.byType[dsType] = append(d.byType[dsType], name)
+	c.Unparsed = "datasource type " + dsType
+	return query{expr: expr, lang: "promql", collectedOnly: true,
+		unparsed: "on a " + dsType + " datasource, which tvt doesn't parse: read as PromQL against collected metrics"}
+}
+
+func (d *dsQueries) gaps() []string {
+	types := make([]string, 0, len(d.byType))
+	for t := range d.byType {
+		types = append(types, t)
+	}
+	slices.Sort(types)
+	var out []string
+	for _, t := range types {
+		names := slices.Compact(slices.Sorted(slices.Values(d.byType[t])))
+		shown := names
+		if len(shown) > 3 {
+			shown = append(shown[:3:3], fmt.Sprintf("%d more", len(names)-3))
+		}
+		out = append(out, fmt.Sprintf("%s: %d %s tvt doesn't parse (%s)", t, len(d.byType[t]),
+			map[bool]string{true: "query", false: "queries"}[len(d.byType[t]) == 1], strings.Join(shown, ", ")))
+	}
+	return out
 }

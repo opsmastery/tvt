@@ -45,10 +45,14 @@ type rawPanel struct {
 }
 
 type rawTarget struct {
-	Datasource   json.RawMessage `json:"datasource"`
-	Expr         string          `json:"expr"`
-	Query        json.RawMessage `json:"query"`
-	LegendFormat string          `json:"legendFormat"`
+	Datasource json.RawMessage `json:"datasource"`
+	Expr       string          `json:"expr"`
+	Query      json.RawMessage `json:"query"`
+	// Pyroscope targets name a profile type and a label selector instead
+	// of an expression.
+	ProfileTypeID string `json:"profileTypeId"`
+	LabelSelector string `json:"labelSelector"`
+	LegendFormat  string `json:"legendFormat"`
 }
 
 type rawVariable struct {
@@ -328,7 +332,14 @@ func (r *resolver) panelQueries(p rawPanel) ([]collect.PanelQuery, error) {
 		if expr == "" {
 			expr = stringOrQuery(t.Query)
 		}
-		if expr == "" {
+		if expr == "" && t.ProfileTypeID != "" {
+			expr = t.ProfileTypeID + t.LabelSelector // Pyroscope's own query syntax
+		}
+		// A Prometheus or Loki target with no expression reads nothing. On
+		// any other datasource tvt can't tell, so the target is kept, even
+		// empty: the panel reads something tvt doesn't parse (Sprint 2
+		// item 19), which scan records as an assumed reader and a gap.
+		if expr == "" && (ds.typ == "prometheus" || ds.typ == "loki" || ds.typ == "") {
 			continue
 		}
 		// Only a query that is actually emitted needs its datasource; a
