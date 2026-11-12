@@ -417,6 +417,10 @@ func versionOneDB(t *testing.T, path string) *Store {
 		`ALTER TABLE consumers DROP COLUMN evaluated_by`,
 		`ALTER TABLE consumers DROP COLUMN interval_ms`,
 		`ALTER TABLE consumers DROP COLUMN datasources`,
+		`ALTER TABLE signals DROP COLUMN class`,
+		`ALTER TABLE signals DROP COLUMN dormant`,
+		`ALTER TABLE signals DROP COLUMN owner`,
+		`ALTER TABLE signals DROP COLUMN tier`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -556,6 +560,10 @@ func TestUpgradeFromVersion2(t *testing.T) {
 		`ALTER TABLE consumers DROP COLUMN evaluated_by`,
 		`ALTER TABLE consumers DROP COLUMN interval_ms`,
 		`ALTER TABLE consumers DROP COLUMN datasources`,
+		`ALTER TABLE signals DROP COLUMN class`,
+		`ALTER TABLE signals DROP COLUMN dormant`,
+		`ALTER TABLE signals DROP COLUMN owner`,
+		`ALTER TABLE signals DROP COLUMN tier`,
 		`UPDATE meta SET value = '2' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -626,6 +634,10 @@ func TestUpgradeFromVersion3AndGaps(t *testing.T) {
 		`ALTER TABLE consumers DROP COLUMN evaluated_by`,
 		`ALTER TABLE consumers DROP COLUMN interval_ms`,
 		`ALTER TABLE consumers DROP COLUMN datasources`,
+		`ALTER TABLE signals DROP COLUMN class`,
+		`ALTER TABLE signals DROP COLUMN dormant`,
+		`ALTER TABLE signals DROP COLUMN owner`,
+		`ALTER TABLE signals DROP COLUMN tier`,
 		`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -699,6 +711,10 @@ func TestUpgradeFromVersion4AndRuleColumns(t *testing.T) {
 		`ALTER TABLE consumers DROP COLUMN evaluated_by`,
 		`ALTER TABLE consumers DROP COLUMN interval_ms`,
 		`ALTER TABLE consumers DROP COLUMN datasources`,
+		`ALTER TABLE signals DROP COLUMN class`,
+		`ALTER TABLE signals DROP COLUMN dormant`,
+		`ALTER TABLE signals DROP COLUMN owner`,
+		`ALTER TABLE signals DROP COLUMN tier`,
 		`UPDATE meta SET value = '4' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -723,4 +739,53 @@ func TestUpgradeFromVersion4AndRuleColumns(t *testing.T) {
 	if len(got) != 1 || !reflect.DeepEqual(got[0], grafana) {
 		t.Errorf("consumers = %+v, want %+v", got, grafana)
 	}
+}
+
+// Version 5 databases gain signal classification; old rows read back with
+// no class, and a scan stores class, dormant reason, owner and tier.
+func TestUpgradeFromVersion5AndClasses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v5.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	old := graph.Signal{ID: "prom:metric:m", Kind: graph.KindMetric, Name: "m", Source: "prom", FirstSeen: t0}
+	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutSignal(ctx, old)) })
+	for _, q := range []string{
+		`ALTER TABLE signals DROP COLUMN class`,
+		`ALTER TABLE signals DROP COLUMN dormant`,
+		`ALTER TABLE signals DROP COLUMN owner`,
+		`ALTER TABLE signals DROP COLUMN tier`,
+		`UPDATE meta SET value = '5' WHERE key = 'schema_version'`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	got, err := s.Signals(ctx, 1)
+	must(t, err)
+	if len(got) != 1 || !reflect.DeepEqual(got[0], old) {
+		t.Errorf("upgraded signals = %+v, want %+v", got, old)
+	}
+	tier := 0
+	classified := graph.Signal{ID: "prom:metric:m", Kind: graph.KindMetric, Name: "m", Source: "prom", FirstSeen: t0,
+		Class: "dormant", Dormant: "tier 0 service", Owner: "payments", Tier: &tier}
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) { must(t, sc.PutSignal(ctx, classified)) })
+	got, err = s.Signals(ctx, id)
+	must(t, err)
+	if len(got) != 1 || !reflect.DeepEqual(got[0], classified) {
+		t.Errorf("signals = %+v, want %+v", got, classified)
+	}
+	// An unknown class is refused by the schema.
+	bad := classified
+	bad.Class = "maybe"
+	sc, err := s.BeginScan(ctx, t0.Add(2*time.Hour), 30)
+	must(t, err)
+	if err := sc.PutSignal(ctx, bad); err == nil {
+		t.Error("class maybe was stored")
+	}
+	sc.Abort()
 }
