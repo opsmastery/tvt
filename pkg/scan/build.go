@@ -32,9 +32,11 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 )
 
@@ -63,6 +65,10 @@ type Inputs struct {
 	// Queries are query-log entries in the window, tvt's own and rule
 	// evaluations already excluded.
 	Queries []collect.LoggedQuery
+	// External are the consumers tvt.yaml declares; every signal they
+	// select is a hard keep. Owners map signals to owners and tiers.
+	External []config.ExternalConsumer
+	Owners   []config.Owner
 }
 
 // Output is one scan's graph rows.
@@ -161,6 +167,20 @@ func Build(in Inputs) (Output, error) {
 			lang = "logql"
 		}
 		queries = append(queries, query{consumer: c, expr: r.Expr, lang: lang})
+	}
+
+	// External consumers: each selector is a query that reads every label
+	// of what it selects.
+	for _, e := range in.External {
+		c := graph.Consumer{ID: ids.unique("ext:" + e.Name), Kind: graph.ConsumerExternal, Name: e.Name,
+			Expr: strings.Join(append(slices.Clone(e.Metrics), e.Streams...), "\n")}
+		out.Consumers = append(out.Consumers, c)
+		for _, m := range e.Metrics {
+			queries = append(queries, query{consumer: c, expr: "{__name__=~" + strconv.Quote(m) + "}", lang: "promql", allLabels: true})
+		}
+		for _, s := range e.Streams {
+			queries = append(queries, query{consumer: c, expr: s, lang: "logql", allLabels: true})
+		}
 	}
 
 	// Views: the latest browser view per dashboard sets last_viewed, and
@@ -269,6 +289,9 @@ func Build(in Inputs) (Output, error) {
 	res.labelRefs()
 	out.Signals = append(out.Signals, res.newSignals...)
 	out.References = res.sorted()
+	if err := classify(out.Signals, out.Consumers, out.References, in.Owners, since, in.Start); err != nil {
+		return Output{}, err
+	}
 
 	// Coverage.
 	seen := map[string]bool{}

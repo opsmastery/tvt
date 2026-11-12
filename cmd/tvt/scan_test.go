@@ -244,6 +244,7 @@ func TestScanLab(t *testing.T) {
 	// lab query parses, so none is a guess. No query creates a metric the
 	// scan didn't collect (all the lab's names exist).
 	assertReferences(t, g, "prom", gt)
+	assertClasses(t, g, "prom", gt)
 	for _, r := range g.refs {
 		if r.Assumed {
 			t.Errorf("lab reference %+v is assumed: %v", r, r.Reasons)
@@ -401,6 +402,12 @@ func TestScanLabMimir(t *testing.T) {
 	g := readGraph(t, db)
 	assertMetrics(t, g, "mimir", gt.Metrics)
 	assertMetrics(t, g, "mimir", gt.Mimir.Metrics)
+	// Classes: only Mimir's own entries. The shared hard keeps come from
+	// Prometheus's alert rules, which a --mimir scan doesn't read (it reads
+	// Mimir's ruler), so there they are rightly keep_high or dormant.
+	mgt := gt
+	mgt.Metrics, mgt.Labels, mgt.Streams = gt.Mimir.Metrics, nil, nil
+	assertClasses(t, g, "mimir", mgt)
 	want := assertRules(t, g, gt.Mimir.Rules, "mimir") + assertRules(t, g, gt.Rules, "loki", "grafana")
 	var rules int
 	for _, c := range g.consumers {
@@ -748,5 +755,69 @@ func assertGrafanaRule(t *testing.T, g scanGraph) {
 	}
 	if !found {
 		t.Errorf("shop_order_export_lag_seconds has no declared reference from %s", id)
+	}
+}
+
+// --config: an external consumer makes the metric it selects a hard keep
+// (node_load1 is a seeded drop otherwise), and an owner's tier 0 makes
+// its unread signals dormant. A config error fails the scan before any
+// backend is contacted.
+func TestScanConfig(t *testing.T) {
+	setNow(t)
+	l := newLab(t, nil)
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "tvt.yaml")
+	if err := os.WriteFile(cfg, []byte(`external_consumers:
+  - name: federation
+    metrics: ["node_load1"]
+ownership:
+  owners:
+    - name: cache
+      tier: 0
+      metrics: ["shop_cache_.*"]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := labOptions(l, filepath.Join(dir, "tvt.db"))
+	o.Config = cfg
+	var out bytes.Buffer
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "; 1 external consumers") {
+		t.Errorf("output:\n%s", out.String())
+	}
+	g := readGraph(t, o.DB)
+	if s := g.signals["prom:metric:node_load1"]; s.Class != "hard_keep" {
+		t.Errorf("node_load1: class %q, want hard_keep through the external consumer", s.Class)
+	}
+	if c, ok := g.consumers["ext:federation"]; !ok || c.Kind != graph.ConsumerExternal {
+		t.Errorf("external consumer %+v", c)
+	}
+	var cache int
+	for _, s := range g.signals {
+		// Unread ones: hits and requests feed the (unread) recording rule.
+		if strings.HasPrefix(s.Name, "shop_cache_") && s.Kind == graph.KindMetric && len(g.refsTo(s.ID)) == 0 {
+			cache++
+			if s.Owner != "cache" || s.Class != "dormant" || s.Dormant != "tier 0 service" {
+				t.Errorf("%s: owner %q class %s %q", s.ID, s.Owner, s.Class, s.Dormant)
+			}
+		}
+	}
+	if cache == 0 {
+		t.Error("no shop_cache_ metric signals")
+	}
+
+	// A typo fails before anything is collected or written.
+	if err := os.WriteFile(cfg, []byte("external_consumer: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o.DB = filepath.Join(dir, "never.db")
+	err := runScan(context.Background(), o, env, &out)
+	if err == nil || !strings.Contains(err.Error(), "external_consumer") {
+		t.Errorf("err %v", err)
+	}
+	if _, statErr := os.Stat(o.DB); !os.IsNotExist(statErr) {
+		t.Error("a scan with a bad config wrote a database")
 	}
 }
