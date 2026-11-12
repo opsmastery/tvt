@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/version"
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 )
 
@@ -87,7 +87,7 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 60 * time.Second}
+	return httpx.DefaultClient()
 }
 
 // apiError is the error envelope of the Prometheus HTTP API.
@@ -105,24 +105,12 @@ func (c *Client) get(ctx context.Context, path string, q url.Values) (io.ReadClo
 
 // getWith is get with extra request headers.
 func (c *Client) getWith(ctx context.Context, path string, q url.Values, hdr http.Header) (io.ReadCloser, error) {
-	u, err := url.Parse(c.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("prometheus: base URL: %w", err)
-	}
-	u = u.JoinPath(path)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := httpx.NewRequest(ctx, c.BaseURL, path, q, c.Token)
 	if err != nil {
 		return nil, fmt.Errorf("prometheus: %s: %w", path, err)
 	}
 	for k, vs := range hdr {
 		req.Header[http.CanonicalHeaderKey(k)] = vs
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "tvt/"+version.Version)
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 
 	resp, err := c.httpClient().Do(req)
@@ -132,7 +120,7 @@ func (c *Client) getWith(ctx context.Context, path string, q url.Values, hdr htt
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxErrorBytes))
 		if resp.StatusCode == http.StatusNotFound {
 			return nil, fmt.Errorf("prometheus: %s: HTTP 404: %w", path, ErrNotFound)
 		}
@@ -142,7 +130,7 @@ func (c *Client) getWith(ctx context.Context, path string, q url.Values, hdr htt
 		}
 		return nil, fmt.Errorf("prometheus: %s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return resp.Body, nil
+	return httpx.Limit(resp.Body, httpx.MaxResponseBytes), nil
 }
 
 // envelope is the success envelope of the Prometheus HTTP API.
