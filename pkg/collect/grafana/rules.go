@@ -116,12 +116,15 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 					if ds.skip || ds.mixed {
 						continue
 					}
-					expr := modelExpr(d.Model)
-					if expr == "" {
-						continue
-					}
 					if ds.needsList {
 						return nil, fmt.Errorf("rule %q (%s): datasource %q %w", a.Title, a.UID, d.DatasourceUID, errNoDatasourceList)
+					}
+					expr := modelExpr(d.Model)
+					if strings.TrimSpace(expr) == "" {
+						if ds.typ == "prometheus" || ds.typ == "loki" {
+							return nil, fmt.Errorf("rule %q (%s): query %q for datasource %q has an empty or unreadable model", a.Title, a.UID, d.RefID, d.DatasourceUID)
+						}
+						continue
 					}
 					r.Queries = append(r.Queries, collect.PanelQuery{DatasourceUID: ds.uid, DatasourceType: ds.typ, Expr: expr})
 					exprs = append(exprs, d.RefID+": "+expr)
