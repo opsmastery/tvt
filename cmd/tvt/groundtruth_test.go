@@ -273,8 +273,14 @@ func selectorMatches(t *testing.T, sel string, labels map[string]string) bool {
 // tvt-lab has the seed, but testdata/lab was captured before it. The golden
 // test skips them, and fails once a recapture makes them pass, so the list
 // can't go stale.
-var fixtureLag = map[string]string{
-	"shop_healthcheck_checks_total": "Shop Overview panel 7 was added to tvt-lab after testdata/lab/grafana was captured",
+var fixtureLag = map[string]string{}
+
+// groundTruthConflicts lists ground-truth entries that contradict the lab's
+// own seeds, to fix in tvt-lab. The golden test skips them and fails once a
+// ground-truth update resolves them.
+var groundTruthConflicts = map[string]string{
+	`{app="shop", component="api", level="debug"}`: `route_cold says "never queried", but Shop Overview panel 8 ` +
+		`(sum by (level) (rate({app="shop", component="api"}[$__auto]))) reads every api stream, debug included`,
 }
 
 // waitsFor lists ground-truth evidence a later Sprint 2 item collects.
@@ -432,6 +438,12 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 
 	// Streams: keep_high is read by a viewed dashboard; route_cold by
 	// nothing.
+	for key := range groundTruthConflicts {
+		e, ok := gt.Streams[key]
+		if !ok || e.Class != "route_cold" {
+			t.Errorf("groundTruthConflicts stream %s is no longer route_cold: remove it from groundTruthConflicts", key)
+		}
+	}
 	for key, e := range gt.Streams {
 		labels := streamLabels(t, key)
 		var viewed, read bool
@@ -449,7 +461,13 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 				t.Errorf("keep_high stream %s is on no viewed dashboard", key)
 			}
 		case "route_cold":
-			if read {
+			conflict, known := groundTruthConflicts[key]
+			switch {
+			case known && !read:
+				t.Errorf("route_cold stream %s is no longer referenced: remove it from groundTruthConflicts", key)
+			case known:
+				t.Logf("%s (route_cold): skipped, %s", key, conflict)
+			case read:
 				t.Errorf("route_cold stream %s is referenced", key)
 			}
 		}
