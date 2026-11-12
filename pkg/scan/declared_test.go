@@ -117,12 +117,12 @@ func TestDefinitionSourcesUnconfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range out.Sources {
-		if (s.Source == SourceSLOs || s.Source == SourceRunbooks) && (s.Configured || s.Coverage != 0 || s.Gap != "") {
+		if (s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources) && (s.Configured || s.Coverage != 0 || s.Gap != "") {
 			t.Errorf("%+v: want unconfigured", s)
 		}
 	}
-	if len(out.Sources) != 2 {
-		t.Errorf("sources %+v, want the two definition sources", out.Sources)
+	if len(out.Sources) != 3 {
+		t.Errorf("sources %+v, want the three definition sources", out.Sources)
 	}
 }
 

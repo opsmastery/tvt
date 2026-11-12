@@ -87,6 +87,9 @@ type Inputs struct {
 const (
 	SourceSLOs     = "slo definitions"
 	SourceRunbooks = "runbooks"
+	// SourceDatasources: the share of dashboard and Grafana-managed rule
+	// queries on datasources tvt parses (Prometheus, Loki, VictoriaMetrics).
+	SourceDatasources = "datasources"
 )
 
 // Output is one scan's graph rows.
@@ -141,6 +144,7 @@ func Build(in Inputs) (Output, error) {
 
 	res := newResolver(in.MetricsSource, in.Metrics, in.Labels)
 	var queries []query
+	dsq := &dsQueries{}
 
 	// Rules. A recording rule's output is a metric signal.
 	for _, r := range in.Rules {
@@ -166,18 +170,23 @@ func Build(in Inputs) (Output, error) {
 			}
 		}
 		slices.Sort(c.Datasources)
+		if len(r.Queries) > 0 {
+			// A Grafana-managed rule: each query goes to its own datasource;
+			// one tvt doesn't parse is an assumed reader and a gap.
+			var qs []query
+			for _, q := range r.Queries {
+				qs = append(qs, dsq.query(&c, q.DatasourceType, q.Expr, r.Name))
+			}
+			for _, q := range qs {
+				q.consumer = c
+				queries = append(queries, q)
+			}
+		}
 		out.Consumers = append(out.Consumers, c)
 		if kind == graph.ConsumerRecordingRule && r.Name != "" {
 			res.recordingRule(c.ID, r.Name)
 		}
 		if len(r.Queries) > 0 {
-			// A Grafana-managed rule: each query goes to its own datasource;
-			// one that isn't Prometheus or Loki reads no signal tvt tracks.
-			for _, q := range r.Queries {
-				if lang, ok := queryLanguage(q.DatasourceType); ok {
-					queries = append(queries, query{consumer: c, expr: q.Expr, lang: lang})
-				}
-			}
 			continue
 		}
 		lang := "promql"
@@ -260,9 +269,11 @@ func Build(in Inputs) (Output, error) {
 		viewed := lastViewed[d.UID]
 		vars := dashboardVars(d, res.metrics)
 		consume := func(c graph.Consumer, dsType string, variable bool, shows []string) {
+			q := dsq.query(&c, dsType, c.Expr, c.Name)
+			q.consumer, q.variable, q.vars, q.shows = c, variable, vars, shows
 			out.Consumers = append(out.Consumers, c)
-			if lang, ok := queryLanguage(dsType); ok {
-				queries = append(queries, query{consumer: c, expr: c.Expr, lang: lang, variable: variable, vars: vars, shows: shows})
+			if q.expr != "" {
+				queries = append(queries, q)
 			}
 		}
 		for _, p := range d.Panels {
@@ -324,7 +335,8 @@ func Build(in Inputs) (Output, error) {
 	sources := slices.Clone(in.Sources)
 	sources = append(sources,
 		definitionSource(SourceSLOs, in.SLOsConfigured, len(in.SLOs), len(sloGaps), sloGaps),
-		definitionSource(SourceRunbooks, len(in.Runbooks) > 0, len(in.Runbooks), rbBad, rbGaps))
+		definitionSource(SourceRunbooks, len(in.Runbooks) > 0, len(in.Runbooks), rbBad, rbGaps),
+		definitionSource(SourceDatasources, dsq.total > 0, dsq.total, dsq.unknown, dsq.gaps()))
 	seen := map[string]bool{}
 	var sum float64
 	var logs int
@@ -343,7 +355,7 @@ func Build(in Inputs) (Output, error) {
 			s.WindowStart = since
 		}
 		out.Sources = append(out.Sources, s)
-		if s.Source == SourceSLOs || s.Source == SourceRunbooks {
+		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources {
 			continue
 		}
 		sum += s.Coverage
