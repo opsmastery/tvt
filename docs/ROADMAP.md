@@ -22,7 +22,8 @@ The MVP covers the Grafana stack, self-hosted (OSS) and Grafana Cloud.
 | --- | --- | --- |
 | `tvt scan` | Builds a usage graph from Prometheus/Mimir cardinality, Prometheus, Mimir and Loki rules, Grafana dashboards and dashboard views, and query logs | In progress |
 | `tvt report` | Ranks signals by monthly cost and confidence; HTML and JSON | Planned |
-| `tvt propose` | Writes Prometheus `metric_relabel_configs`, OTel Collector `filter`/`transform` or Alloy config into the pipeline's repo, one PR per repo | Planned |
+| `tvt init` | Asks for each backend, tests the URL, token scope and log settings, and writes `tvt.yaml` | Planned |
+| `tvt propose` | Writes Prometheus `metric_relabel_configs`, OTel Collector `filter`/`transform`, Alloy `prometheus.relabel`/`loki.process` or Fluent Bit filters into the pipeline's repo, one PR per repo | Planned |
 | `tvt check` | CI gate: fails a config PR that would break an alert, SLO or viewed dashboard, or that lacks an acknowledged evidence gap | Planned |
 
 MVP scope in more detail:
@@ -31,15 +32,19 @@ MVP scope in more detail:
 - **Usage evidence:** PromQL and LogQL reference extraction (matchers, `by`/`without`, `on`/`ignoring`, recording-rule chains); Grafana-managed alert and recording rules; annotation queries; query logs.
 - **Grafana OSS and Grafana Cloud.** On OSS, dashboard views come from Grafana's router log and query use from Prometheus, Mimir and Loki query logs. On Grafana Cloud, the equivalents are Usage Insights, Adaptive Metrics usage data and the Mimir cardinality API. Where an edition can't provide a signal, `tvt` records the gap and keeps the data.
 - **Cost:** a price card you control (per series, per GB, per span), with vendor presets marked approximate.
+- **Recommendations you can check:** each one states a testable claim, the cheapest way to confirm it and how many minutes that takes, every downstream reader, and the risk if it's wrong. The report is ranked by savings per minute of checking. Each signal maps to the pipeline that would change it, or shows as unmapped.
 - **Logs:** stream-level volume and drops. Line-level reduction candidates are handed off to zeroreads.
 - **Alerts and rules:** each rule's cost per day, plus findings with a recommended fix: Grafana-managed alerts that bypass the datasource ruler, LogQL alerts that parse raw logs every interval, range windows far longer than the interval, broad selectors, duplicate rules, recording rules nobody reads, rules that silently return nothing, and rule groups slower than their interval. Report only; `tvt` never edits rules.
 - **Dormant, not unused:** unread signals that look incident-critical (error, latency and saturation signals, tier 0/1 services, runbook mentions) are labelled dormant and never ranked as drop candidates. Last-read dates are kept indefinitely.
-- **Safety:** a protection manifest per pipeline repo, an error-pattern guard on every generated log rule, a least-lossy action order (downsample or reroute before drop; never drop warn and above), owner confirmation recorded in the protection manifest before a drop PR leaves draft, staged drops (archive, then drop after a quiet period) and a generated revert PR.
+- **Safety:** a protection manifest per pipeline repo, an error-pattern guard on every generated log rule, a least-lossy action order (downsample or reroute before drop; never drop warn and above), owner confirmation recorded in the protection manifest before a drop PR leaves draft, staged drops (archive, then drop after a quiet period) and a generated revert PR. Logs can be sampled (keep 1 in N lines) before they're dropped, and each generated rule carries its monthly saving.
+- **Owner workflow:** every recommendation is open, confirmed or dismissed with a reason; a dismissal records a keep and a review date in the manifest. Each owner gets a capped queue and a weekly digest.
+- **Measured savings:** a ledger of before and after for every merged PR.
 - **Supply chain:** signed, reproducible releases; govulncheck and gitleaks in CI.
+- **Security review:** `SECURITY.md` documents what `tvt` reads, where data goes (only your backends and Git host) and what stays on disk.
 
 ## Next: continuous mode (target: Q2 2027)
 
-- Scheduled scans with trend history.
+- A server mode (`tvt serve`) with scheduled scans and trend history.
 - New waste flagged within 24 hours, and release-aware regressions ("release X added `user_id`, +5,000 series").
 - Cost by team or service from `team`/`service`/`namespace` labels and an ownership map.
 - Slack and webhook alerts.
@@ -47,6 +52,7 @@ MVP scope in more detail:
 - AI agent and MCP query logs as usage evidence.
 - Incident evidence: read incident timelines (PagerDuty, incident.io, Grafana IRM, Opsgenie) and postmortems, and promote anything queried during an incident into the protection manifest through a reviewed PR that links the postmortem. Protection doesn't expire.
 - A read-only MCP server over the usage graph (`why_kept`, `consumers_of`, `savings_if_dropped`).
+- Verification metrics in `tvt`'s own telemetry: time from draft PR to owner decision, and how often owners dismiss a recommendation.
 
 ## Later: more backends (target: mid 2027)
 
@@ -58,6 +64,8 @@ Backends are added where a cut saves users the most: high list price per unit, b
 4. Splunk Cloud Platform logs
 
 Then, driven by demand: New Relic, Sumo Logic, Google Cloud Logging, Dynatrace, Honeycomb and Elastic. Tempo and Jaeger traces with tail-sampling output, and Vector and Cribl as pipeline targets.
+
+Changes can also land at the source: exporter flags and allow/deny lists (node_exporter, kube-state-metrics, common database exporters) and OTel Collector receiver settings, with a catalog of each exporter's metrics.
 
 Cheap per-GB OpenTelemetry-native backends are covered through OTel Collector proposals without a dedicated collector.
 
