@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -110,6 +111,7 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 		"/api/datasources":                  "grafana/datasources.json",
 		"/api/dashboards/uid/shop-overview": "grafana/dashboard_shop-overview.json",
 		"/api/dashboards/uid/legacy-queue":  "grafana/dashboard_legacy-queue.json",
+		"/api/ruler/grafana/api/v1/rules":   "grafana/ruler_config.json",
 	}, map[string]http.HandlerFunc{
 		"/api/user": func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer test-grafana-token" {
@@ -213,13 +215,13 @@ func TestScanLab(t *testing.T) {
 	}
 
 	// Ground truth, Sprint 1 rows: every seeded metric is a signal; every
-	// lab rule from a ruler tvt collects is a consumer (Grafana-managed
-	// rules arrive in Sprint 2); Shop Overview is viewed and Legacy Queue
+	// lab rule is a consumer, Grafana-managed ones included; Shop Overview is viewed and Legacy Queue
 	// isn't; the Loki alert's stream is hard-keep.
 	gt := loadGroundTruth(t)
 	g := readGraph(t, db)
 	assertMetrics(t, g, "prom", gt.Metrics)
-	want := assertRules(t, g, gt.Rules, "prometheus", "loki")
+	want := assertRules(t, g, gt.Rules, "prometheus", "loki", "grafana")
+	assertGrafanaRule(t, g)
 	var rules int
 	for _, c := range g.consumers {
 		if c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule {
@@ -392,7 +394,7 @@ func TestScanLabMimir(t *testing.T) {
 	g := readGraph(t, db)
 	assertMetrics(t, g, "mimir", gt.Metrics)
 	assertMetrics(t, g, "mimir", gt.Mimir.Metrics)
-	want := assertRules(t, g, gt.Mimir.Rules, "mimir") + assertRules(t, g, gt.Rules, "loki")
+	want := assertRules(t, g, gt.Mimir.Rules, "mimir") + assertRules(t, g, gt.Rules, "loki", "grafana")
 	var rules int
 	for _, c := range g.consumers {
 		if c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule {
@@ -714,5 +716,30 @@ func TestQueryLogReadAfterProbe(t *testing.T) {
 	}
 	if src.Gap != "" || src.Coverage != 0.5 || len(queries) != 2 {
 		t.Errorf("got gap %q, coverage %v, %d queries; want proven, 0.5, 2 (read after the flush)\n%s", src.Gap, src.Coverage, len(queries), out.String())
+	}
+}
+
+// assertGrafanaRule: Sprint 2 item 5. The lab's Grafana-managed alert is a
+// consumer tagged evaluated_by=grafana with its interval and datasource,
+// and the metric only it reads is hard keep through a declared reference.
+func assertGrafanaRule(t *testing.T, g scanGraph) {
+	t.Helper()
+	id := "rule:grafana:cg3qdhms8urr4c/shop-grafana-alerts/shop-order-export-lag"
+	c, ok := g.consumers[id]
+	if !ok {
+		t.Fatalf("no consumer %s", id)
+	}
+	if c.EvaluatedBy != "grafana" || c.Interval != time.Minute || !slices.Equal(c.Datasources, []string{"prometheus"}) ||
+		c.Expr != "max(shop_order_export_lag_seconds)" {
+		t.Errorf("Grafana rule consumer %+v", c)
+	}
+	var found bool
+	for _, r := range g.refsTo("prom:metric:shop_order_export_lag_seconds") {
+		if r.ConsumerID == id && r.Evidence == graph.EvidenceDeclared {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("shop_order_export_lag_seconds has no declared reference from %s", id)
 	}
 }
