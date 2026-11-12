@@ -68,6 +68,8 @@ Run it against [tvt-lab](../tvt-lab), a Podman Grafana stack seeded with known w
   --prom-query-log ../tvt-lab/lab-logs/query.log --grafana-log '../tvt-lab/lab-logs/grafana.log*'
 ```
 
+Tokens (`TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `TVT_LOKI_TOKEN`) are only sent over https, or over http to a loopback host such as the lab. For any other plain-http URL, `tvt scan` exits with a usage error unless you pass `--allow-insecure-token`.
+
 ## Layout
 
 | Path | What |

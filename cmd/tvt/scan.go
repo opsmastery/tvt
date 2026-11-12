@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -69,6 +70,9 @@ type scanOptions struct {
 	LabelTop int
 	// Config is tvt.yaml: external consumers and ownership. Optional.
 	Config string
+	// AllowInsecureToken permits sending a token over plain http to a host
+	// that is not loopback.
+	AllowInsecureToken bool
 }
 
 // stringList is a repeatable string flag.
@@ -94,6 +98,7 @@ func cmdScan(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&o.GrafanaLogs, "grafana-log", "Grafana log file or glob with router logging on (repeatable; .gz is read)")
 	fs.IntVar(&o.LabelTop, "label-top", 50, "collect per-label cardinality for this many of the largest metrics")
 	fs.StringVar(&o.Config, "config", "", "tvt.yaml with external_consumers and ownership (optional)")
+	fs.BoolVar(&o.AllowInsecureToken, "allow-insecure-token", false, "send tokens over plain http to non-loopback hosts (not recommended)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -105,6 +110,10 @@ func cmdScan(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	if err := o.validate(); err != nil {
+		fmt.Fprintf(stderr, "tvt scan: %v\n", err)
+		return exitUsage
+	}
+	if err := o.checkTokenTransport(os.Getenv); err != nil {
 		fmt.Fprintf(stderr, "tvt scan: %v\n", err)
 		return exitUsage
 	}
@@ -455,6 +464,39 @@ func (o scanOptions) validate() error {
 		return errors.New("--probe-wait must not be negative")
 	}
 	return nil
+}
+
+// checkTokenTransport refuses to send a bearer token over plain http to a
+// host that is not loopback, where anyone on the path could read it.
+func (o scanOptions) checkTokenTransport(getenv func(string) string) error {
+	if o.AllowInsecureToken {
+		return nil
+	}
+	backends := []struct{ flag, url, tokenEnv string }{
+		{"grafana", o.Grafana, "TVT_GRAFANA_TOKEN"},
+		{"prom", o.Prom, "TVT_PROM_TOKEN"},
+		{"mimir", o.Mimir, "TVT_PROM_TOKEN"},
+		{"loki", o.Loki, "TVT_LOKI_TOKEN"},
+	}
+	for _, b := range backends {
+		if b.url == "" || getenv(b.tokenEnv) == "" {
+			continue
+		}
+		u, err := url.Parse(b.url)
+		if err != nil || u.Scheme != "http" || isLoopback(u.Hostname()) {
+			continue
+		}
+		return fmt.Errorf("--%s: %s is set but %q is plain http: the token would be sent unencrypted; use https or pass --allow-insecure-token", b.flag, b.tokenEnv, b.url)
+	}
+	return nil
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func checkURL(raw string) error {
