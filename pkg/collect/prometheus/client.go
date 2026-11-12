@@ -3,7 +3,8 @@
 //
 // Every call is a read-only GET. The collector never runs PromQL through
 // /api/v1/query: the Prometheus query log records only the client IP, so tvt's
-// own queries would be indistinguishable from real usage. Cardinality comes from
+// own queries would be indistinguishable from real usage. The one exception
+// is Probe's marker, which selects no series and which QueryLog recognizes. Cardinality comes from
 // /api/v1/status/tsdb and /api/v1/series, which the query log doesn't record.
 //
 // The same client works against Mimir's Prometheus-compatible API by setting
@@ -99,6 +100,11 @@ type apiError struct {
 // get sends a GET to path (relative to BaseURL) and returns the open
 // response body on HTTP 200. The caller closes it.
 func (c *Client) get(ctx context.Context, path string, q url.Values) (io.ReadCloser, error) {
+	return c.getWith(ctx, path, q, nil)
+}
+
+// getWith is get with extra request headers.
+func (c *Client) getWith(ctx context.Context, path string, q url.Values, hdr http.Header) (io.ReadCloser, error) {
 	u, err := url.Parse(c.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("prometheus: base URL: %w", err)
@@ -109,6 +115,9 @@ func (c *Client) get(ctx context.Context, path string, q url.Values) (io.ReadClo
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("prometheus: %s: %w", path, err)
+	}
+	for k, vs := range hdr {
+		req.Header[http.CanonicalHeaderKey(k)] = vs
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "tvt/"+version.Version)
@@ -168,4 +177,16 @@ func truncated(warnings []string) bool {
 		}
 	}
 	return false
+}
+
+// Probe sends the query-log marker for nonce (collect.ProbeQuery) as an
+// instant query, tagged collect.ProbeTag. It is the one query tvt sends:
+// it selects no series, and query log readers drop it from usage.
+func (c *Client) Probe(ctx context.Context, nonce string) error {
+	q := url.Values{"query": {collect.ProbeQuery(nonce)}}
+	body, err := c.getWith(ctx, "/api/v1/query", q, http.Header{"X-Query-Tags": {collect.ProbeTag}})
+	if err != nil {
+		return err
+	}
+	return body.Close()
 }

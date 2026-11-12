@@ -5,11 +5,15 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 )
 
 func TestQueriesFixture(t *testing.T) {
@@ -235,5 +239,46 @@ func TestQueriesCancelled(t *testing.T) {
 	ql := &QueryLog{Paths: []string{filepath.Join(fixtures, "query.log")}}
 	if _, err := ql.Queries(ctx, time.Time{}); err == nil {
 		t.Error("cancelled context ignored")
+	}
+}
+
+// The marker is the scan's own query: it proves the log, never counts as
+// usage, and only its own nonce counts.
+func TestQueryLogProbe(t *testing.T) {
+	dir := t.TempDir()
+	marker := strings.ReplaceAll(collect.ProbeQuery("ab12"), `"`, `\"`)
+	path := writeFile(t, dir, "query.log", strings.Join([]string{
+		`{"httpRequest":{"clientIP":"10.0.0.1","path":"/api/v1/query"},"params":{"query":"` + marker + `"},"time":"2026-11-11T10:00:00Z"}`,
+		`{"httpRequest":{"clientIP":"10.0.0.2","path":"/api/v1/query"},"params":{"query":"up"},"time":"2026-11-11T10:00:01Z"}`,
+	}, "\n")+"\n")
+	ql := &QueryLog{Paths: []string{path}}
+	got, err := ql.Queries(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Expr != "up" {
+		t.Errorf("queries = %+v, want only up", got)
+	}
+	for nonce, want := range map[string]bool{"ab12": true, "cd34": false} {
+		seen, err := ql.ProbeSeen(context.Background(), nonce)
+		if err != nil || seen != want {
+			t.Errorf("ProbeSeen(%s) = %v, %v; want %v", nonce, seen, err, want)
+		}
+	}
+}
+
+func TestProbeSendsTheTaggedMarker(t *testing.T) {
+	var got *http.Request
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r
+		w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	c := New(srv.URL+"/prometheus", "")
+	if err := c.Probe(context.Background(), "ab12"); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.URL.Path != "/prometheus/api/v1/query" || got.URL.Query().Get("query") != collect.ProbeQuery("ab12") ||
+		got.Header.Get("X-Query-Tags") != collect.ProbeTag {
+		t.Errorf("probe request = %+v", got)
 	}
 }

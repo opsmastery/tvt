@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -411,6 +413,7 @@ func versionOneDB(t *testing.T, path string) *Store {
 		`ALTER TABLE refs DROP COLUMN all_labels`,
 		`ALTER TABLE refs DROP COLUMN reason`,
 		`ALTER TABLE refs DROP COLUMN result_labels`,
+		`ALTER TABLE scan_sources DROP COLUMN gap`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -431,8 +434,8 @@ func TestUpgradeFromVersion1(t *testing.T) {
 	defer s.Close()
 	var v string
 	must(t, s.db.QueryRow(`SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&v))
-	if v != "3" {
-		t.Errorf("schema_version = %s, want 3", v)
+	if v != strconv.Itoa(SchemaVersion) {
+		t.Errorf("schema_version = %s, want %d", v, SchemaVersion)
 	}
 	info, err := s.LatestScan(ctx)
 	must(t, err)
@@ -546,6 +549,7 @@ func TestUpgradeFromVersion2(t *testing.T) {
 		`ALTER TABLE refs DROP COLUMN all_labels`,
 		`ALTER TABLE refs DROP COLUMN reason`,
 		`ALTER TABLE refs DROP COLUMN result_labels`,
+		`ALTER TABLE scan_sources DROP COLUMN gap`,
 		`UPDATE meta SET value = '2' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -563,5 +567,112 @@ func TestUpgradeFromVersion2(t *testing.T) {
 	must(t, err)
 	if len(refs) != 2 || !refs[0].Assumed || !refs[0].AllLabels || refs[0].Evidence != "" || refs[1].AllLabels {
 		t.Errorf("refs after upgrade = %+v, want c assumed and all labels, d neither, evidence unknown", refs)
+	}
+}
+
+// A read seen once, long ago, outlives every later scan that doesn't see it.
+func TestLastReadsNeverDecay(t *testing.T) {
+	s, _ := open(t)
+	sig := graph.Signal{ID: "prom:metric:m", Kind: graph.KindMetric, Name: "m", Source: "prom"}
+	other := graph.Signal{ID: "prom:metric:n", Kind: graph.KindMetric, Name: "n", Source: "prom"}
+	adhoc := graph.Consumer{ID: "qlog:prometheus:abc", Kind: graph.ConsumerAdhocQuery, Name: "ad hoc"}
+	panel := graph.Consumer{ID: "panel:1:d:1:0", Kind: graph.ConsumerDashboardPanel, Name: "D / p"}
+	nineMonths := t0.Add(-270 * 24 * time.Hour)
+	scan(t, s, t0.Add(-269*24*time.Hour), func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutConsumer(ctx, adhoc))
+		must(t, sc.PutReference(ctx, graph.Reference{SignalID: sig.ID, ConsumerID: adhoc.ID, Evidence: graph.EvidenceObserved,
+			LastSeen: nineMonths, Actor: "alice"}))
+		must(t, sc.PutReference(ctx, graph.Reference{SignalID: sig.ID, ConsumerID: adhoc.ID, Evidence: graph.EvidenceObserved,
+			LastSeen: nineMonths.Add(-time.Hour), Actor: "bob"}))
+	})
+	latest := scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutSignal(ctx, other))
+		must(t, sc.PutConsumer(ctx, panel))
+		// A dashboard reference has no last_seen: not a logged read.
+		must(t, sc.PutReference(ctx, graph.Reference{SignalID: other.ID, ConsumerID: panel.ID, Evidence: graph.EvidenceObserved}))
+	})
+	refs, err := s.References(ctx, latest)
+	must(t, err)
+	for _, r := range refs {
+		if r.SignalID == sig.ID {
+			t.Errorf("latest scan still lists the old read: %+v", r)
+		}
+	}
+	reads, err := s.LastReads(ctx)
+	must(t, err)
+	want := []SignalRead{{SignalID: sig.ID, ConsumerID: adhoc.ID, Actor: "alice", At: nineMonths}}
+	if !reflect.DeepEqual(reads, want) {
+		t.Errorf("LastReads\n got  %+v\n want %+v", reads, want)
+	}
+}
+
+// Version 3 databases gain scan_sources.gap; a source can record a gap.
+func TestUpgradeFromVersion3AndGaps(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v3.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	src := graph.SourceCoverage{Source: "prometheus query log", Configured: true, Coverage: 0.5, WindowStart: t0.Add(-time.Hour)}
+	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutSource(ctx, src)) })
+	for _, q := range []string{
+		`ALTER TABLE scan_sources DROP COLUMN gap`,
+		`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	gapped := graph.SourceCoverage{Source: "mimir query log", Configured: true, WindowStart: t0, Gap: "probe marker not found"}
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) { must(t, sc.PutSource(ctx, gapped)) })
+	got, err := s.Sources(ctx, id)
+	must(t, err)
+	if len(got) != 1 || got[0] != gapped {
+		t.Errorf("sources = %+v, want %+v", got, gapped)
+	}
+	old, err := s.Sources(ctx, id-1)
+	must(t, err)
+	if len(old) != 1 || old[0].Gap != "" || old[0].Coverage != 0.5 {
+		t.Errorf("upgraded sources = %+v", old)
+	}
+}
+
+// Each signal gets its single latest read however many references it has;
+// ties go to the first consumer by ID.
+func TestLastReadsManyRefsAndTies(t *testing.T) {
+	s, _ := open(t)
+	a := graph.Signal{ID: "prom:metric:a", Kind: graph.KindMetric, Name: "a", Source: "prom"}
+	b := graph.Signal{ID: "prom:metric:b", Kind: graph.KindMetric, Name: "b", Source: "prom"}
+	scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, a))
+		must(t, sc.PutSignal(ctx, b))
+		for i := range 5 {
+			c := graph.Consumer{ID: fmt.Sprintf("qlog:prometheus:%d", i), Kind: graph.ConsumerAdhocQuery, Name: "ad hoc"}
+			must(t, sc.PutConsumer(ctx, c))
+			// a: consumers 3 and 1 tie on the latest read.
+			at := t0.Add(-time.Duration(5-i) * time.Hour)
+			if i == 1 || i == 3 {
+				at = t0
+			}
+			must(t, sc.PutReference(ctx, graph.Reference{SignalID: a.ID, ConsumerID: c.ID, Evidence: graph.EvidenceObserved,
+				LastSeen: at, Actor: fmt.Sprintf("u%d", i)}))
+			// b: consumer 2 read it last.
+			must(t, sc.PutReference(ctx, graph.Reference{SignalID: b.ID, ConsumerID: c.ID, Evidence: graph.EvidenceObserved,
+				LastSeen: t0.Add(-time.Duration((i-2)*(i-2)) * time.Minute), Actor: fmt.Sprintf("u%d", i)}))
+		}
+	})
+	reads, err := s.LastReads(ctx)
+	must(t, err)
+	want := []SignalRead{
+		{SignalID: a.ID, ConsumerID: "qlog:prometheus:1", Actor: "u1", At: t0},
+		{SignalID: b.ID, ConsumerID: "qlog:prometheus:2", Actor: "u2", At: t0},
+	}
+	if !reflect.DeepEqual(reads, want) {
+		t.Errorf("LastReads\n got  %+v\n want %+v", reads, want)
 	}
 }

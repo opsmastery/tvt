@@ -49,6 +49,15 @@ func Expand(paths []string) ([]string, error) {
 // surrounding whitespace. Files ending in .gz are decompressed. The slice
 // passed to fn is only valid during the call.
 func ScanFile(ctx context.Context, path string, fn func(line []byte)) error {
+	return scan(ctx, path, func(raw []byte) {
+		if line := bytes.TrimSpace(raw); len(line) > 0 {
+			fn(line)
+		}
+	})
+}
+
+// scan calls fn with every line of path, including its newline.
+func scan(ctx context.Context, path string, fn func(raw []byte)) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -74,8 +83,8 @@ func ScanFile(ctx context.Context, path string, fn func(line []byte)) error {
 		}
 		// ReadBytes has no line-length limit, unlike bufio.Scanner.
 		raw, err := br.ReadBytes('\n')
-		if line := bytes.TrimSpace(raw); len(line) > 0 {
-			fn(line)
+		if len(raw) > 0 {
+			fn(raw)
 		}
 		if err == io.EOF {
 			return nil

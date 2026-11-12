@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,11 +20,20 @@ var Testdata = func() string {
 // Lab is testdata/lab: recorded responses from tvt-lab.
 var Lab = filepath.Join(Testdata, "lab")
 
-// forbidden reports whether a request path would run a query on a backend
-// that logs queries as usage (invariant 4: tvt never runs PromQL or LogQL
+// forbidden reports whether a request would run a query on a backend that
+// logs queries as usage (invariant 4: tvt never runs PromQL or LogQL
 // there). It covers Prometheus and Mimir (any prefix), Loki, and Grafana's
-// query and datasource-proxy APIs, which forward to those backends.
-func forbidden(path string) bool {
+// query and datasource-proxy APIs, which forward to those backends. The
+// one exception is the query-log probe (collect.ProbeQuery): an instant
+// query to Prometheus or Mimir whose text is a marker selecting no series,
+// tagged collect.ProbeTag.
+func forbidden(r *http.Request) bool {
+	path := r.URL.Path
+	if strings.HasSuffix(path, "/api/v1/query") && !strings.Contains(path, "/loki/") && !strings.Contains(path, "/api/datasources/proxy/") {
+		if _, ok := collect.ProbeNonce(r.URL.Query().Get("query")); ok && r.Header.Get("X-Query-Tags") == collect.ProbeTag {
+			return false
+		}
+	}
 	for _, suffix := range []string{"/api/v1/query", "/api/v1/query_range"} {
 		if strings.HasSuffix(path, suffix) {
 			return true
@@ -49,7 +59,7 @@ func Serve(t testing.TB, h http.Handler) *httptest.Server {
 			http.Error(w, "tvt must only GET", http.StatusMethodNotAllowed)
 			return
 		}
-		if forbidden(r.URL.Path) {
+		if forbidden(r) {
 			t.Errorf("GET %s: tvt must never run queries against a backend that logs them as usage", r.URL.Path)
 			http.Error(w, "query endpoints are off limits", http.StatusForbidden)
 			return
