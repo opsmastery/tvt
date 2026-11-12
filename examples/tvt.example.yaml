@@ -1,4 +1,6 @@
-# Example tvt config. Copy to ./tvt.yaml (git-ignored). Draft: not read by the CLI yet.
+# Example tvt config. Copy to ./tvt.yaml (git-ignored). `tvt scan --config tvt.yaml`
+# reads external_consumers and ownership; the other sections are accepted and read
+# by later sprints (backends still come from flags). Unknown keys are errors.
 grafana:
   url: http://localhost:3000
   # token: from TVT_GRAFANA_TOKEN
@@ -18,9 +20,19 @@ external_consumers:
   - name: siem-export
     streams: ['{component="audit"}']
 
-# How to attribute cost to teams.
+# Who owns which signals, and how critical their service is. First match wins.
+# An unread signal of a tier 0 or 1 service is dormant (ask its owner), never a
+# drop candidate.
 ownership:
-  labels: [team, service, namespace]
+  labels: [team, service, namespace]   # recorded; read once series label values are collected
+  owners:
+    - name: payments
+      tier: 0
+      metrics: ["shop_payment_.*"]
+    - name: shop
+      tier: 2
+      metrics: ["shop_.*"]
+      streams: ['{app="shop"}']
 
 # Where changes land (ADR 0007). Every signal must be claimed by exactly one
 # pipeline; unclaimed or doubly claimed signals are reported, never proposed.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -500,4 +501,97 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// assertClasses checks Sprint 2 item 6's classification against ground
+// truth: every hard keep comes out hard_keep and nothing else does, viewed
+// dashboard signals are keep_high (protected), and the rest are ranked
+// candidates. A seeded drop that the dormant name rules catch is logged,
+// not failed: Sprint 3 decides whether ground truth should call it
+// "dormant: confirm" (see the PR).
+func assertClasses(t *testing.T, g scanGraph, src string, gt groundTruth) {
+	t.Helper()
+	want := map[string][]string{
+		"hard_keep":   {"hard_keep"},
+		"keep_high":   {"keep_high"},
+		"keep_medium": {"candidate"},
+		"low":         {"candidate"},
+		"drop_metric": {"candidate", "dormant"},
+		"drop_label":  {"candidate", "dormant"},
+	}
+	expect := func(s graph.Signal) (gtEntry, bool) {
+		switch s.Kind {
+		case graph.KindMetric:
+			if e, ok := gt.Metrics[s.Name]; ok {
+				return e, true
+			}
+			for name, e := range gt.Metrics {
+				if ok, _ := path.Match(name, s.Name); ok && strings.Contains(name, "*") {
+					return e, true
+				}
+			}
+		case graph.KindLabel:
+			e, ok := gt.Labels[s.Parent+"/"+s.Name]
+			return e, ok
+		}
+		return gtEntry{}, false
+	}
+	var dormant []string
+	ids := make([]string, 0, len(g.signals))
+	for id := range g.signals {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	var checked int
+	for _, id := range ids {
+		s := g.signals[id]
+		if s.Source != src || s.Class == "" {
+			if s.Source == src {
+				t.Errorf("signal %s has no class", id)
+			}
+			continue
+		}
+		e, ok := expect(s)
+		if !ok {
+			continue
+		}
+		checked++
+		classes, known := want[e.Class]
+		if !known {
+			t.Fatalf("ground-truth class %q for %s", e.Class, id)
+		}
+		if !slices.Contains(classes, s.Class) {
+			t.Errorf("%s: class %s, ground truth %s (want %v)", id, s.Class, e.Class, classes)
+		}
+		if s.Class == "dormant" {
+			dormant = append(dormant, s.Name+" ("+s.Dormant+")")
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no signal matched a ground-truth metric or label")
+	}
+	if len(dormant) > 0 {
+		t.Logf("%d seeded drops the dormant name rules hold back: %s", len(dormant), strings.Join(dormant, ", "))
+	}
+
+	// Streams: the selectors that select a hard_keep stream include a
+	// hard_keep one; a keep_high stream's include a protected one.
+	for key, e := range gt.Streams {
+		if e.Class != "hard_keep" && e.Class != "keep_high" {
+			continue
+		}
+		labels := streamLabels(t, key)
+		var best string
+		for _, s := range g.signals {
+			if s.Kind != graph.KindStream || !selectorMatches(t, s.Name, labels) {
+				continue
+			}
+			if s.Class == "hard_keep" || s.Class == "keep_high" && best == "" {
+				best = s.Class
+			}
+		}
+		if e.Class == "hard_keep" && best != "hard_keep" || e.Class == "keep_high" && best == "" {
+			t.Errorf("stream %s (%s): best selector class %q", key, e.Class, best)
+		}
+	}
 }

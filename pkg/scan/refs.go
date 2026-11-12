@@ -28,6 +28,9 @@ type query struct {
 	// sent it then (zero for dashboards and rules).
 	seen  time.Time
 	actor string
+	// allLabels: the consumer depends on every label of what it selects
+	// (an external consumer receives the series whole).
+	allLabels bool
 }
 
 // varValues are the values a dashboard variable can take. any: it can take
@@ -167,6 +170,7 @@ func (r *resolver) resolve(q query) {
 	// never create one.
 	failed := err != nil
 	for _, pr := range refs {
+		pr.AllLabels = pr.AllLabels || q.allLabels
 		if q.lang == "logql" {
 			r.resolveStream(q, pr)
 		} else {
