@@ -123,7 +123,10 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 		},
 		"/api/org": func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"id":1,"name":"Main Org."}`) },
 	})
-	loki := fixtureServer(t, map[string]string{"/loki/api/v1/rules": "loki/rules.yaml"}, nil)
+	loki := fixtureServer(t, map[string]string{
+		"/loki/api/v1/rules":       "loki/rules.yaml",
+		"/prometheus/api/v1/rules": "loki/prom_rules.json",
+	}, nil)
 	return labServers{prom, graf, loki, promLog, probes}
 }
 
@@ -226,6 +229,10 @@ func TestScanLab(t *testing.T) {
 	for _, c := range g.consumers {
 		if c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule {
 			rules++
+			// Sprint 2 item 16: every ruler's interval, for cost per rule.
+			if want := map[string]time.Duration{"prometheus": 30 * time.Second, "loki": time.Minute, "grafana": time.Minute}[strings.SplitN(c.ID, ":", 3)[1]]; c.Interval != want {
+				t.Errorf("rule %s: interval %s, want %s", c.ID, c.Interval, want)
+			}
 		}
 	}
 	if rules != want {
