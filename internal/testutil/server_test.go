@@ -1,7 +1,10 @@
 package testutil
 
 import (
+	"net/url"
+
 	"fmt"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"io"
 	"net/http"
 	"strings"
@@ -28,23 +31,33 @@ func TestServeRejectsWritesAndQueries(t *testing.T) {
 	for _, tc := range []struct {
 		method, path string
 		status       int
+		tag          string
 	}{
-		{"POST", "/api/v1/rules", 405},
-		{"PUT", "/anything", 405},
-		{"DELETE", "/api/dashboards/uid/x", 405},
-		{"GET", "/api/v1/query", 403},
-		{"GET", "/api/v1/query_range", 403},
-		{"GET", "/prometheus/api/v1/query", 403},
-		{"GET", "/prometheus/api/v1/query_range", 403},
-		{"GET", "/loki/api/v1/query", 403},
-		{"GET", "/loki/api/v1/query_range", 403},
-		{"GET", "/api/ds/query", 403},
-		{"GET", "/api/datasources/proxy/uid/prom/api/v1/series", 403},
+		{"POST", "/api/v1/rules", 405, ""},
+		{"PUT", "/anything", 405, ""},
+		{"DELETE", "/api/dashboards/uid/x", 405, ""},
+		{"GET", "/api/v1/query", 403, ""},
+		{"GET", "/api/v1/query_range", 403, ""},
+		{"GET", "/prometheus/api/v1/query", 403, ""},
+		{"GET", "/prometheus/api/v1/query_range", 403, ""},
+		{"GET", "/loki/api/v1/query", 403, ""},
+		{"GET", "/loki/api/v1/query_range", 403, ""},
+		{"GET", "/api/ds/query", 403, ""},
+		{"GET", "/api/datasources/proxy/uid/prom/api/v1/series", 403, ""},
+		// The probe marker is allowed only as itself, tagged, on an
+		// instant-query endpoint of Prometheus or Mimir.
+		{"GET", "/api/v1/query?query=" + url.QueryEscape(collect.ProbeQuery("ab12")), 403, ""},
+		{"GET", "/api/v1/query?query=" + url.QueryEscape(collect.ProbeQuery("ab12")+" + up"), 403, collect.ProbeTag},
+		{"GET", "/api/v1/query_range?query=" + url.QueryEscape(collect.ProbeQuery("ab12")), 403, collect.ProbeTag},
+		{"GET", "/loki/api/v1/query?query=" + url.QueryEscape(collect.ProbeQuery("ab12")), 403, collect.ProbeTag},
 	} {
 		rec := &recorder{TB: t}
 		reached := false
 		srv := Serve(rec, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true }))
 		req, _ := http.NewRequest(tc.method, srv.URL+tc.path, nil)
+		if tc.tag != "" {
+			req.Header.Set("X-Query-Tags", tc.tag)
+		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -121,4 +134,21 @@ func (f *fatalRecorder) Helper() {}
 func (f *fatalRecorder) Fatal(args ...any) {
 	f.fatal, f.msg = true, fmt.Sprint(args...)
 	panic("fatal")
+}
+
+func TestServeAllowsTheProbe(t *testing.T) {
+	for _, path := range []string{"/api/v1/query", "/prometheus/api/v1/query"} {
+		reached := false
+		srv := Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true }))
+		req, _ := http.NewRequest("GET", srv.URL+path+"?query="+url.QueryEscape(collect.ProbeQuery("ab12")), nil)
+		req.Header.Set("X-Query-Tags", collect.ProbeTag)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if !reached {
+			t.Errorf("%s: probe blocked (%d)", path, resp.StatusCode)
+		}
+	}
 }

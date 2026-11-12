@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
@@ -23,6 +24,10 @@ type query struct {
 	variable bool   // a dashboard variable's query (label_values() etc.)
 	vars     map[string]varValues
 	shows    []string // labels a panel legend or annotation template shows
+	// seen and actor: when a query log last recorded the query, and who
+	// sent it then (zero for dashboards and rules).
+	seen  time.Time
+	actor string
 }
 
 // varValues are the values a dashboard variable can take. any: it can take
@@ -132,9 +137,13 @@ func (r *resolver) merge(ref graph.Reference) (refKey, bool) {
 	cur.AllLabels = cur.AllLabels || ref.AllLabels
 	cur.Assumed = cur.Assumed || ref.Assumed
 	cur.ResultLabels = cur.ResultLabels || ref.ResultLabels
+	if ref.LastSeen.After(cur.LastSeen) {
+		cur.LastSeen, cur.Actor = ref.LastSeen, ref.Actor
+	}
 	// Unions only grow, so equal lengths mean nothing new.
 	changed := len(cur.Labels) != len(before.Labels) || len(cur.Reasons) != len(before.Reasons) ||
-		cur.AllLabels != before.AllLabels || cur.Assumed != before.Assumed || cur.ResultLabels != before.ResultLabels
+		cur.AllLabels != before.AllLabels || cur.Assumed != before.Assumed || cur.ResultLabels != before.ResultLabels ||
+		!cur.LastSeen.Equal(before.LastSeen)
 	return k, changed
 }
 
@@ -171,6 +180,8 @@ func (r *resolver) resolveMetric(q query, pr parse.Ref, failed bool) {
 	base := graph.Reference{
 		ConsumerID:   q.consumer.ID,
 		Evidence:     q.consumer.Kind.Evidence(),
+		LastSeen:     q.seen,
+		Actor:        q.actor,
 		Labels:       appendUses(promLabels(pr), q.shows, graph.LabelLegend),
 		AllLabels:    pr.AllLabels,
 		ResultLabels: pr.ResultLabels,
@@ -314,6 +325,8 @@ func (r *resolver) resolveStream(q query, pr parse.Ref) {
 	base := graph.Reference{
 		ConsumerID:   q.consumer.ID,
 		Evidence:     q.consumer.Kind.Evidence(),
+		LastSeen:     q.seen,
+		Actor:        q.actor,
 		Labels:       appendUses(logLabels(pr), q.shows, graph.LabelLegend),
 		AllLabels:    pr.AllLabels,
 		ResultLabels: pr.ResultLabels,
@@ -562,6 +575,8 @@ func (r *resolver) follow(consumer string, out graph.Reference) {
 				SignalID:   in.SignalID,
 				ConsumerID: consumer,
 				Via:        rule,
+				LastSeen:   out.LastSeen, // the reader's last read, not the rule's
+				Actor:      out.Actor,
 				Evidence:   r.consumerEvd[consumer],
 				Labels:     append(append([]graph.LabelRef(nil), in.Labels...), out.Labels...),
 				AllLabels:  in.AllLabels || out.AllLabels,

@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS scan_sources (
     configured   INTEGER NOT NULL CHECK (configured IN (0, 1)),
     coverage     REAL NOT NULL CHECK (coverage >= 0 AND coverage <= 1),
     window_start INTEGER NOT NULL,
+    -- Schema version 4: why the source can't be trusted (a query log
+    -- whose probe never appeared), '' when it can.
+    gap          TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (scan_id, source)
 );
 

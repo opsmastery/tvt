@@ -204,4 +204,8 @@ type SourceCoverage struct {
 	Configured  bool
 	Coverage    float64 // 0..1
 	WindowStart time.Time
+	// Gap says why the source can't be trusted for the window, when it
+	// can't: a query log whose probe marker never appeared (Coverage is
+	// then 0). Empty when there is no gap or the source isn't configured.
+	Gap string
 }

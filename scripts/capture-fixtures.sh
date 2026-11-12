@@ -50,6 +50,14 @@ get "$LOKI/loki/api/v1/index/volume" "$OUT/loki/volume_by_stream.json" -G \
   --data-urlencode 'query={app=~".+"}' --data-urlencode 'since=24h' --data-urlencode 'aggregateBy=series' \
   --data-urlencode 'targetLabels=app,component,level'
 get "$LOKI/loki/api/v1/labels" "$OUT/loki/labels.json"
+# Loki's query log: the metrics.go lines of the last two hours (frontend,
+# querier and ruler; item 4 keeps the frontend's user queries).
+if (cd "$LAB_DIR" && podman compose logs --no-log-prefix --since 2h loki 2>&1) \
+     | grep 'caller=metrics.go' > "$OUT/loki/query.log"; then
+  echo "  ok  $OUT/loki/query.log"
+else
+  echo "  FAIL loki query.log (is LAB_DIR=$LAB_DIR right?)" >&2
+fi
 fi
 
 if want grafana; then
@@ -110,6 +118,15 @@ if curl -fs -o /dev/null "$MIMIR/ready"; then
     --data-urlencode "selector=$sel" --data-urlencode 'limit=0' \
     --data-urlencode 'label_names[]=instance' --data-urlencode 'label_names[]=job' \
     --data-urlencode 'label_names[]=op' --data-urlencode 'label_names[]=user_id'
+  # The query-frontend's query stats lines. The viewer doesn't query
+  # Mimir, so send a panel query through Grafana's datasource proxy first
+  # to have an attributed one (or run `tvt scan --mimir` for a probe line).
+  if (cd "$LAB_DIR" && podman compose logs --no-log-prefix --since 48h mimir 2>&1) \
+       | grep 'msg="query stats"' | tail -n 500 > "$OUT/mimir/query.log"; then
+    echo "  ok  $OUT/mimir/query.log"
+  else
+    echo "  FAIL mimir query.log (is LAB_DIR=$LAB_DIR right?)" >&2
+  fi
 else
   echo "  skip: no Mimir at $MIMIR (tvt-lab: make up-mimir)"
 fi
