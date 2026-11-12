@@ -3,15 +3,19 @@ package prometheus
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 )
 
 type rulesData struct {
 	Groups []struct {
-		Name  string `json:"name"`
-		File  string `json:"file"`
-		Rules []struct {
+		Name string `json:"name"`
+		File string `json:"file"`
+		// Interval is the group's effective evaluation interval in seconds
+		// (its own, else the global evaluation_interval).
+		Interval float64 `json:"interval"`
+		Rules    []struct {
 			Name  string `json:"name"`
 			Query string `json:"query"`
 			Type  string `json:"type"` // "alerting" or "recording"
@@ -50,6 +54,7 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 				Kind:      kind,
 				Expr:      r.Query,
 				Language:  "promql",
+				Interval:  time.Duration(g.Interval * float64(time.Second)),
 			})
 		}
 	}

@@ -176,7 +176,7 @@ func TestRulesFixture(t *testing.T) {
 	for _, r := range got {
 		kinds[r.Name] = r.Kind
 		if r.Source != "prometheus" || r.Language != "promql" || r.Expr == "" ||
-			r.Namespace != "/etc/prometheus/rules/shop.yml" {
+			r.Namespace != "/etc/prometheus/rules/shop.yml" || r.Interval != 30*time.Second {
 			t.Errorf("bad rule %+v", r)
 		}
 	}
