@@ -37,7 +37,7 @@ A signal's weight is its strongest single piece of evidence. Weights are not sum
 
 ## Design rules
 
-- Read-only against every backend. Changes only happen through reviewed PRs.
+- Read-only against every backend. Changes only happen through reviewed PRs. The only query tvt sends to a backend that logs queries is the query-log probe: a marker that selects no series, tagged `Source=tvt-probe`, which proves the log is written and is never counted as usage.
 - Credentials come from the environment and are never logged.
 - Collectors are tested against recorded responses, so no live stack is needed.
 - The JSON report is the internal API.
