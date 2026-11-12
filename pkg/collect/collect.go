@@ -76,14 +76,29 @@ const (
 
 // Rule is one alerting or recording rule.
 type Rule struct {
-	Source    string // "prometheus", "mimir", "loki"
-	Namespace string
+	Source    string // "prometheus", "mimir", "loki", "grafana"
+	Namespace string // Grafana: the folder UID
 	Group     string
 	Name      string // alert name, or the recorded metric name
 	Kind      RuleKind
 	Expr      string
 	Language  string // "promql" or "logql"
+	// UID identifies a Grafana-managed rule; titles needn't be unique.
+	UID string
+	// Interval is how often the rule is evaluated, when known.
+	Interval time.Duration
+	// EvaluatedBy is EvaluatedByGrafana when Grafana evaluates the rule and
+	// sends its queries to the datasource on every interval; empty when
+	// the datasource's own ruler does.
+	EvaluatedBy string
+	// Queries are a Grafana-managed rule's datasource queries, each with
+	// its datasource (expressions left out). When set, they are what the
+	// rule reads, and Expr and Language are evidence only.
+	Queries []PanelQuery
 }
+
+// EvaluatedByGrafana marks a rule Grafana evaluates itself.
+const EvaluatedByGrafana = "grafana"
 
 // Dashboard is a Grafana dashboard.
 type Dashboard struct {

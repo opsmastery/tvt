@@ -10,6 +10,7 @@
 //	loki:stream:<selector>               log stream selector (canonical, see parse.CanonicalSelector)
 //	loki:stream:*                        every stream: a LogQL query whose selectors couldn't be read
 //	rule:<source>:<namespace>/<group>/<name>
+//	rule:grafana:<folder uid>/<group>/<rule uid>   Grafana-managed rule
 //	panel:<org>:<dashboard uid>:<panel id>:<query index>
 //	var:<org>:<dashboard uid>:<variable name>
 //	annot:<org>:<dashboard uid>:<annotation name>
@@ -28,6 +29,7 @@ package scan
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -122,15 +124,37 @@ func Build(in Inputs) (Output, error) {
 		if r.Kind == collect.RuleAlert {
 			kind = graph.ConsumerAlertRule
 		}
-		c := graph.Consumer{
-			ID:   ids.unique("rule:" + r.Source + ":" + r.Namespace + "/" + r.Group + "/" + r.Name),
-			Kind: kind,
-			Name: r.Name,
-			Expr: r.Expr,
+		key := r.Name
+		if r.UID != "" {
+			key = r.UID // Grafana rule titles needn't be unique; UIDs are
 		}
+		c := graph.Consumer{
+			ID:          ids.unique("rule:" + r.Source + ":" + r.Namespace + "/" + r.Group + "/" + key),
+			Kind:        kind,
+			Name:        r.Name,
+			Expr:        r.Expr,
+			EvaluatedBy: r.EvaluatedBy,
+			Interval:    r.Interval,
+		}
+		for _, q := range r.Queries {
+			if q.DatasourceUID != "" && !slices.Contains(c.Datasources, q.DatasourceUID) {
+				c.Datasources = append(c.Datasources, q.DatasourceUID)
+			}
+		}
+		slices.Sort(c.Datasources)
 		out.Consumers = append(out.Consumers, c)
 		if kind == graph.ConsumerRecordingRule && r.Name != "" {
 			res.recordingRule(c.ID, r.Name)
+		}
+		if len(r.Queries) > 0 {
+			// A Grafana-managed rule: each query goes to its own datasource;
+			// one that isn't Prometheus or Loki reads no signal tvt tracks.
+			for _, q := range r.Queries {
+				if lang, ok := queryLanguage(q.DatasourceType); ok {
+					queries = append(queries, query{consumer: c, expr: q.Expr, lang: lang})
+				}
+			}
+			continue
 		}
 		lang := "promql"
 		if r.Language == "logql" {

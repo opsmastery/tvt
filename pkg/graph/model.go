@@ -132,6 +132,13 @@ type Consumer struct {
 	Expr       string    // the query or rule expression, shown as evidence
 	Team       string    // owning team, when known
 	LastViewed time.Time // dashboards only; zero if unknown
+	// Rules only: EvaluatedBy is "grafana" when Grafana evaluates the rule
+	// (and sends its query to the datasource every Interval), empty when
+	// the datasource's ruler does. Interval is zero when unknown.
+	// Datasources are the UIDs a Grafana-managed rule queries, sorted.
+	EvaluatedBy string
+	Interval    time.Duration
+	Datasources []string
 }
 
 // Reference links a signal to a consumer that depends on it.

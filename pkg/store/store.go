@@ -28,7 +28,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -164,6 +164,18 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 5 {
+		for _, q := range []string{
+			`ALTER TABLE consumers ADD COLUMN evaluated_by TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE consumers ADD COLUMN interval_ms INTEGER`,
+			`ALTER TABLE consumers ADD COLUMN datasources TEXT NOT NULL DEFAULT ''`,
+			`UPDATE meta SET value = '5' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -238,7 +250,7 @@ func (s *Store) Signals(ctx context.Context, scanID int64) ([]graph.Signal, erro
 // Consumers returns the consumers seen in scan scanID, ordered by ID.
 func (s *Store) Consumers(ctx context.Context, scanID int64) ([]graph.Consumer, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, kind, name, expr, team, last_viewed FROM consumers WHERE last_scan = ? ORDER BY id`, scanID)
+		`SELECT id, kind, name, expr, team, last_viewed, evaluated_by, interval_ms, datasources FROM consumers WHERE last_scan = ? ORDER BY id`, scanID)
 	if err != nil {
 		return nil, err
 	}
@@ -247,11 +259,18 @@ func (s *Store) Consumers(ctx context.Context, scanID int64) ([]graph.Consumer, 
 	for rows.Next() {
 		var c graph.Consumer
 		var kind string
-		var viewed sql.NullInt64
-		if err := rows.Scan(&c.ID, &kind, &c.Name, &c.Expr, &c.Team, &viewed); err != nil {
+		var viewed, interval sql.NullInt64
+		var dss string
+		if err := rows.Scan(&c.ID, &kind, &c.Name, &c.Expr, &c.Team, &viewed, &c.EvaluatedBy, &interval, &dss); err != nil {
 			return nil, err
 		}
 		c.Kind, c.LastViewed = graph.ConsumerKind(kind), fromNullMillis(viewed)
+		if interval.Valid {
+			c.Interval = time.Duration(interval.Int64) * time.Millisecond
+		}
+		if dss != "" {
+			c.Datasources = strings.Split(dss, "\n")
+		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -457,10 +476,11 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 				source = excluded.source,
 				first_seen = min(signals.first_seen, excluded.first_seen),
 				last_scan = excluded.last_scan`},
-		{&sc.cons, `INSERT INTO consumers (id, kind, name, expr, team, last_viewed, last_scan)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
+		{&sc.cons, `INSERT INTO consumers (id, kind, name, expr, team, last_viewed, last_scan, evaluated_by, interval_ms, datasources)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET
 				kind = excluded.kind, name = excluded.name, expr = excluded.expr, team = excluded.team,
+				evaluated_by = excluded.evaluated_by, interval_ms = excluded.interval_ms, datasources = excluded.datasources,
 				last_viewed = CASE
 					WHEN consumers.last_viewed IS NULL THEN excluded.last_viewed
 					WHEN excluded.last_viewed IS NULL THEN consumers.last_viewed
@@ -547,7 +567,12 @@ func (sc *Scan) PutConsumer(ctx context.Context, c graph.Consumer) error {
 	if c.ID == "" || c.Kind == "" {
 		return fmt.Errorf("store: consumer %q: ID and Kind are required", c.ID)
 	}
-	_, err := sc.cons.ExecContext(ctx, c.ID, string(c.Kind), c.Name, c.Expr, c.Team, nullMillis(c.LastViewed), sc.ID)
+	var interval sql.NullInt64
+	if c.Interval > 0 {
+		interval = sql.NullInt64{Int64: c.Interval.Milliseconds(), Valid: true}
+	}
+	_, err := sc.cons.ExecContext(ctx, c.ID, string(c.Kind), c.Name, c.Expr, c.Team, nullMillis(c.LastViewed), sc.ID,
+		c.EvaluatedBy, interval, strings.Join(c.Datasources, "\n"))
 	return wrap("consumer", c.ID, err)
 }
 
