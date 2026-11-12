@@ -58,6 +58,9 @@ type Inputs struct {
 	Views []collect.DashboardView
 	// Sources is the coverage of each evidence source, configured or not.
 	Sources []graph.SourceCoverage
+	// Queries are query-log entries in the window, tvt's own and rule
+	// evaluations already excluded.
+	Queries []collect.LoggedQuery
 }
 
 // Output is one scan's graph rows.
@@ -226,6 +229,12 @@ func Build(in Inputs) (Output, error) {
 			}, a.DatasourceType, false, shownLabels([]string{a.TitleFormat, a.TextFormat}, a.TagKeys))
 		}
 	}
+
+	// Query logs: one consumer per distinct query (per panel, when the log
+	// attributes it).
+	logged, lq := loggedConsumers(in.Queries, in.Dashboards, in.OrgID, ids)
+	out.Consumers = append(out.Consumers, logged...)
+	queries = append(queries, lq...)
 
 	// References: every query, then recording-rule chains, then the label
 	// signals each metric reference reads.

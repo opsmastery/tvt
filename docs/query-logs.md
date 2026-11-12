@@ -91,3 +91,16 @@ The cost of query logging is disk and log volume, not query latency.
 2. Drop Loki sub-queries and metadata calls (keep `component=frontend` with `query_type` in `limited`, `filter`, `metric`).
 3. Drop tvt's own queries (`source=tvt`, `user_agent=tvt/...`) and Mimir remote-ruler evaluations (`user_agent=mimir/...`).
 4. Attribute: Mimir headers → dashboard, panel and (with `send_user_header`) user; Grafana IP or user agent → "Grafana, unattributed" (match against panel expressions); anything else → "other API client" (ad hoc weight).
+
+## Proving a query log (Sprint 2 item 4)
+
+A log that stopped being written, or a stale copy, looks exactly like a quiet one. So each `tvt scan` sends one marker query to every query log it can probe, before collecting anything, and re-reads the log for up to `--probe-wait` (default 30s) until the marker shows up:
+
+```
+count(tvt_query_log_probe{nonce="<16 hex digits>"})     X-Query-Tags: Source=tvt-probe
+```
+
+- It selects no series (verified in the lab: Mimir logs it with `fetched_series_count=0`), and every reader drops it from usage.
+- Prometheus logs it as an API query (match on the text; Prometheus doesn't log headers). Mimir logs it with `header_x_query_tags="Source=tvt-probe"` when `X-Query-Tags` is in `log_query_request_headers`.
+- If the marker never appears, the probe request fails, or tvt can't send one (a Prometheus log in a `--mimir` scan), the source's coverage is 0 and the scan records the gap (`scan_sources.gap`). The log's queries still count: unknown means used.
+- So tvt must read the **live** log, not a copy made before the scan. Partners point `--prom-query-log` at the file Prometheus writes (or a mount of it), and `--mimir-query-log`/`--loki-query-log` at the backends' container logs: on Kubernetes the node's `/var/log/pods/...` files, which tvt reads in the CRI format. Loki's probe (a LogQL marker) is Sprint 3 item 9.
