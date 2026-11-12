@@ -12,7 +12,7 @@ staged=$(git diff --cached --name-only --diff-filter=ACMR)
 #    local configs and price cards (negotiated prices), env files and keys.
 #    .gitignore covers most of these; this also catches `git add -f`.
 blocked=$(printf '%s\n' "$staged" | grep -E \
-	'^docs/plan\.md$|\.db$|\.db-(journal|shm|wal)$|^tvt\.yaml$|^pricecard\.yaml$|(^|/)\.env(\..*)?$|\.key$' || true)
+	'^docs/plan\.md$|\.db$|\.db-(journal|shm|wal)$|^tvt\.yaml$|^pricecard\.yaml$|(^|/)\.env[^/]*$|\.key$' || true)
 [ -z "$blocked" ] || fail "these files must not be committed:
 $blocked"
 
