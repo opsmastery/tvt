@@ -140,9 +140,10 @@ func assertMetrics(t *testing.T, g scanGraph, src string, metrics map[string]gtE
 }
 
 // assertRules: every ground-truth rule from one of sources is a consumer of
-// its kind (rule:<source>:<namespace>/<group>/<name>; the namespace is the
-// ruler's file or namespace, which ground truth doesn't record). It returns
-// how many rules it asserted.
+// its kind and name in its group (rule:<source>:<namespace>/<group>/<key>;
+// the namespace is the ruler's file or namespace, or a Grafana folder UID,
+// which ground truth doesn't record, and a Grafana rule's key is its UID).
+// It returns how many rules it asserted.
 func assertRules(t *testing.T, g scanGraph, rules map[string]gtRule, sources ...string) int {
 	t.Helper()
 	var n int
@@ -157,7 +158,7 @@ func assertRules(t *testing.T, g scanGraph, rules map[string]gtRule, sources ...
 		}
 		found := false
 		for id, c := range g.consumers {
-			if strings.HasPrefix(id, "rule:"+r.Source+":") && strings.HasSuffix(id, "/"+r.Group+"/"+name) && c.Kind == want {
+			if strings.HasPrefix(id, "rule:"+r.Source+":") && strings.Contains(id, "/"+r.Group+"/") && c.Name == name && c.Kind == want {
 				found = true
 				break
 			}
@@ -283,14 +284,6 @@ var groundTruthConflicts = map[string]string{
 		`(sum by (level) (rate({app="shop", component="api"}[$__auto]))) reads every api stream, debug included`,
 }
 
-// waitsFor lists ground-truth evidence a later Sprint 2 item collects.
-func waitsFor(e gtEntry) string {
-	if strings.Contains(e.Source, "Grafana ruler") {
-		return "Grafana-managed rules (Sprint 2 item 5)"
-	}
-	return ""
-}
-
 // refsTo returns every reference to a signal with its consumer.
 func (g scanGraph) refsTo(signalID string) []graph.Reference {
 	var out []graph.Reference
@@ -327,10 +320,6 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 		e := gt.Metrics[name]
 		if strings.Contains(name, "*") {
 			continue // globs: below
-		}
-		if why := waitsFor(e); why != "" {
-			t.Logf("%s (%s): waits for %s", name, e.Class, why)
-			continue
 		}
 		var hard, viewed, dash, adhoc, read bool
 		for _, r := range g.refsTo(src + ":metric:" + name) {
