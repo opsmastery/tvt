@@ -240,3 +240,47 @@ func TestRedactLogQL(t *testing.T) {
 		}
 	}
 }
+
+// TestMetricsQLCorpus (Sprint 2 item 17): MetricsQL extends PromQL, so the
+// PromQL parser rejects some VictoriaMetrics queries. Each one must still
+// reference every metric it names, assumed; none may come back as "no
+// reference". The share PromQL accepts is tracked against a baseline.
+func TestMetricsQLCorpus(t *testing.T) {
+	b, err := os.ReadFile("testdata/metricsql-corpus/queries.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus []struct {
+		Source string   `json:"source"`
+		Expr   string   `json:"expr"`
+		Names  []string `json:"names"`
+	}
+	if err := json.Unmarshal(b, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	parsed := 0
+	for _, q := range corpus {
+		refs, err := PromQL(q.Expr)
+		if err == nil {
+			parsed++
+		}
+		got := map[string]bool{}
+		for _, r := range refs {
+			got[r.Metric] = true
+			if err != nil && (!r.Assumed || !r.AllLabels) {
+				t.Errorf("%s: a ref from a query that didn't parse must be assumed and read every label: %+v", q.Source, r)
+			}
+		}
+		for _, n := range q.Names {
+			if !got[n] {
+				t.Errorf("%s: no reference to %s (err %v, refs %+v)", q.Source, n, err, refs)
+			}
+		}
+	}
+	rate := float64(parsed) / float64(len(corpus))
+	baseline := readBaseline(t, "testdata/metricsql-corpus/baseline")
+	t.Logf("MetricsQL corpus: PromQL parses %.4f (%d/%d), baseline %.4f; the rest are assumed references", rate, parsed, len(corpus), baseline)
+	if rate < baseline {
+		t.Errorf("PromQL parse rate on the MetricsQL corpus %.4f is below the baseline %.4f", rate, baseline)
+	}
+}
