@@ -1,71 +1,84 @@
 #!/usr/bin/env bash
 # tvt pre-commit: fast checks on what is staged. Enable with `make hooks`.
 # Skip once with `git commit --no-verify` (CI runs the same checks).
-set -eu
+set -euo pipefail
 
 fail() { printf 'pre-commit: %s\n' "$*" >&2; exit 1; }
 
-has_staged=false
-has_go=false
-has_go_mod=false
-has_schema=false
-unformatted=false
+if git diff --cached --quiet; then
+	exit 0
+fi
 
+go_changed=0
+schema_changed=0
+mod_changed=0
+
+# 1. Files that must never be committed: internal planning, scan databases,
+#    local configs and price cards (negotiated prices), env files and keys.
+#    .gitignore covers most of these; this also catches `git add -f`.
+# Read paths as NUL-delimited records so Git's quoted display format cannot
+# alter filenames containing spaces, newlines or non-ASCII bytes.
 while IFS= read -r -d '' f; do
-	has_staged=true
-
-	# 1. Files that must never be committed: internal planning, scan databases,
-	#    local configs and price cards (negotiated prices), env files and keys.
-	#    .gitignore covers most of these; this also catches `git add -f`.
 	case "$f" in
-		docs/plan.md|*.db|*.db-journal|*.db-shm|*.db-wal|tvt.yaml|pricecard.yaml|*.key)
-			fail "these files must not be committed: $f"
-			;;
-	esac
-	case "${f##*/}" in
-		.env*)
-			fail "these files must not be committed: $f"
+		docs/plan.md|*.db|*.db-journal|*.db-shm|*.db-wal|tvt.yaml|pricecard.yaml|.env*|*/.env*|*.key)
+			fail "this file must not be committed: $f"
 			;;
 	esac
 
 	case "$f" in
 		*.go)
-			has_go=true
-			# 2. gofmt, on the staged content rather than the working tree.
-			if [ -n "$(git show ":$f" | gofmt -l 2>&1)" ]; then
-				printf 'pre-commit: gofmt needed: %s\n' "$f" >&2
-				unformatted=true
+			go_changed=1
+			if [ -n "$(git show ":$f" | gofmt -d 2>&1)" ]; then
+				fail "gofmt needed for staged file (run make fmt, then git add): $f"
 			fi
 			;;
 		go.mod|go.sum)
-			has_go_mod=true
-			;;
-		pkg/graph/schema.sql|pkg/store/*)
-			has_schema=true
+			mod_changed=1
 			;;
 	esac
-done < <(git diff --cached --name-only --diff-filter=ACMR -z)
 
-[ "$has_staged" = true ] || exit 0
-[ "$unformatted" = false ] || fail "gofmt needed (run make fmt, then git add)"
+	case "$f" in
+		pkg/graph/schema.sql|pkg/store/*) schema_changed=1 ;;
+	esac
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
 
-# 3. go vet.
-if [ "$has_go" = true ]; then
+# Deletions trigger checks but are not inputs to filename blocking or gofmt.
+while IFS= read -r -d '' f; do
+	case "$f" in
+		*.go) go_changed=1 ;;
+	esac
+	case "$f" in
+		go.mod|go.sum) mod_changed=1 ;;
+	esac
+	case "$f" in
+		pkg/graph/schema.sql|pkg/store/*) schema_changed=1 ;;
+	esac
+done < <(git diff --cached --name-only -z --diff-filter=D)
+
+# 2. go vet.
+if [ "$go_changed" -eq 1 ]; then
 	go vet ./... || fail "go vet failed"
 fi
 
-# 4. go.mod and go.sum tidy.
-if [ "$has_go_mod" = true ]; then
+# 3. go.mod and go.sum tidy.
+if [ "$mod_changed" -eq 1 ]; then
 	go mod tidy -diff >/dev/null || fail "go.mod/go.sum not tidy (run go mod tidy)"
 fi
 
-# 5. Schema changes: a new SchemaVersion, upgrade step and frozen copy.
-if [ "$has_schema" = true ]; then
-	go test -count=1 -run 'Schema|Upgrade' ./pkg/store >/dev/null ||
-		fail "store schema tests failed (go test -run 'Schema|Upgrade' ./pkg/store)"
+# 4. Schema changes: a new SchemaVersion, upgrade step and frozen copy.
+# Export the index, rather than testing the working tree, so the checks cover
+# exactly the snapshot that will be committed.
+if [ "$schema_changed" -eq 1 ]; then
+	snapshot=$(mktemp -d "${TMPDIR:-/tmp}/tvt-index.XXXXXX")
+	trap 'rm -rf "$snapshot"' EXIT
+	git checkout-index --all --prefix="$snapshot/"
+	(
+		cd "$snapshot"
+		go test -count=1 -run 'Schema|Upgrade' ./pkg/store >/dev/null
+	) || fail "store schema tests failed (go test -run 'Schema|Upgrade' ./pkg/store)"
 fi
 
-# 6. Secrets in the staged diff, before they reach GitHub.
+# 5. Secrets in the staged diff, before they reach GitHub.
 command -v gitleaks >/dev/null 2>&1 ||
 	fail "gitleaks not installed (brew install gitleaks); it keeps tokens out of commits"
 gitleaks git --pre-commit --staged --redact --no-banner --log-level warn ||
