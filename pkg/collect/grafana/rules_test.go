@@ -35,8 +35,8 @@ func TestRulesFixture(t *testing.T) {
 	}
 }
 
-// Queries keep their datasource (by UID or name); expressions and queries
-// with no text are left out; a recording rule is named by its metric; the
+// Queries keep their datasource (by UID or name); expressions, and queries
+// with no text to a datasource tvt doesn't parse, are left out; a recording rule is named by its metric; the
 // group interval stands in when the rule has none.
 func TestRulesQueriesAndRecording(t *testing.T) {
 	rules := `{"Ops": [{"name": "g", "interval": "30s", "rules": [
@@ -44,7 +44,7 @@ func TestRulesQueriesAndRecording(t *testing.T) {
 	    {"refId": "A", "datasourceUid": "loki", "model": {"expr": "count_over_time({app=\"shop\"} | json [5m])"}},
 	    {"refId": "B", "datasourceUid": "Mimir", "model": {"expr": "up"}},
 	    {"refId": "C", "datasourceUid": "__expr__", "model": {"type": "math", "expression": "$A + $B"}},
-	    {"refId": "D", "datasourceUid": "prometheus", "model": {"expr": ""}}]}},
+	    {"refId": "D", "datasourceUid": "es", "model": {"query": ""}}]}},
 	  {"grafana_alert": {"uid": "a", "title": "Recorder", "namespace_uid": "f1", "rule_group": "g", "intervalSeconds": 60,
 	    "record": {"metric": "job:up:sum", "from": "A"},
 	    "data": [{"refId": "A", "datasourceUid": "prometheus", "model": {"expr": "sum by (job) (up)"}}]}}]}]}`
@@ -84,6 +84,14 @@ func TestRulesErrors(t *testing.T) {
 	}{
 		{"forbidden", testutil.Routes{"/api/ruler/grafana/api/v1/rules": status(403)}, "alert.rules:read"},
 		{"alerting off", testutil.Routes{"/api/ruler/grafana/api/v1/rules": status(404)}, "HTTP 404"},
+		{"null listing", testutil.Routes{"/api/ruler/grafana/api/v1/rules": body("null")}, "not a rule listing"},
+		// A Prometheus or Loki query tvt can't read might be the only thing
+		// protecting a signal.
+		{"empty Prometheus query", testutil.Routes{
+			"/api/ruler/grafana/api/v1/rules": body(`{"F": [{"name": "g", "rules": [{"grafana_alert": {"uid": "u", "title": "T", "data": [
+			  {"refId": "A", "datasourceUid": "prometheus", "model": {"expr": "  "}}]}}]}]}`),
+			"/api/datasources": testutil.File(t, "lab/grafana/datasources.json"),
+		}, `query "A" for datasource "prometheus" has an empty or unreadable model`},
 		{"datasource by name without the list", testutil.Routes{
 			"/api/ruler/grafana/api/v1/rules": body(strings.Replace(alert, "%s", "Prometheus", 1)),
 			"/api/datasources":                status(403),
