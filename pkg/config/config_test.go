@@ -1,0 +1,81 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// The example config loads: every section in it is either read or
+// accepted for a later sprint.
+func TestExampleLoads(t *testing.T) {
+	c, err := Load(filepath.Join("..", "..", "examples", "tvt.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.ExternalConsumers) != 2 || c.ExternalConsumers[0].Name != "finance-federation" ||
+		c.ExternalConsumers[1].Streams[0] != `{component="audit"}` {
+		t.Errorf("external consumers %+v", c.ExternalConsumers)
+	}
+	if len(c.Ownership.Owners) == 0 || c.Ownership.Owners[0].Tier == nil {
+		t.Errorf("owners %+v", c.Ownership.Owners)
+	}
+}
+
+func TestEmptyIsValid(t *testing.T) {
+	for _, doc := range []string{"", "# nothing\n", "external_consumers: []\n"} {
+		if _, err := Parse([]byte(doc)); err != nil {
+			t.Errorf("%q: %v", doc, err)
+		}
+	}
+}
+
+// A typo or bad selector fails the load: silently ignoring it could drop an
+// external consumer, and with it a hard keep.
+func TestStrict(t *testing.T) {
+	for doc, want := range map[string]string{
+		"external_consumer: []\n":                                                         "external_consumer",
+		"external_consumers:\n  - name: a\n    metric: [x]\n":                             "metric",
+		"external_consumers:\n  - metrics: [x]\n":                                         "name is required",
+		"external_consumers:\n  - name: a\n":                                              "needs metrics or streams",
+		"external_consumers:\n  - {name: a, metrics: [x]}\n  - {name: a, metrics: [y]}\n": "appears twice",
+		"external_consumers:\n  - name: a\n    metrics: ['(']\n":                          "missing closing",
+		"external_consumers:\n  - name: a\n    streams: ['{}']\n":                         "streams",
+		"external_consumers:\n  - name: a\n    streams: ['up']\n":                         "streams",
+		"ownership:\n  owners:\n    - {name: a, tier: -1}\n":                              "tier -1",
+		"ownership:\n  owners:\n    - {tier: 1}\n":                                        "name is required",
+		"ownership:\n  owners:\n    - {name: a, streams: ['{a=~\"(\"}']}\n":               "streams",
+	} {
+		_, err := Parse([]byte(doc))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: err %v, want %q", doc, err, want)
+		}
+	}
+}
+
+func TestMetricRegexpAnchored(t *testing.T) {
+	re, err := MetricRegexp("billing_.*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !re.MatchString("billing_total") || re.MatchString("x_billing_total") {
+		t.Error("metrics regex is not anchored like PromQL")
+	}
+}
+
+func TestLoadMissingFile(t *testing.T) {
+	if _, err := Load(filepath.Join(t.TempDir(), "nope.yaml")); !os.IsNotExist(errUnwrapAll(err)) {
+		t.Errorf("err %v", err)
+	}
+}
+
+func errUnwrapAll(err error) error {
+	for {
+		u, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return err
+		}
+		err = u.Unwrap()
+	}
+}
