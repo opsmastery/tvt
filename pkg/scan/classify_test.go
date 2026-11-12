@@ -83,3 +83,56 @@ func TestClassify(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamOwnerRequiresImpliedSelector(t *testing.T) {
+	tests := []struct {
+		name   string
+		signal string
+		owners []config.Owner
+		want   string
+	}{
+		{
+			name:   "non-equality matcher does not imply a different constraint",
+			signal: `{app="shop", env=~"prod"}`,
+			owners: []config.Owner{
+				{Name: "mismatch", Streams: []string{`{app="shop", env!="prod"}`}},
+				{Name: "shop", Streams: []string{`{app="shop"}`}},
+			},
+			want: "shop",
+		},
+		{
+			name:   "omitted signal label is unknown",
+			signal: `{app="shop"}`,
+			owners: []config.Owner{
+				{Name: "empty-env", Streams: []string{`{app="shop", env=""}`}},
+			},
+		},
+		{
+			name:   "equality can imply another matcher",
+			signal: `{app="shop", env="dev"}`,
+			owners: []config.Owner{
+				{Name: "shop", Streams: []string{`{app="shop", env!="prod"}`}},
+			},
+			want: "shop",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, err := newOwnerMatcher(tt.owners)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := m.match(graph.Signal{Kind: graph.KindStream, Name: tt.signal})
+			if got == nil {
+				if tt.want != "" {
+					t.Fatalf("no owner, want %q", tt.want)
+				}
+				return
+			}
+			if got.Name != tt.want {
+				t.Fatalf("owner %q, want %q", got.Name, tt.want)
+			}
+		})
+	}
+}

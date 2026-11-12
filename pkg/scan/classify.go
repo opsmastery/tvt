@@ -76,7 +76,7 @@ func isDashboard(k graph.ConsumerKind) bool {
 
 // ownerMatcher finds a signal's owner: the first tvt.yaml owner whose
 // metrics regex matches the metric (a label's parent), or whose stream
-// selector's matchers all hold for the stream signal's equality matchers.
+// selector's matchers are implied by the stream signal's selector.
 type ownerMatcher struct {
 	owners  []config.Owner
 	metrics [][]*regexp.Regexp
@@ -112,15 +112,10 @@ func (m *ownerMatcher) match(s graph.Signal) *config.Owner {
 	if len(m.owners) == 0 {
 		return nil
 	}
-	var streamLabels map[string]string
+	var streamMatchers []parse.Matcher
 	if s.Kind == graph.KindStream && s.Name != AllStreams {
 		if refs, err := parse.LogQL(s.Name); err == nil && len(refs) == 1 {
-			streamLabels = map[string]string{}
-			for _, mt := range refs[0].Matchers {
-				if mt.Op == parse.MatchEqual {
-					streamLabels[mt.Label] = mt.Value
-				}
-			}
+			streamMatchers = refs[0].Matchers
 		}
 	}
 	for i := range m.owners {
@@ -136,11 +131,11 @@ func (m *ownerMatcher) match(s graph.Signal) *config.Owner {
 				}
 			}
 		case graph.KindStream:
-			if streamLabels == nil {
+			if streamMatchers == nil {
 				continue
 			}
 			for _, sel := range m.streams[i] {
-				if selects(sel, streamLabels) {
+				if selectorImplies(streamMatchers, sel) {
 					return &m.owners[i]
 				}
 			}
@@ -149,26 +144,39 @@ func (m *ownerMatcher) match(s graph.Signal) *config.Owner {
 	return nil
 }
 
-// selects reports whether every matcher in sel holds for a stream with
-// labels (a label it doesn't carry has the empty value, as in Loki).
-func selects(sel []parse.Matcher, labels map[string]string) bool {
-	for _, m := range sel {
-		v := labels[m.Label]
-		switch m.Op {
-		case parse.MatchEqual:
-			if v != m.Value {
-				return false
+// selectorImplies reports whether every stream selected by signal also
+// matches owner. It proves constraints from an identical matcher or from an
+// equality matcher on the same label; other implications stay unknown.
+func selectorImplies(signal, owner []parse.Matcher) bool {
+	for _, want := range owner {
+		proven := false
+		for _, have := range signal {
+			if have.Label != want.Label {
+				continue
 			}
-		case parse.MatchNotEqual:
-			if v == m.Value {
-				return false
+			if have.Op == parse.MatchEqual && matcherMatches(want, have.Value) ||
+				have.Op == want.Op && have.Value == want.Value {
+				proven = true
+				break
 			}
-		case parse.MatchRegexp, parse.MatchNotRegex:
-			re, err := regexp.Compile("^(?:" + m.Value + ")$")
-			if err != nil || re.MatchString(v) != (m.Op == parse.MatchRegexp) {
-				return false
-			}
+		}
+		if !proven {
+			return false
 		}
 	}
 	return true
+}
+
+func matcherMatches(m parse.Matcher, value string) bool {
+	switch m.Op {
+	case parse.MatchEqual:
+		return value == m.Value
+	case parse.MatchNotEqual:
+		return value != m.Value
+	case parse.MatchRegexp, parse.MatchNotRegex:
+		re, err := regexp.Compile("^(?:" + m.Value + ")$")
+		return err == nil && re.MatchString(value) == (m.Op == parse.MatchRegexp)
+	default:
+		return false
+	}
 }
