@@ -32,6 +32,9 @@ type query struct {
 	// (an external consumer receives the series whole).
 	allLabels       bool
 	includeRecorded bool
+	// collectedOnly: resolve only against collected metrics, as for a
+	// query that didn't parse (runbook steps: prose can look like PromQL).
+	collectedOnly bool
 }
 
 // varValues are the values a dashboard variable can take. any: it can take
@@ -176,7 +179,7 @@ func (r *resolver) resolve(q query) {
 	// A query that didn't parse yields guesses (the fallback can name "and",
 	// "by" or "range"): they resolve only against collected signals and
 	// never create one.
-	failed := err != nil
+	failed := err != nil || q.collectedOnly
 	for _, pr := range refs {
 		pr.AllLabels = pr.AllLabels || q.allLabels
 		if q.lang == "logql" {

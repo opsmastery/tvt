@@ -1,5 +1,5 @@
 # Example tvt config. Copy to ./tvt.yaml (git-ignored). `tvt scan --config tvt.yaml`
-# reads external_consumers and ownership; the other sections are accepted and read
+# reads external_consumers, ownership, slos and runbooks; the other sections are accepted and read
 # by later sprints (backends still come from flags). Unknown keys are errors.
 grafana:
   url: http://localhost:3000
@@ -33,6 +33,23 @@ ownership:
       tier: 2
       metrics: ["shop_.*"]
       streams: ['{app="shop"}']
+
+# SLO definitions (Sloth, Pyrra, OpenSLO): files or directories, relative to
+# this file. Everything an SLI reads is a hard keep; an SLI tvt can't read
+# (a Sloth plugin, a non-Prometheus OpenSLO source) is a recorded gap.
+slos:
+  paths: [./slos]
+
+# Alert runbooks (runbook_url and other annotation links). A runbook step that
+# runs a query (a promql/logql code block, a Grafana Explore or dashboard link)
+# makes its signals hard keeps. Links under a mirror's url_prefix are read from
+# a local checkout; others are fetched with an unauthenticated GET only when
+# fetch is true. Anything tvt can't read is a recorded gap.
+runbooks:
+  fetch: false
+  mirrors:
+    - url_prefix: https://github.com/acme/runbooks/blob/main/
+      path: ../../runbooks
 
 # Where changes land (ADR 0007). Every signal must be claimed by exactly one
 # pipeline; unclaimed or doubly claimed signals are reported, never proposed.
