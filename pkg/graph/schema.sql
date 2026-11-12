@@ -45,7 +45,14 @@ CREATE TABLE IF NOT EXISTS signals (
     parent     TEXT NOT NULL DEFAULT '',
     source     TEXT NOT NULL,
     first_seen INTEGER NOT NULL,
-    last_scan  INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED
+    last_scan  INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    -- Schema version 6. class: hard_keep, keep_high, dormant or candidate
+    -- ('' before version 6). dormant: why an unread signal looks
+    -- incident-critical. owner and tier: from tvt.yaml ownership.
+    class      TEXT NOT NULL DEFAULT '' CHECK (class IN ('', 'hard_keep', 'keep_high', 'dormant', 'candidate')),
+    dormant    TEXT NOT NULL DEFAULT '',
+    owner      TEXT NOT NULL DEFAULT '',
+    tier       INTEGER
 );
 CREATE INDEX IF NOT EXISTS signals_name ON signals (kind, name);
 CREATE INDEX IF NOT EXISTS signals_scan ON signals (last_scan);

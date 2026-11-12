@@ -20,8 +20,10 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/loki"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/mimir"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/prometheus"
+	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
+	"github.com/Opsmastery-Summit/tvt/pkg/score"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
 
@@ -65,6 +67,8 @@ type scanOptions struct {
 	ProbeWait time.Duration
 	// LabelTop is how many of the largest metrics get per-label cardinality.
 	LabelTop int
+	// Config is tvt.yaml: external consumers and ownership. Optional.
+	Config string
 }
 
 // stringList is a repeatable string flag.
@@ -89,6 +93,7 @@ func cmdScan(args []string, stdout, stderr io.Writer) int {
 	fs.DurationVar(&o.ProbeWait, "probe-wait", 30*time.Second, "how long to wait for tvt's probe query to appear in each query log")
 	fs.Var(&o.GrafanaLogs, "grafana-log", "Grafana log file or glob with router logging on (repeatable; .gz is read)")
 	fs.IntVar(&o.LabelTop, "label-top", 50, "collect per-label cardinality for this many of the largest metrics")
+	fs.StringVar(&o.Config, "config", "", "tvt.yaml with external_consumers and ownership (optional)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -125,6 +130,15 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	window := time.Duration(o.Window) * 24 * time.Hour
 	since := start.Add(-window)
 	in := scan.Inputs{Start: start, Window: window}
+	// tvt.yaml first: a typo there fails the scan before it touches any
+	// backend, rather than silently dropping an external consumer.
+	if o.Config != "" {
+		cfg, err := config.Load(o.Config)
+		if err != nil {
+			return err
+		}
+		in.External, in.Owners = cfg.ExternalConsumers, cfg.Ownership.Owners
+	}
 
 	// Query logs: each one tvt can probe gets the marker now, before
 	// anything is collected, and must show it by the time it is read.
@@ -264,6 +278,14 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+
+	classes := map[string]int{}
+	for _, s := range g.Signals {
+		classes[s.Class]++
+	}
+	fmt.Fprintf(out, "%-12s %d hard keep, %d keep_high (viewed), %d dormant, %d candidates; %d external consumers\n", "classes",
+		classes[string(score.ClassHardKeep)], classes[string(score.ClassKeepHigh)], classes[string(score.ClassDormant)],
+		classes[string(score.ClassCandidate)], len(in.External))
 
 	id, err := save(ctx, o.DB, start, o.Window, g)
 	if err != nil {

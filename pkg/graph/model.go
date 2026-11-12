@@ -32,6 +32,15 @@ type Signal struct {
 	Parent    string // for KindLabel: the metric the label belongs to
 	Source    string // backend the signal was observed in, e.g. "prom", "loki"
 	FirstSeen time.Time
+	// Class is the scan's classification (score.Class: hard_keep,
+	// keep_high, dormant or candidate); empty for rows from before schema
+	// version 6. Dormant says why an unread signal looks incident-critical.
+	Class   string
+	Dormant string
+	// Owner decides about the signal (tvt.yaml ownership), empty when
+	// unknown; Tier is its service tier, nil when unknown.
+	Owner string
+	Tier  *int
 }
 
 // ConsumerKind is the type of thing that depends on a signal.
