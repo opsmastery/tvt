@@ -485,7 +485,7 @@ type queryLog struct {
 // queryLogs lists the query logs to record, configured or not: the metrics
 // backend's (Prometheus or Mimir), a Prometheus log given with --mimir (the
 // lab's Prometheus remote-writes to Mimir and still answers Grafana), and
-// Loki's when the scan reads Loki. Loki's probe is Sprint 3 item 9.
+// Loki's when the scan reads Loki. Loki's probe is S5 item 5 (docs/tasks/s05-benchmark-and-log-findings.md).
 func (o scanOptions) queryLogs(getenv func(string) string) []*queryLog {
 	var out []*queryLog
 	prom := &queryLog{source: sourcePromQueryLog, flag: "prom-query-log", label: "prom log"}
