@@ -2,13 +2,16 @@ package loki
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/prometheus/common/model"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
@@ -16,16 +19,21 @@ import (
 
 const rulesPath = "/loki/api/v1/rules"
 
+// promRulesPath is Loki's Prometheus-format rules view. Unlike the YAML
+// listing it reports each group's effective interval, the ruler's
+// evaluation_interval included.
+const promRulesPath = "/prometheus/api/v1/rules"
+
 // maxRulesBody caps the rules response. Loki's ruler config for a large
 // tenant is a few MB; anything far beyond that is not a rules listing.
 const maxRulesBody = 64 << 20
 
 // ruleGroup is one group in Loki's rules listing (Prometheus rule-file
-// format). Fields tvt doesn't use (for, labels, annotations, interval) are
-// ignored.
+// format). Fields tvt doesn't use (for, labels, annotations) are ignored.
 type ruleGroup struct {
-	Name  string `yaml:"name"`
-	Rules []struct {
+	Name     string `yaml:"name"`
+	Interval string `yaml:"interval"` // empty: the ruler's evaluation_interval
+	Rules    []struct {
 		Alert  string `yaml:"alert"`
 		Record string `yaml:"record"`
 		Expr   string `yaml:"expr"`
@@ -76,11 +84,25 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 	}
 	sort.Strings(namespaces)
 
+	var effective map[[2]string]time.Duration // fetched once, if a group needs it
 	var out []collect.Rule
 	for _, ns := range namespaces {
 		for _, g := range byNS[ns] {
 			if g.Name == "" {
 				return nil, fmt.Errorf("loki: %s: namespace %q: group without a name", rulesPath, ns)
+			}
+			var interval time.Duration
+			if g.Interval != "" {
+				d, err := model.ParseDuration(g.Interval)
+				if err != nil {
+					return nil, fmt.Errorf("loki: %s: namespace %q group %q: interval: %w", rulesPath, ns, g.Name, err)
+				}
+				interval = time.Duration(d)
+			} else {
+				if effective == nil {
+					effective = c.effectiveIntervals(ctx)
+				}
+				interval = effective[[2]string{ns, g.Name}]
 			}
 			for i, r := range g.Rules {
 				var kind collect.RuleKind
@@ -104,9 +126,39 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 					Kind:      kind,
 					Expr:      r.Expr,
 					Language:  "logql",
+					Interval:  interval,
 				})
 			}
 		}
 	}
 	return out, nil
+}
+
+// effectiveIntervals reads each group's effective interval, keyed by
+// namespace and group, from Loki's Prometheus-format rules view. It is only
+// a cost input: when the view can't be read the intervals stay unknown
+// (zero), and the rules themselves still come from the YAML listing.
+func (c *Client) effectiveIntervals(ctx context.Context) map[[2]string]time.Duration {
+	out := map[[2]string]time.Duration{}
+	body, err := c.get(ctx, promRulesPath, nil, "application/json")
+	if err != nil {
+		return out
+	}
+	defer body.Close()
+	var d struct {
+		Data struct {
+			Groups []struct {
+				Name     string  `json:"name"`
+				File     string  `json:"file"`
+				Interval float64 `json:"interval"`
+			} `json:"groups"`
+		} `json:"data"`
+	}
+	if json.NewDecoder(io.LimitReader(body, maxRulesBody)).Decode(&d) != nil {
+		return out
+	}
+	for _, g := range d.Data.Groups {
+		out[[2]string{g.File, g.Name}] = time.Duration(g.Interval * float64(time.Second))
+	}
+	return out
 }
