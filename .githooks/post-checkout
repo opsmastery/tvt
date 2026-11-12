@@ -1,0 +1,5 @@
+#!/bin/sh
+# Rebuild bin/tvt after switching branches so it matches the checkout.
+# $3 is 1 for a branch checkout, 0 for a file checkout.
+[ "${3:-0}" = 1 ] || exit 0
+exec "$(git rev-parse --show-toplevel)/.githooks/rebuild"
