@@ -322,10 +322,13 @@ func Build(in Inputs) (Output, error) {
 // queryLanguage maps a datasource plugin type to the query language tvt
 // reads. An empty type (a datasource tvt couldn't resolve) is read as
 // PromQL; a LogQL query fails to parse as PromQL and then only resolves
-// against collected metrics, so it can't invent signals.
+// against collected metrics, so it can't invent signals. VictoriaMetrics'
+// plugins speak MetricsQL, a PromQL superset: what the PromQL parser
+// rejects becomes assumed references to every collected metric it names
+// (Sprint 2 item 17).
 func queryLanguage(dsType string) (string, bool) {
 	switch dsType {
-	case "prometheus", "":
+	case "prometheus", "", "victoriametrics-metrics-datasource", "victoriametrics-datasource":
 		return "promql", true
 	case "loki":
 		return "logql", true
