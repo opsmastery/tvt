@@ -30,3 +30,29 @@ func TestScanContainerFile(t *testing.T) {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
 }
+
+// stdout and stderr each continue their own partial lines: interleaved
+// fragments must not be joined across streams.
+func TestScanContainerFileInterleavedStreams(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loki.log")
+	content := "2026-11-11T23:59:49.1Z stdout P A\n" +
+		"2026-11-11T23:59:49.2Z stderr F B\n" +
+		"2026-11-11T23:59:49.3Z stdout F C\n" +
+		"2026-11-11T23:59:50.1Z stderr P D\n" +
+		"2026-11-11T23:59:50.2Z stdout P E\n" +
+		"2026-11-11T23:59:50.3Z stdout F F\n" +
+		"2026-11-11T23:59:50.4Z stderr F G\n" +
+		"2026-11-11T23:59:51.1Z stdout P cut\n" +
+		"2026-11-11T23:59:51.2Z stderr P off\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if err := ScanContainerFile(context.Background(), path, func(l []byte) { got = append(got, string(l)) }); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"B", "AC", "EF", "DG", "cut", "off"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}

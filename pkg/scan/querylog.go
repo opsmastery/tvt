@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
@@ -20,7 +21,41 @@ var rangeRe = regexp.MustCompile(`\[\s*\d+[a-zA-Z0-9]*\s*(?::\s*(?:\d+[a-zA-Z0-9
 
 // normalizeQuery is a logged query's identity: ranges folded, so one
 // panel or one habit is one consumer rather than one per time range.
-func normalizeQuery(expr string) string { return rangeRe.ReplaceAllString(expr, "[_]") }
+// Only ranges in the query itself fold: string literals ("…", '…', `…`)
+// and # comments are kept verbatim, so {__name__=~"m_[12]"} and
+// {__name__=~"m_[34]"} stay distinct queries.
+func normalizeQuery(expr string) string {
+	var b strings.Builder
+	start := 0 // first byte of the current run outside strings and comments
+	fold := func(end int) { b.WriteString(rangeRe.ReplaceAllString(expr[start:end], "[_]")) }
+	for i := 0; i < len(expr); {
+		var end int
+		switch c := expr[i]; c {
+		case '"', '\'', '`':
+			end = i + 1
+			for end < len(expr) && expr[end] != c {
+				if expr[end] == '\\' && c != '`' {
+					end++ // an escaped byte, the closing quote included
+				}
+				end++
+			}
+			end = min(end+1, len(expr)) // past the closing quote
+		case '#':
+			end = len(expr)
+			if nl := strings.IndexByte(expr[i:], '\n'); nl >= 0 {
+				end = i + nl
+			}
+		default:
+			i++
+			continue
+		}
+		fold(i)
+		b.WriteString(expr[i:end])
+		i, start = end, end
+	}
+	fold(len(expr))
+	return b.String()
+}
 
 // loggedGroup is every logged query with the same source, attribution and
 // normalized text.
