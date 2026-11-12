@@ -17,6 +17,15 @@ func TestNormalizeQuery(t *testing.T) {
 		`max_over_time(x[1h:])`:         `max_over_time(x[_])`,
 		`x{le=~"[0-9]+"}`:               `x{le=~"[0-9]+"}`,
 		`count_over_time({a="b"}[5m])`:  `count_over_time({a="b"}[_])`,
+		// Strings and comments keep their brackets: these select
+		// different things and must stay different consumers.
+		`rate({__name__=~"metric_[12]"}[5m])`:        `rate({__name__=~"metric_[12]"}[_])`,
+		`rate({__name__=~"metric_[34]"}[5m])`:        `rate({__name__=~"metric_[34]"}[_])`,
+		`rate({__name__=~'m_[12]'}[1m])`:             `rate({__name__=~'m_[12]'}[_])`,
+		"count_over_time({a=\"b\"} |~ `x[12]` [5m])": "count_over_time({a=\"b\"} |~ `x[12]` [_])",
+		`count_over_time({a="b"} |~ "q\"[12]" [5m])`: `count_over_time({a="b"} |~ "q\"[12]" [_])`,
+		"rate(x[5m]) # was [10m]\n+ rate(y[1m])":     "rate(x[_]) # was [10m]\n+ rate(y[_])",
+		`x{a="unterminated [12]`:                     `x{a="unterminated [12]`,
 	} {
 		if got := normalizeQuery(in); got != want {
 			t.Errorf("normalizeQuery(%s) = %s, want %s", in, got, want)

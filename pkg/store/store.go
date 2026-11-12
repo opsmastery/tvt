@@ -304,10 +304,14 @@ type SignalRead struct {
 // decays into "never read".
 func (s *Store) LastReads(ctx context.Context) ([]SignalRead, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT signal_id, consumer_id, actor, last_seen FROM refs r
-		 WHERE last_seen IS NOT NULL
-		   AND last_seen = (SELECT max(last_seen) FROM refs WHERE signal_id = r.signal_id)
-		 ORDER BY signal_id, consumer_id, via`)
+		// The latest read per signal is computed once and joined back,
+		// not looked up per reference: refs are kept forever, so a
+		// correlated max would grow quadratically with a signal's history.
+		`SELECT r.signal_id, r.consumer_id, r.actor, r.last_seen FROM refs r
+		 JOIN (SELECT signal_id, max(last_seen) AS latest FROM refs
+		       WHERE last_seen IS NOT NULL GROUP BY signal_id) l
+		   ON l.signal_id = r.signal_id AND r.last_seen = l.latest
+		 ORDER BY r.signal_id, r.consumer_id, r.via`)
 	if err != nil {
 		return nil, err
 	}
