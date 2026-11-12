@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# tvt pre-commit: fast checks on what is staged. Enable with `make hooks`.
+# Skip once with `git commit --no-verify` (CI runs the same checks).
+set -euo pipefail
+
+fail() { printf 'pre-commit: %s\n' "$*" >&2; exit 1; }
+
+if git diff --cached --quiet; then
+	exit 0
+fi
+
+go_changed=0
+schema_changed=0
+mod_changed=0
+
+# 1. Files that must never be committed: internal planning, scan databases,
+#    local configs and price cards (negotiated prices), env files and keys.
+#    .gitignore covers most of these; this also catches `git add -f`.
+# Read paths as NUL-delimited records so Git's quoted display format cannot
+# alter filenames containing spaces, newlines or non-ASCII bytes.
+while IFS= read -r -d '' f; do
+	case "$f" in
+		docs/plan.md|*.db|*.db-journal|*.db-shm|*.db-wal|tvt.yaml|pricecard.yaml|.env*|*/.env*|*.key)
+			fail "this file must not be committed: $f"
+			;;
+	esac
+
+	case "$f" in
+		*.go)
+			go_changed=1
+			if [ -n "$(git show ":$f" | gofmt -d 2>&1)" ]; then
+				fail "gofmt needed for staged file (run make fmt, then git add): $f"
+			fi
+			;;
+		go.mod|go.sum)
+			mod_changed=1
+			;;
+	esac
+
+	case "$f" in
+		pkg/graph/schema.sql|pkg/store/*) schema_changed=1 ;;
+	esac
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
+
+# Deletions trigger checks but are not inputs to filename blocking or gofmt.
+while IFS= read -r -d '' f; do
+	case "$f" in
+		*.go) go_changed=1 ;;
+	esac
+	case "$f" in
+		go.mod|go.sum) mod_changed=1 ;;
+	esac
+	case "$f" in
+		pkg/graph/schema.sql|pkg/store/*) schema_changed=1 ;;
+	esac
+done < <(git diff --cached --name-only -z --diff-filter=D)
+
+# 2. go vet.
+if [ "$go_changed" -eq 1 ]; then
+	go vet ./... || fail "go vet failed"
+fi
+
+# 3. go.mod and go.sum tidy.
+if [ "$mod_changed" -eq 1 ]; then
+	go mod tidy -diff >/dev/null || fail "go.mod/go.sum not tidy (run go mod tidy)"
+fi
+
+# 4. Schema changes: a new SchemaVersion, upgrade step and frozen copy.
+# Export the index, rather than testing the working tree, so the checks cover
+# exactly the snapshot that will be committed.
+if [ "$schema_changed" -eq 1 ]; then
+	snapshot=$(mktemp -d "${TMPDIR:-/tmp}/tvt-index.XXXXXX")
+	trap 'rm -rf "$snapshot"' EXIT
+	git checkout-index --all --prefix="$snapshot/"
+	(
+		cd "$snapshot"
+		go test -count=1 -run 'Schema|Upgrade' ./pkg/store >/dev/null
+	) || fail "store schema tests failed (go test -run 'Schema|Upgrade' ./pkg/store)"
+fi
+
+# 5. Secrets in the staged diff, before they reach GitHub.
+command -v gitleaks >/dev/null 2>&1 ||
+	fail "gitleaks not installed (brew install gitleaks); it keeps tokens out of commits"
+gitleaks git --pre-commit --staged --redact --no-banner --log-level warn ||
+	fail "gitleaks found a possible secret in the staged changes"

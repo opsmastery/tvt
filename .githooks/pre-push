@@ -1,0 +1,18 @@
+#!/bin/sh
+# tvt pre-push: the test suite without -race (CI runs -race; locally it has
+# stalled on this machine). Skip once with `git push --no-verify`.
+set -eu
+
+# Deleting a remote branch pushes no commits: nothing to test.
+pushes=false
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+	case "$local_sha" in
+	*[!0]*) pushes=true ;;
+	esac
+done
+$pushes || exit 0
+
+go test -timeout 5m ./... >/dev/null || {
+	echo "pre-push: go test ./... failed; run it to see why" >&2
+	exit 1
+}
