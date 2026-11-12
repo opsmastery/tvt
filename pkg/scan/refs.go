@@ -28,6 +28,10 @@ type query struct {
 	// sent it then (zero for dashboards and rules).
 	seen  time.Time
 	actor string
+	// allLabels: the consumer depends on every label of what it selects
+	// (an external consumer receives the series whole).
+	allLabels       bool
+	includeRecorded bool
 }
 
 // varValues are the values a dashboard variable can take. any: it can take
@@ -51,7 +55,9 @@ type refKey struct{ signal, consumer, via string }
 type resolver struct {
 	src         string
 	metrics     []string            // collected metric names, sorted
+	collected   map[string]bool     // collected metric signal IDs
 	known       map[string]bool     // collected or created metric signal IDs
+	recorded    []string            // recording-rule output names
 	labels      map[string][]string // collected label names per metric
 	streams     map[string]bool     // stream signal IDs created
 	newSignals  []graph.Signal
@@ -64,7 +70,7 @@ type resolver struct {
 
 func newResolver(src string, metrics []collect.MetricCardinality, labels []collect.LabelCardinality) *resolver {
 	r := &resolver{
-		src: src, known: map[string]bool{}, labels: map[string][]string{}, streams: map[string]bool{},
+		src: src, collected: map[string]bool{}, known: map[string]bool{}, labels: map[string][]string{}, streams: map[string]bool{},
 		refs: map[refKey]*graph.Reference{}, direct: map[string][]refKey{}, recordedBy: map[string][]string{},
 		consumerEvd: map[string]graph.EvidenceClass{}, regexps: map[string]*regexp.Regexp{},
 	}
@@ -72,6 +78,7 @@ func newResolver(src string, metrics []collect.MetricCardinality, labels []colle
 		id := r.metricID(m.Metric)
 		if !r.known[id] {
 			r.known[id] = true
+			r.collected[id] = true
 			r.metrics = append(r.metrics, m.Metric)
 		}
 	}
@@ -90,14 +97,15 @@ func (r *resolver) labelID(metric, label string) string {
 
 // metricSignal returns the ID of a metric signal, creating it for an exact
 // name the scan didn't collect (a metric with no series costs nothing, but a
-// consumer reading it is still evidence) unless onlyKnown is set.
+// consumer reading it is still evidence) unless onlyKnown is set, in which
+// case it must be a collected metric.
 func (r *resolver) metricSignal(name string, onlyKnown bool) (string, bool) {
 	id := r.metricID(name)
+	if onlyKnown && !r.collected[id] {
+		return "", false
+	}
 	if r.known[id] {
 		return id, true
-	}
-	if onlyKnown {
-		return "", false
 	}
 	r.known[id] = true
 	r.newSignals = append(r.newSignals, graph.Signal{ID: id, Kind: graph.KindMetric, Name: name, Source: r.src})
@@ -108,6 +116,9 @@ func (r *resolver) metricSignal(name string, onlyKnown bool) (string, bool) {
 // readers of it resolve, and through it, to the rule's inputs.
 func (r *resolver) recordingRule(consumerID, metric string) {
 	id, _ := r.metricSignal(metric, false)
+	if len(r.recordedBy[id]) == 0 && !r.collected[id] {
+		r.recorded = append(r.recorded, metric)
+	}
 	r.recordedBy[id] = append(r.recordedBy[id], consumerID)
 }
 
@@ -167,6 +178,7 @@ func (r *resolver) resolve(q query) {
 	// never create one.
 	failed := err != nil
 	for _, pr := range refs {
+		pr.AllLabels = pr.AllLabels || q.allLabels
 		if q.lang == "logql" {
 			r.resolveStream(q, pr)
 		} else {
@@ -191,7 +203,7 @@ func (r *resolver) resolveMetric(q query, pr parse.Ref, failed bool) {
 	names := []string{pr.Metric}
 	if pr.Metric == "" {
 		var why []string
-		names, why = r.matchNames(pr.Matchers, q.vars)
+		names, why = r.matchNames(pr.Matchers, q.vars, q.includeRecorded && !failed)
 		if len(why) > 0 {
 			base.Assumed = true
 			base.Reasons = append(base.Reasons, why...)
@@ -208,7 +220,7 @@ func (r *resolver) resolveMetric(q query, pr parse.Ref, failed bool) {
 		}
 	}
 	for _, name := range names {
-		id, ok := r.metricSignal(name, failed || pr.Metric == "")
+		id, ok := r.metricSignal(name, failed)
 		if !ok {
 			continue
 		}
@@ -221,18 +233,23 @@ func (r *resolver) resolveMetric(q query, pr parse.Ref, failed bool) {
 	}
 }
 
-// matchNames returns the collected metric names a selector without a plain
-// name selects, from its __name__ matchers. A selector with none selects
-// every metric that has its labels; tvt doesn't know which, so it selects
-// every collected metric, assumed. The second result holds reasons for an
-// assumed reading.
-func (r *resolver) matchNames(ms []parse.Matcher, vars map[string]varValues) ([]string, []string) {
+// matchNames returns the metric names a selector without a plain name
+// selects, from its __name__ matchers. A selector with none selects every
+// metric that has its labels; tvt doesn't know which, so it selects every
+// collected metric and optionally recording-rule outputs, assumed. The
+// second result holds reasons for an assumed reading.
+func (r *resolver) matchNames(ms []parse.Matcher, vars map[string]varValues, includeRecorded bool) ([]string, []string) {
 	var reasons []string
 	if !hasNameMatcher(ms) {
 		reasons = append(reasons, "selector names no metric, so every metric with its labels")
 	}
+	metrics := r.metrics
+	if includeRecorded {
+		metrics = append(append([]string(nil), r.metrics...), r.recorded...)
+		sort.Strings(metrics)
+	}
 	var out []string
-	for _, name := range r.metrics {
+	for _, name := range metrics {
 		ok, why := r.namesMatch(name, ms, vars)
 		reasons = append(reasons, why...)
 		if ok {
