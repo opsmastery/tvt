@@ -506,13 +506,6 @@ func (ql *queryLog) read(ctx context.Context, since time.Time, nonce string, wai
 		return src, nil, nil
 	}
 	src.Configured = true
-	queries, err := ql.reader.Queries(ctx, since)
-	if err != nil {
-		return src, nil, err
-	}
-	if src.Coverage, err = ql.reader.Coverage(ctx, since); err != nil {
-		return src, nil, err
-	}
 	switch {
 	case ql.probeErr != nil:
 		src.Gap = "probe query failed: " + ql.probeErr.Error()
@@ -526,6 +519,16 @@ func (ql *queryLog) read(ctx context.Context, since time.Time, nonce string, wai
 		}
 	default:
 		src.Gap = ql.unprovable
+	}
+	// Read the log after the probe wait, not before: the backend may
+	// flush buffered queries along with the marker, and a proven log
+	// must include them.
+	queries, err := ql.reader.Queries(ctx, since)
+	if err != nil {
+		return src, nil, err
+	}
+	if src.Coverage, err = ql.reader.Coverage(ctx, since); err != nil {
+		return src, nil, err
 	}
 	proof := "probe found"
 	switch {

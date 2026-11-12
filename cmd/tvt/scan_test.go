@@ -675,3 +675,44 @@ func TestScanQueryLogUnproven(t *testing.T) {
 		t.Error("an unproven log's queries were dropped")
 	}
 }
+
+// flushingLog is a query log whose backend flushes buffered queries
+// together with tvt's probe marker.
+type flushingLog struct{ flushed bool }
+
+func (f *flushingLog) Probe(context.Context, string) error { return nil }
+
+func (f *flushingLog) ProbeSeen(context.Context, string) (bool, error) {
+	f.flushed = true // the marker and the buffered query land together
+	return true, nil
+}
+
+func (f *flushingLog) Queries(context.Context, time.Time) ([]collect.LoggedQuery, error) {
+	q := []collect.LoggedQuery{{Source: "prometheus", Language: "promql", Expr: "up"}}
+	if f.flushed {
+		q = append(q, collect.LoggedQuery{Source: "prometheus", Language: "promql", Expr: "rate(shop_orders_total[5m])"})
+	}
+	return q, nil
+}
+
+func (f *flushingLog) Coverage(context.Context, time.Time) (float64, error) {
+	if f.flushed {
+		return 0.5, nil
+	}
+	return 0.25, nil
+}
+
+// A proven log is read after the probe wait, so queries flushed with the
+// marker are part of the scan.
+func TestQueryLogReadAfterProbe(t *testing.T) {
+	f := &flushingLog{}
+	ql := &queryLog{source: sourcePromQueryLog, label: "prom log", reader: f, probe: f}
+	var out bytes.Buffer
+	src, queries, err := ql.read(context.Background(), time.Now().Add(-time.Hour), "n", time.Second, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.Gap != "" || src.Coverage != 0.5 || len(queries) != 2 {
+		t.Errorf("got gap %q, coverage %v, %d queries; want proven, 0.5, 2 (read after the flush)\n%s", src.Gap, src.Coverage, len(queries), out.String())
+	}
+}

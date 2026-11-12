@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -638,5 +639,40 @@ func TestUpgradeFromVersion3AndGaps(t *testing.T) {
 	must(t, err)
 	if len(old) != 1 || old[0].Gap != "" || old[0].Coverage != 0.5 {
 		t.Errorf("upgraded sources = %+v", old)
+	}
+}
+
+// Each signal gets its single latest read however many references it has;
+// ties go to the first consumer by ID.
+func TestLastReadsManyRefsAndTies(t *testing.T) {
+	s, _ := open(t)
+	a := graph.Signal{ID: "prom:metric:a", Kind: graph.KindMetric, Name: "a", Source: "prom"}
+	b := graph.Signal{ID: "prom:metric:b", Kind: graph.KindMetric, Name: "b", Source: "prom"}
+	scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, a))
+		must(t, sc.PutSignal(ctx, b))
+		for i := range 5 {
+			c := graph.Consumer{ID: fmt.Sprintf("qlog:prometheus:%d", i), Kind: graph.ConsumerAdhocQuery, Name: "ad hoc"}
+			must(t, sc.PutConsumer(ctx, c))
+			// a: consumers 3 and 1 tie on the latest read.
+			at := t0.Add(-time.Duration(5-i) * time.Hour)
+			if i == 1 || i == 3 {
+				at = t0
+			}
+			must(t, sc.PutReference(ctx, graph.Reference{SignalID: a.ID, ConsumerID: c.ID, Evidence: graph.EvidenceObserved,
+				LastSeen: at, Actor: fmt.Sprintf("u%d", i)}))
+			// b: consumer 2 read it last.
+			must(t, sc.PutReference(ctx, graph.Reference{SignalID: b.ID, ConsumerID: c.ID, Evidence: graph.EvidenceObserved,
+				LastSeen: t0.Add(-time.Duration((i-2)*(i-2)) * time.Minute), Actor: fmt.Sprintf("u%d", i)}))
+		}
+	})
+	reads, err := s.LastReads(ctx)
+	must(t, err)
+	want := []SignalRead{
+		{SignalID: a.ID, ConsumerID: "qlog:prometheus:1", Actor: "u1", At: t0},
+		{SignalID: b.ID, ConsumerID: "qlog:prometheus:2", Actor: "u2", At: t0},
+	}
+	if !reflect.DeepEqual(reads, want) {
+		t.Errorf("LastReads\n got  %+v\n want %+v", reads, want)
 	}
 }
