@@ -66,6 +66,9 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 		}
 		return nil, err
 	}
+	if folders == nil {
+		return nil, fmt.Errorf("grafana: %s: response is not a rule listing (null)", rulesPath)
+	}
 	var dss []datasource
 	listed, needList := false, false
 	for _, groups := range folders {
