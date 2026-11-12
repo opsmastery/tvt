@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 )
@@ -151,6 +152,41 @@ func TestRecordingRuleChainDepthAndCycles(t *testing.T) {
 	for _, c := range out.Costs {
 		if c.SignalID == "prom:metric:a:rec" {
 			t.Errorf("uncollected a:rec has a cost row %+v", c)
+		}
+	}
+}
+
+func TestExternalPatternMatchesRecordingRuleOutput(t *testing.T) {
+	in := baseInputs()
+	in.Metrics = append(in.Metrics, collect.MetricCardinality{Metric: "raw_total"})
+	in.Rules = append(in.Rules, collect.Rule{
+		Source: "prometheus", Namespace: "billing.yml", Group: "billing", Name: "billing:total",
+		Kind: collect.RuleRecord, Language: "promql", Expr: "sum(raw_total)",
+	})
+	in.Rules = append(in.Rules, collect.Rule{
+		Source: "prometheus", Namespace: "billing.yml", Group: "billing", Name: "Broken",
+		Kind: collect.RuleAlert, Language: "promql", Expr: "billing:total + (",
+	})
+	in.External = []config.ExternalConsumer{{Name: "billing", Metrics: []string{"billing:total"}}}
+
+	out, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := refIndex(out)
+	rule := "rule:prometheus:billing.yml/billing/billing:total"
+	if _, ok := refs["prom:metric:billing:total <- ext:billing"]; !ok {
+		t.Fatal("external consumer does not reference the recording-rule output")
+	}
+	if _, ok := refs["prom:metric:raw_total <- ext:billing via "+rule]; !ok {
+		t.Fatal("external consumer does not reference the recording-rule input")
+	}
+	if _, ok := refs["prom:metric:billing:total <- rule:prometheus:billing.yml/billing/Broken"]; ok {
+		t.Fatal("parse failure referenced an uncollected recording-rule output")
+	}
+	for _, s := range out.Signals {
+		if s.ID == "prom:metric:raw_total" && s.Class != "hard_keep" {
+			t.Errorf("recording-rule input class = %q, want hard_keep", s.Class)
 		}
 	}
 }
