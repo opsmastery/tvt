@@ -176,7 +176,7 @@ func Build(in Inputs) (Output, error) {
 			Expr: strings.Join(append(slices.Clone(e.Metrics), e.Streams...), "\n")}
 		out.Consumers = append(out.Consumers, c)
 		for _, m := range e.Metrics {
-			queries = append(queries, query{consumer: c, expr: "{__name__=~" + strconv.Quote(m) + "}", lang: "promql", allLabels: true})
+			queries = append(queries, query{consumer: c, expr: "{__name__=~" + strconv.Quote(m) + "}", lang: "promql", allLabels: true, includeRecorded: true})
 		}
 		for _, s := range e.Streams {
 			queries = append(queries, query{consumer: c, expr: s, lang: "logql", allLabels: true})
