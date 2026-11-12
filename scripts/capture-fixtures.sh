@@ -46,6 +46,7 @@ fi
 if want loki; then
 echo "Loki ($LOKI)"
 get "$LOKI/loki/api/v1/rules" "$OUT/loki/rules.yaml"
+get "$LOKI/prometheus/api/v1/rules" "$OUT/loki/prom_rules.json"  # effective group intervals
 get "$LOKI/loki/api/v1/index/volume" "$OUT/loki/volume_by_stream.json" -G \
   --data-urlencode 'query={app=~".+"}' --data-urlencode 'since=24h' --data-urlencode 'aggregateBy=series' \
   --data-urlencode 'targetLabels=app,component,level'
