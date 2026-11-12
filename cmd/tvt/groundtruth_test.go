@@ -326,13 +326,14 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 			t.Logf("%s (%s): waits for %s", name, e.Class, why)
 			continue
 		}
-		var hard, viewed, dash, read bool
+		var hard, viewed, dash, adhoc, read bool
 		for _, r := range g.refsTo(src + ":metric:" + name) {
 			c := g.consumers[r.ConsumerID]
 			read = true
 			hard = hard || c.Kind.HardKeep()
 			dash = dash || isDashboard(c.Kind)
 			viewed = viewed || isDashboard(c.Kind) && !c.LastViewed.IsZero()
+			adhoc = adhoc || c.Kind == graph.ConsumerAdhocQuery && !r.LastSeen.IsZero()
 		}
 		var ok bool
 		switch e.Class {
@@ -343,9 +344,9 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 		case "low":
 			ok = dash && !viewed && !hard
 		case "keep_medium":
-			ok = !hard && !dash // ad hoc evidence arrives with query logs (item 4)
+			ok = adhoc && !hard && !dash // a query log saw it, and only ad hoc
 		case "drop_metric":
-			ok = !hard && !dash
+			ok = !hard && !dash && !adhoc
 		default:
 			t.Fatalf("ground-truth metric %s: class %q", name, e.Class)
 		}
@@ -356,8 +357,8 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 		case lagging:
 			t.Logf("%s (%s): skipped, %s", name, e.Class, lag)
 		case !ok:
-			t.Errorf("ground-truth metric %s is %s, but references: hard keep %v, dashboard %v (viewed %v), any %v",
-				name, e.Class, hard, dash, viewed, read)
+			t.Errorf("ground-truth metric %s is %s, but references: hard keep %v, dashboard %v (viewed %v), ad hoc %v, any %v",
+				name, e.Class, hard, dash, viewed, adhoc, read)
 		}
 	}
 
@@ -390,7 +391,7 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 				continue
 			}
 			for _, r := range g.refsTo(id) {
-				if k := g.consumers[r.ConsumerID].Kind; k.HardKeep() || isDashboard(k) {
+				if k := g.consumers[r.ConsumerID].Kind; k.HardKeep() || isDashboard(k) || k == graph.ConsumerAdhocQuery {
 					t.Errorf("%s matches drop_metric glob %s, but %s reads it", s.Name, name, r.ConsumerID)
 				}
 			}

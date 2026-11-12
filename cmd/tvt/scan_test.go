@@ -10,10 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
@@ -46,6 +48,37 @@ func syntheticSeries(w http.ResponseWriter, r *http.Request) {
 
 type labServers struct {
 	prom, grafana, loki *httptest.Server
+	// promLog is a copy of the recorded Prometheus query log that the
+	// fixture Prometheus appends to, as the real one does, when tvt sends
+	// its probe marker.
+	promLog string
+	probes  *atomic.Int32
+}
+
+// probeSink answers tvt's probe query like Prometheus or Mimir and, when
+// log is set, writes the marker into that query log.
+func probeSink(t *testing.T, log string, n *atomic.Int32) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		if _, ok := collect.ProbeNonce(q); !ok {
+			t.Errorf("query endpoint got %q, not a probe marker", q)
+		}
+		n.Add(1)
+		if log != "" {
+			line, _ := json.Marshal(map[string]any{
+				"httpRequest": map[string]string{"clientIP": "10.89.0.20", "path": "/api/v1/query"},
+				"params":      map[string]string{"query": q}, "time": scanTime.Format(time.RFC3339Nano),
+			})
+			f, err := os.OpenFile(log, os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			fmt.Fprintf(f, "%s\n", line)
+			f.Close()
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+	}
 }
 
 func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
@@ -55,6 +88,18 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 	}
 	if _, ok := promOverride["/api/v1/series"]; !ok {
 		promOverride["/api/v1/series"] = syntheticSeries
+	}
+	promLog := filepath.Join(t.TempDir(), "query.log")
+	data, err := os.ReadFile(filepath.Join(lab, "prometheus/query.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(promLog, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	probes := &atomic.Int32{}
+	if _, ok := promOverride["/api/v1/query"]; !ok {
+		promOverride["/api/v1/query"] = probeSink(t, promLog, probes)
 	}
 	prom := fixtureServer(t, map[string]string{
 		"/api/v1/status/tsdb": "prometheus/tsdb.json",
@@ -77,7 +122,7 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 		"/api/org": func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"id":1,"name":"Main Org."}`) },
 	})
 	loki := fixtureServer(t, map[string]string{"/loki/api/v1/rules": "loki/rules.yaml"}, nil)
-	return labServers{prom, graf, loki}
+	return labServers{prom, graf, loki, promLog, probes}
 }
 
 func labOptions(l labServers, db string) scanOptions {
@@ -89,7 +134,8 @@ func labOptions(l labServers, db string) scanOptions {
 		Window:        30,
 		LabelTop:      2,
 		GrafanaLogs:   stringList{filepath.Join(lab, "grafana/grafana.log")},
-		PromQueryLogs: stringList{filepath.Join(lab, "prometheus/query.log")},
+		PromQueryLogs: stringList{l.promLog},
+		ProbeWait:     2 * time.Second,
 	}
 }
 
@@ -214,16 +260,24 @@ func TestScanLab(t *testing.T) {
 		}
 	}
 
-	// Both log sources are configured, and each covers part of the window.
+	// The Grafana and Prometheus logs are configured, the probe proved the
+	// query log, and each covers part of the window; Loki's query log is
+	// recorded as not configured.
 	srcs, err := st.Sources(ctx, info.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(srcs) != 2 {
-		t.Fatalf("sources = %+v", srcs)
+	if len(srcs) != 3 || l.probes.Load() != 1 {
+		t.Fatalf("sources = %+v, probes %d", srcs, l.probes.Load())
 	}
 	for _, s := range srcs {
-		if !s.Configured || s.Coverage <= 0 || s.Coverage >= 1 {
+		if s.Source == sourceLokiQueryLog {
+			if s.Configured || s.Coverage != 0 || s.Gap != "" {
+				t.Errorf("source %+v", s)
+			}
+			continue
+		}
+		if !s.Configured || s.Coverage <= 0 || s.Coverage >= 1 || s.Gap != "" {
 			t.Errorf("source %+v", s)
 		}
 	}
@@ -495,5 +549,129 @@ func readJSON(t *testing.T, name string, v any) {
 	}
 	if err := json.Unmarshal(b, v); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Item 4 on Mimir and Loki: Mimir's query stats attribute Grafana's panel
+// queries to their panel; Loki's metrics.go lines carry the on-call ad hoc
+// query. The Mimir capture holds a real probe marker (nonce pinned here);
+// the Prometheus log in a --mimir scan can't be probed, so it is a gap.
+func TestScanQueryLogsMimirLoki(t *testing.T) {
+	old, oldNonce := scanNow, newProbeNonce
+	scanNow = func() time.Time { return time.Date(2026, 11, 12, 1, 0, 0, 0, time.UTC) }
+	newProbeNonce = func() string { return "0f1e2d3c4b5a6978" }
+	t.Cleanup(func() { scanNow, newProbeNonce = old, oldNonce })
+
+	l := newLab(t, nil)
+	top, err := os.ReadFile(filepath.Join(lab, "mimir/label_values_name.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := &testutil.MimirNames{T: t, Names: testutil.LoadMimirNames(t, filepath.Join(lab, "mimir/label_values_name_by_prefix.json")), Top: top}
+	mimirProbes := &atomic.Int32{}
+	mimirSrv := fixtureServer(t, map[string]string{"/prometheus/api/v1/rules": "mimir/rules.json"},
+		map[string]http.HandlerFunc{testutil.MimirLabelValuesPath: names.ServeHTTP, "/prometheus/api/v1/query": probeSink(t, "", mimirProbes)})
+
+	db := filepath.Join(t.TempDir(), "tvt.db")
+	o := labOptions(l, db)
+	o.Prom, o.Mimir, o.LabelTop = "", mimirSrv.URL, 0
+	o.MimirQueryLogs = stringList{filepath.Join(lab, "mimir/query.log")}
+	o.LokiQueryLogs = stringList{filepath.Join(lab, "loki/query.log")}
+	var out bytes.Buffer
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	t.Log("\n" + out.String())
+	if mimirProbes.Load() != 1 || l.probes.Load() != 0 {
+		t.Errorf("probes: mimir %d, prometheus %d; want 1 and 0", mimirProbes.Load(), l.probes.Load())
+	}
+
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	info, err := st.LatestScan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcs, err := st.Sources(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bySource := map[string]graph.SourceCoverage{}
+	for _, s := range srcs {
+		bySource[s.Source] = s
+	}
+	if s := bySource[sourceMimirQueryLog]; !s.Configured || s.Gap != "" || s.Coverage <= 0 {
+		t.Errorf("mimir query log %+v, want proven", s)
+	}
+	if s := bySource[sourceLokiQueryLog]; !s.Configured || s.Gap != "" || s.Coverage <= 0 {
+		t.Errorf("loki query log %+v", s)
+	}
+	if s := bySource[sourcePromQueryLog]; !s.Configured || s.Coverage != 0 || !strings.Contains(s.Gap, "no Prometheus URL") {
+		t.Errorf("prometheus query log %+v, want an unproven gap", s)
+	}
+
+	g := readGraph(t, db)
+	var panel, stream bool
+	for _, r := range g.refs {
+		c := g.consumers[r.ConsumerID]
+		if r.SignalID == "mimir:metric:shop_cart_operations_total" && c.Kind == graph.ConsumerDashboardPanel &&
+			strings.HasPrefix(c.ID, "qlog:mimir:panel:1:shop-overview:4:") && r.Actor == "admin" && !r.LastSeen.IsZero() {
+			panel = true
+		}
+		if r.SignalID == `loki:stream:{app="shop", component="api"}` && c.Kind == graph.ConsumerAdhocQuery &&
+			strings.Contains(c.Expr, `"route=/healthz"`) && !r.LastSeen.IsZero() {
+			stream = true
+		}
+	}
+	if !panel {
+		t.Error("no reference from Shop Overview panel 4's logged Mimir query")
+	}
+	if !stream {
+		t.Error("no reference from the on-call ad hoc Loki query")
+	}
+	// The probe marker is never a consumer.
+	for _, c := range g.consumers {
+		if strings.Contains(c.Expr, "tvt_query_log_probe") {
+			t.Errorf("probe marker became consumer %s", c.ID)
+		}
+	}
+	reads, err := st.LastReads(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reads) == 0 {
+		t.Error("no last reads stored")
+	}
+}
+
+// A query log that never shows the marker covers nothing and records the
+// gap, but its queries still count.
+func TestScanQueryLogUnproven(t *testing.T) {
+	setNow(t)
+	probes := &atomic.Int32{}
+	l := newLab(t, map[string]http.HandlerFunc{"/api/v1/query": probeSink(t, "", probes)}) // answers, never logs
+	db := filepath.Join(t.TempDir(), "tvt.db")
+	o := labOptions(l, db)
+	o.ProbeWait = 300 * time.Millisecond
+	var out bytes.Buffer
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "prom log     70 queries, coverage 0% (gap: tvt's probe query never appeared") || probes.Load() != 1 {
+		t.Errorf("output:\n%s", out.String())
+	}
+	g := readGraph(t, db)
+	found := false
+	for _, r := range g.refs {
+		if r.SignalID == "prom:metric:node_memory_MemAvailable_bytes" && g.consumers[r.ConsumerID].Kind == graph.ConsumerAdhocQuery {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("an unproven log's queries were dropped")
 	}
 }

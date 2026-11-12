@@ -31,7 +31,10 @@ type QueryLog struct {
 	Bucket time.Duration
 }
 
-var _ collect.QueryLogSource = (*QueryLog)(nil)
+var (
+	_ collect.QueryLogSource = (*QueryLog)(nil)
+	_ collect.ProbeSource    = (*QueryLog)(nil)
+)
 
 // queryLogLine is one query log entry. Prometheus 3.x (slog) writes the
 // timestamp as "time"; 2.x (go-kit) wrote "ts".
@@ -84,6 +87,9 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 		if l.RuleGroup != nil {
 			return
 		}
+		if _, probe := collect.ProbeNonce(l.Params.Query); probe {
+			return // tvt's own marker, not usage
+		}
 		lq := collect.LoggedQuery{
 			Source:   "prometheus",
 			Expr:     l.Params.Query,
@@ -102,6 +108,17 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 	return out, nil
 }
 
+// ProbeSeen reports whether the log holds tvt's marker query for nonce.
+func (q *QueryLog) ProbeSeen(ctx context.Context, nonce string) (bool, error) {
+	found := false
+	err := q.scan(ctx, time.Time{}, func(l *queryLogLine) {
+		if n, ok := collect.ProbeNonce(l.Params.Query); ok && n == nonce && l.RuleGroup == nil {
+			found = true
+		}
+	})
+	return found, err
+}
+
 // Coverage is the share of Bucket-sized intervals between since and now that
 // contain at least one log entry. Gaps (Prometheus down, logging off, host
 // asleep, a missing rotated file) lower it.
@@ -115,52 +132,13 @@ func (q *QueryLog) Coverage(ctx context.Context, since time.Time) (float64, erro
 	if !since.Before(now) {
 		return 0, fmt.Errorf("prometheus query log: coverage window starts at %s, not before now", since.Format(time.RFC3339))
 	}
-	bucket := q.Bucket
-	if bucket <= 0 {
-		bucket = 10 * time.Minute
-	}
-	n := int((now.Sub(since) + bucket - 1) / bucket)
-	seen := make([]bool, n)
-	var first time.Time
-	heartbeat := false
+	cov := logfile.NewCoverage(since, now, q.Bucket)
 	// Read entries before the window too: they show where the log starts.
-	err := q.scan(ctx, time.Time{}, func(l *queryLogLine) {
-		at := l.at()
-		if at.After(now) {
-			return
-		}
-		if first.IsZero() || at.Before(first) {
-			first = at
-		}
-		if at.Before(since) {
-			return
-		}
-		if l.RuleGroup != nil {
-			heartbeat = true
-		}
-		if i := int(at.Sub(since) / bucket); i < n {
-			seen[i] = true
-		}
-	})
+	err := q.scan(ctx, time.Time{}, func(l *queryLogLine) { cov.Add(l.at(), l.RuleGroup != nil) })
 	if err != nil {
 		return 0, err
 	}
-	if first.IsZero() {
-		return 0, nil
-	}
-	if !heartbeat {
-		if !first.After(since) {
-			return 1, nil
-		}
-		return float64(now.Sub(first)) / float64(now.Sub(since)), nil
-	}
-	covered := 0
-	for _, s := range seen {
-		if s {
-			covered++
-		}
-	}
-	return float64(covered) / float64(n), nil
+	return cov.Value(), nil
 }
 
 // errNotQueryLog means no line in a non-empty file parsed as a query log entry.
