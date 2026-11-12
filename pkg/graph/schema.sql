@@ -57,7 +57,14 @@ CREATE TABLE IF NOT EXISTS consumers (
     expr        TEXT NOT NULL DEFAULT '',  -- the query, for evidence in reports
     team        TEXT NOT NULL DEFAULT '',
     last_viewed INTEGER,
-    last_scan   INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED
+    last_scan   INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    -- Schema version 5, rules only. evaluated_by: 'grafana' when Grafana
+    -- evaluates the rule and queries the datasource every interval, '' when
+    -- the datasource's ruler does. interval_ms: evaluation interval (NULL
+    -- if unknown). datasources: the UIDs it queries, one per line.
+    evaluated_by TEXT NOT NULL DEFAULT '',
+    interval_ms  INTEGER,
+    datasources  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS consumers_scan ON consumers (last_scan);
 

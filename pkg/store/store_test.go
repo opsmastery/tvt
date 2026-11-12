@@ -414,6 +414,9 @@ func versionOneDB(t *testing.T, path string) *Store {
 		`ALTER TABLE refs DROP COLUMN reason`,
 		`ALTER TABLE refs DROP COLUMN result_labels`,
 		`ALTER TABLE scan_sources DROP COLUMN gap`,
+		`ALTER TABLE consumers DROP COLUMN evaluated_by`,
+		`ALTER TABLE consumers DROP COLUMN interval_ms`,
+		`ALTER TABLE consumers DROP COLUMN datasources`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -550,6 +553,9 @@ func TestUpgradeFromVersion2(t *testing.T) {
 		`ALTER TABLE refs DROP COLUMN reason`,
 		`ALTER TABLE refs DROP COLUMN result_labels`,
 		`ALTER TABLE scan_sources DROP COLUMN gap`,
+		`ALTER TABLE consumers DROP COLUMN evaluated_by`,
+		`ALTER TABLE consumers DROP COLUMN interval_ms`,
+		`ALTER TABLE consumers DROP COLUMN datasources`,
 		`UPDATE meta SET value = '2' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -617,6 +623,9 @@ func TestUpgradeFromVersion3AndGaps(t *testing.T) {
 	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutSource(ctx, src)) })
 	for _, q := range []string{
 		`ALTER TABLE scan_sources DROP COLUMN gap`,
+		`ALTER TABLE consumers DROP COLUMN evaluated_by`,
+		`ALTER TABLE consumers DROP COLUMN interval_ms`,
+		`ALTER TABLE consumers DROP COLUMN datasources`,
 		`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -674,5 +683,44 @@ func TestLastReadsManyRefsAndTies(t *testing.T) {
 	}
 	if !reflect.DeepEqual(reads, want) {
 		t.Errorf("LastReads\n got  %+v\n want %+v", reads, want)
+	}
+}
+
+// Version 4 databases gain the rule columns on consumers; old rows read
+// back empty, and a Grafana-managed rule keeps who evaluates it, how often
+// and which datasources it queries.
+func TestUpgradeFromVersion4AndRuleColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v4.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	old := graph.Consumer{ID: "rule:prometheus:f/g/A", Kind: graph.ConsumerAlertRule, Name: "A", Expr: "up == 0"}
+	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutConsumer(ctx, old)) })
+	for _, q := range []string{
+		`ALTER TABLE consumers DROP COLUMN evaluated_by`,
+		`ALTER TABLE consumers DROP COLUMN interval_ms`,
+		`ALTER TABLE consumers DROP COLUMN datasources`,
+		`UPDATE meta SET value = '4' WHERE key = 'schema_version'`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	got, err := s.Consumers(ctx, 1)
+	must(t, err)
+	if len(got) != 1 || !reflect.DeepEqual(got[0], old) {
+		t.Errorf("upgraded consumers = %+v, want %+v", got, old)
+	}
+	grafana := graph.Consumer{ID: "rule:grafana:folder/g/uid", Kind: graph.ConsumerAlertRule, Name: "Lag", Expr: "A: x\nB: y",
+		EvaluatedBy: "grafana", Interval: 30 * time.Second, Datasources: []string{"loki", "prometheus"}}
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) { must(t, sc.PutConsumer(ctx, grafana)) })
+	got, err = s.Consumers(ctx, id)
+	must(t, err)
+	if len(got) != 1 || !reflect.DeepEqual(got[0], grafana) {
+		t.Errorf("consumers = %+v, want %+v", got, grafana)
 	}
 }
