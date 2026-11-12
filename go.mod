@@ -5,6 +5,7 @@ go 1.26.7
 toolchain go1.27.4
 
 require (
+	github.com/prometheus/common v0.72.1
 	github.com/prometheus/prometheus v0.316.0
 	go.yaml.in/yaml/v3 v3.0.6
 	modernc.org/sqlite v1.62.0
@@ -22,7 +23,6 @@ require (
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/prometheus/client_golang v1.25.0 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
-	github.com/prometheus/common v0.72.1 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	go.uber.org/atomic v1.12.0 // indirect

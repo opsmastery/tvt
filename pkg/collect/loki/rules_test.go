@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
@@ -26,15 +27,20 @@ func server(t *testing.T, h http.HandlerFunc) *httptest.Server {
 	}))
 }
 
-// fixture serves testdata/lab/loki/<name> at the rules path.
+// fixture serves testdata/lab/loki/<name> at the rules path, and the
+// recorded Prometheus-format view (effective intervals) at its path.
 func fixture(t *testing.T, name string) http.HandlerFunc {
 	f := testutil.File(t, "lab/loki/"+name)
+	prom := testutil.File(t, "lab/loki/prom_rules.json")
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != rulesPath {
+		switch r.URL.Path {
+		case rulesPath:
+			f.ServeHTTP(w, r)
+		case promRulesPath:
+			prom.ServeHTTP(w, r)
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		f.ServeHTTP(w, r)
 	}
 }
 
@@ -57,6 +63,7 @@ func TestRulesFixture(t *testing.T) {
 		Kind:      collect.RuleAlert,
 		Expr:      `sum(count_over_time({app="shop", component="audit"} |= "result=denied" [5m])) > 20`,
 		Language:  "logql",
+		Interval:  time.Minute, // no interval in the YAML: the effective one
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("rules:\n got %+v\nwant %+v", got, want)
@@ -90,10 +97,12 @@ a-ns:
 	if len(got) != 2 {
 		t.Fatalf("got %d rules: %+v", len(got), got)
 	}
-	if got[0].Namespace != "a-ns" || got[0].Kind != collect.RuleAlert || got[0].Name != "A" {
+	// g1's own interval; g has none and the Prometheus-format view isn't
+	// served, so its interval stays unknown rather than failing the scan.
+	if got[0].Namespace != "a-ns" || got[0].Kind != collect.RuleAlert || got[0].Name != "A" || got[0].Interval != time.Minute {
 		t.Errorf("first rule = %+v", got[0])
 	}
-	if got[1].Namespace != "z-ns" || got[1].Kind != collect.RuleRecord || got[1].Name != "shop:errors:rate5m" {
+	if got[1].Namespace != "z-ns" || got[1].Kind != collect.RuleRecord || got[1].Name != "shop:errors:rate5m" || got[1].Interval != 0 {
 		t.Errorf("second rule = %+v", got[1])
 	}
 }
@@ -133,6 +142,7 @@ func TestRulesErrors(t *testing.T) {
 		"both kinds":     {200, "ns:\n  - name: g\n    rules:\n      - alert: A\n        record: r\n        expr: '{a=\"b\"}'\n", "exactly one of alert or record"},
 		"empty expr":     {200, "ns:\n  - name: g\n    rules:\n      - alert: A\n", "empty expr"},
 		"unnamed group":  {200, "ns:\n  - rules:\n      - alert: A\n        expr: x\n", "group without a name"},
+		"bad interval":   {200, "ns:\n  - name: g\n    interval: soon\n    rules:\n      - alert: A\n        expr: x\n", "interval"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			srv := server(t, func(w http.ResponseWriter, r *http.Request) {
