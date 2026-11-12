@@ -28,7 +28,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -148,6 +148,16 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			// Before version 3 an assumed reference covered every label.
 			`UPDATE refs SET all_labels = assumed`,
 			`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
+	if from < 4 {
+		for _, q := range []string{
+			`ALTER TABLE scan_sources ADD COLUMN gap TEXT NOT NULL DEFAULT ''`,
+			`UPDATE meta SET value = '4' WHERE key = 'schema_version'`,
 		} {
 			if _, err := tx.ExecContext(ctx, q); err != nil {
 				return err
@@ -277,6 +287,51 @@ func (s *Store) References(ctx context.Context, scanID int64) ([]graph.Reference
 	return out, rows.Err()
 }
 
+// SignalRead is the most recent time a query log showed a signal being
+// read: by which consumer, and by whom when the log recorded it.
+type SignalRead struct {
+	SignalID   string
+	ConsumerID string
+	Actor      string
+	At         time.Time
+}
+
+// LastReads returns, for every signal a query log ever showed being read,
+// its most recent read across all scans, ordered by signal. References
+// are kept after the scan that saw them, and their last_seen only moves
+// forward, so a read that has left every log since (rotated away, the
+// window moved on) still shows here: "last read nine months ago" never
+// decays into "never read".
+func (s *Store) LastReads(ctx context.Context) ([]SignalRead, error) {
+	rows, err := s.db.QueryContext(ctx,
+		// The latest read per signal is computed once and joined back,
+		// not looked up per reference: refs are kept forever, so a
+		// correlated max would grow quadratically with a signal's history.
+		`SELECT r.signal_id, r.consumer_id, r.actor, r.last_seen FROM refs r
+		 JOIN (SELECT signal_id, max(last_seen) AS latest FROM refs
+		       WHERE last_seen IS NOT NULL GROUP BY signal_id) l
+		   ON l.signal_id = r.signal_id AND r.last_seen = l.latest
+		 ORDER BY r.signal_id, r.consumer_id, r.via`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SignalRead
+	for rows.Next() {
+		var r SignalRead
+		var at int64
+		if err := rows.Scan(&r.SignalID, &r.ConsumerID, &r.Actor, &at); err != nil {
+			return nil, err
+		}
+		r.At = fromMillis(at)
+		if n := len(out); n > 0 && out[n-1].SignalID == r.SignalID {
+			continue // a tie: keep the first consumer
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // Costs returns the costs observed in scan scanID, ordered by signal.
 func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -303,7 +358,7 @@ func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 // ordered by source.
 func (s *Store) Sources(ctx context.Context, scanID int64) ([]graph.SourceCoverage, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT source, configured, coverage, window_start FROM scan_sources WHERE scan_id = ? ORDER BY source`, scanID)
+		`SELECT source, configured, coverage, window_start, gap FROM scan_sources WHERE scan_id = ? ORDER BY source`, scanID)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +368,7 @@ func (s *Store) Sources(ctx context.Context, scanID int64) ([]graph.SourceCovera
 		var src graph.SourceCoverage
 		var configured int
 		var start int64
-		if err := rows.Scan(&src.Source, &configured, &src.Coverage, &start); err != nil {
+		if err := rows.Scan(&src.Source, &configured, &src.Coverage, &start, &src.Gap); err != nil {
 			return nil, err
 		}
 		src.Configured, src.WindowStart = configured == 1, fromMillis(start)
@@ -447,8 +502,8 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 				distinct_values = excluded.distinct_values,
 				bytes_per_day = excluded.bytes_per_day, spans_per_day = excluded.spans_per_day,
 				monthly_cost = excluded.monthly_cost`},
-		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start)
-			VALUES (?, ?, ?, ?, ?)`},
+		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start, gap)
+			VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`},
 	} {
@@ -551,7 +606,7 @@ func (sc *Scan) PutSource(ctx context.Context, src graph.SourceCoverage) error {
 	if src.Coverage < 0 || src.Coverage > 1 {
 		return fmt.Errorf("store: source %q: coverage %v outside 0..1", src.Source, src.Coverage)
 	}
-	_, err := sc.source.ExecContext(ctx, sc.ID, src.Source, boolInt(src.Configured), src.Coverage, millis(src.WindowStart))
+	_, err := sc.source.ExecContext(ctx, sc.ID, src.Source, boolInt(src.Configured), src.Coverage, millis(src.WindowStart), src.Gap)
 	return wrap("source", src.Source, err)
 }
 

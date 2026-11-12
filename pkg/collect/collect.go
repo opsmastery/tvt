@@ -174,6 +174,7 @@ type LoggedQuery struct {
 	Client       string // client IP or user agent, when the log records one
 	DashboardUID string // when the request carried dashboard attribution
 	PanelID      int
+	OrgID        int64 // Grafana organization of DashboardUID, when logged
 }
 
 // StreamVolume is ingested bytes for one log stream over a window.
