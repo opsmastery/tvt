@@ -86,6 +86,13 @@ func Parse(b []byte) (*Config, error) {
 	if err := dec.Decode(&c); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
+	var extra yaml.Node
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New("expected a single YAML document")
+	}
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
