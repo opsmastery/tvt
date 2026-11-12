@@ -1,0 +1,3 @@
+#!/bin/sh
+# Rebuild bin/tvt after a pull or merge so it matches the checkout.
+exec "$(git rev-parse --show-toplevel)/.githooks/rebuild"

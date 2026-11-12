@@ -12,6 +12,7 @@ A Go CLI that finds telemetry (metrics, labels, log streams, span attributes) th
 ```sh
 make           # gofmt check, go vet, tests, build -> bin/tvt
 make race      # tests with -race
+make hooks     # enable .githooks: pre-commit (blocked files, gofmt, vet, tidy, schema tests, gitleaks), pre-push (go test), rebuild bin/tvt on checkout/merge
 ./scripts/capture-fixtures.sh   # record real lab API responses into testdata/lab/
 ```
 
@@ -24,6 +25,7 @@ make race      # tests with -race
 - `pkg/score`, `pkg/cost`, `pkg/graph` and `pkg/parse` stay I/O-free. Legacy Bridge will import them.
 - `check` fails closed: a config it can't evaluate is a failure.
 - Commits are authored as Jason Vance.
+- Schema changes: bump `SchemaVersion`, add an upgrade step, and copy `pkg/graph/schema.sql` to `pkg/store/testdata/schema/vN.sql`. Never edit a frozen copy or an upgrade step that has reached main (`pkg/store/schema_test.go` enforces it).
 
 ## Status (Nov 12, 2026)
 
