@@ -509,3 +509,32 @@ func TestRouterLogCoverageIgnoresFutureLines(t *testing.T) {
 		}
 	}
 }
+
+// Sprint 2 item 19: targets on datasources tvt doesn't parse are kept, so
+// the panel is still a reader: a Pyroscope target's profile type and label
+// selector become its expression, and a target with no text at all stays
+// with an empty one. A Prometheus target with no expression reads nothing.
+func TestUnparsedDatasourceTargets(t *testing.T) {
+	srv := labServer(t, map[string]string{
+		"/api/search": `[{"uid":"x","title":"X"}]`,
+		"/api/dashboards/uid/x": `{"dashboard":{"uid":"x","title":"X","panels":[
+			{"id":1,"title":"flame","datasource":{"type":"grafana-pyroscope-datasource","uid":"pyro"},
+			 "targets":[{"refId":"A","profileTypeId":"process_cpu:cpu:nanoseconds:cpu:nanoseconds","labelSelector":"{service_name=\"shop\"}","queryType":"profile"}]},
+			{"id":2,"title":"es","datasource":{"type":"elasticsearch","uid":"es"},"targets":[{"refId":"A","metrics":[{"type":"count"}]}]},
+			{"id":3,"title":"blank","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"refId":"A","expr":""}]}]}}`,
+	})
+	got, err := New(srv.URL, "").Dashboards(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int][]collect.PanelQuery{
+		1: {{DatasourceUID: "pyro", DatasourceType: "grafana-pyroscope-datasource", Expr: `process_cpu:cpu:nanoseconds:cpu:nanoseconds{service_name="shop"}`}},
+		2: {{DatasourceUID: "es", DatasourceType: "elasticsearch"}},
+		3: nil,
+	}
+	for _, p := range got[0].Panels {
+		if !reflect.DeepEqual(p.Queries, want[p.ID]) {
+			t.Errorf("panel %d queries %+v, want %+v", p.ID, p.Queries, want[p.ID])
+		}
+	}
+}

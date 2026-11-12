@@ -421,6 +421,7 @@ func versionOneDB(t *testing.T, path string) *Store {
 		`ALTER TABLE signals DROP COLUMN dormant`,
 		`ALTER TABLE signals DROP COLUMN owner`,
 		`ALTER TABLE signals DROP COLUMN tier`,
+		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -564,6 +565,7 @@ func TestUpgradeFromVersion2(t *testing.T) {
 		`ALTER TABLE signals DROP COLUMN dormant`,
 		`ALTER TABLE signals DROP COLUMN owner`,
 		`ALTER TABLE signals DROP COLUMN tier`,
+		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '2' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -638,6 +640,7 @@ func TestUpgradeFromVersion3AndGaps(t *testing.T) {
 		`ALTER TABLE signals DROP COLUMN dormant`,
 		`ALTER TABLE signals DROP COLUMN owner`,
 		`ALTER TABLE signals DROP COLUMN tier`,
+		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -715,6 +718,7 @@ func TestUpgradeFromVersion4AndRuleColumns(t *testing.T) {
 		`ALTER TABLE signals DROP COLUMN dormant`,
 		`ALTER TABLE signals DROP COLUMN owner`,
 		`ALTER TABLE signals DROP COLUMN tier`,
+		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '4' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -754,6 +758,7 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 		`ALTER TABLE signals DROP COLUMN dormant`,
 		`ALTER TABLE signals DROP COLUMN owner`,
 		`ALTER TABLE signals DROP COLUMN tier`,
+		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '5' WHERE key = 'schema_version'`,
 	} {
 		if _, err := s.db.Exec(q); err != nil {
@@ -788,4 +793,40 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 		t.Error("class maybe was stored")
 	}
 	sc.Abort()
+}
+
+// Version 6 databases gain consumers.unparsed (Sprint 2 item 19): old rows
+// read back with none, and a scan stores why a panel couldn't be read.
+func TestUpgradeFromVersion6AndUnparsed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v6.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	old := graph.Consumer{ID: "panel:1:d:1:0", Kind: graph.ConsumerDashboardPanel, Name: "D / p", Expr: "up"}
+	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutConsumer(ctx, old)) })
+	for _, q := range []string{
+		`ALTER TABLE consumers DROP COLUMN unparsed`,
+		`UPDATE meta SET value = '6' WHERE key = 'schema_version'`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	got, err := s.Consumers(ctx, 1)
+	must(t, err)
+	if len(got) != 1 || !reflect.DeepEqual(got[0], old) {
+		t.Errorf("upgraded consumers = %+v, want %+v", got, old)
+	}
+	flame := graph.Consumer{ID: "panel:1:d:2:0", Kind: graph.ConsumerDashboardPanel, Name: "D / flame",
+		Expr: `process_cpu:cpu:nanoseconds:cpu:nanoseconds{service_name="shop"}`, Unparsed: "datasource type grafana-pyroscope-datasource"}
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) { must(t, sc.PutConsumer(ctx, flame)) })
+	got, err = s.Consumers(ctx, id)
+	must(t, err)
+	if len(got) != 1 || !reflect.DeepEqual(got[0], flame) {
+		t.Errorf("consumers = %+v, want %+v", got, flame)
+	}
 }
