@@ -54,9 +54,10 @@ type rawRule struct {
 // and threshold read no signal and are left out); Expr is the queries
 // joined, as evidence.
 //
-// A token without alert.rules:read (403) or a Grafana with unified
-// alerting off (404) is an error, not zero rules: a rule tvt can't read
-// might be the only thing protecting a signal.
+// A token without alert.rules:read (403), a Grafana with unified alerting
+// off (404), a null listing, or a Prometheus or Loki query with no readable
+// expression is an error, not zero rules: a rule tvt can't read might be
+// the only thing protecting a signal.
 func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 	var folders map[string][]rawRuleGroup
 	if err := c.getJSON(ctx, rulesPath, nil, &folders); err != nil {
