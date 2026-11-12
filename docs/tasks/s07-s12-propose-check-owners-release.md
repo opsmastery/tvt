@@ -1,0 +1,76 @@
+# S7–S12: propose, check, owners, reduce before drop, savings, release candidate
+
+Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 0006 and 0007 first. The only writes tvt makes are Git branches and PRs in mapped pipeline repos; every backend stays read-only.
+
+**Done when (S12):** `v0.1.0-rc1` is tagged; on the lab, `tvt propose` opens a draft PR for a seeded drop, `tvt check` passes it and fails a PR that would break any hard keep or record, the PR leaves draft only after a recorded owner confirmation, and the next `tvt scan` records the measured saving in the ledger.
+
+## Before S7
+
+- S4's JSON report (recommendation records, evidence gaps) and S6's pipeline targets merged: they're what `propose` and `check` read.
+- ADR: Alloy parsing (Grafana's Alloy syntax package after a license check, or a narrow parser for only the blocks tvt writes).
+- ADR 0009 (amends 0007): Fluent Bit and exporter/receiver pipeline kinds, and the source-first rule.
+- ADR 0010: reduce-before-drop actions (label removal, bucketing, stream aggregation, retention tiers, scrape interval, collapse with a count) and where each sits in the least-lossy order.
+- ADR 0011: records as a protected class, approvals bound to an evidence hash, and the expected end state on recommendations.
+- tvt-lab: the pipeline repo and Fluent Bit container from `lab-backlog.md` (S7).
+
+## S7: writers
+
+**Done when:** `propose` opens a draft PR against the lab pipelines repo for each writer kind.
+
+1. **Protection manifest** (ADR 0003, amended by 0007: one per pipeline repo). `tvt scan` writes `.tvt/protect.json` per pipeline: every hard keep, keep_high, dormant and record signal it handles with the consumers that protect it (evidence class, rule or dashboard, owner), owner decisions and acknowledged gaps. Deterministic output (sorted, no timestamps beyond `generated_at`) so diffs review cleanly.
+2. **Records class.** Audit logs, deploy and change events, Kubernetes audit, and agent tool-call spans (`gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`) are records, detected by name patterns and OTel attributes and declared with `records:` selectors in `tvt.yaml`. `propose` never targets them, sampling and collapse included.
+3. **`tvt propose`** (`pkg/propose`, `pkg/vcs`). From the JSON report's open recommendations, write the change into each mapped pipeline's repo, one PR per repo, GitHub first (GitLab second, first on the cut list): Prometheus `metric_relabel_configs`, Alloy `prometheus.relabel` and `loki.process`, OTel Collector `filter`/`transform`, Fluent Bit `grep` Exclude, `modify`/`record_modifier` and `rewrite_tag` (classic `.conf`, YAML, the Helm chart's values and Fluent Operator resources). Each rule carries a comment with the recommendation's claim and monthly saving. Only mapped signals are proposed. `--output patch` writes a patch file with no Git token.
+4. **The target build must contain what tvt writes.** Before writing a `filter`, `transform`, `logdedup` or `count` component, read the Collector distribution (the ocb manifest in the repo, or `components` output); if the component is missing, add it to the manifest in the same PR or report that it can't.
+5. **Validate before the PR.** Run the target's own validator on the changed config: `otelcol validate` with the user's distribution, `promtool check config`, `alloy fmt` plus a config load, `fluent-bit --dry-run`. A config that doesn't load never becomes a PR.
+6. **Generated OTTL follows safe defaults.** Stable OTTL v1 syntax and standard functions only (no experimental or lambda functions behind feature gates); `error_mode: ignore`; a `where` clause on every regex statement; explicit casts (`Int`, `String`) where an attribute's type varies between libraries; the narrowest correct context; new processors placed in the enrich, clean, parse, filter, cardinality order. Never write the deprecated `batch` processor: use exporter `sending_queue` batching.
+
+## S8: check, the safety gate
+
+**Done when:** every unsafe case in ground truth is refused, with the reason in the `check` output.
+
+1. **`tvt check`** (`pkg/check`). Evaluates the config in a PR against the manifest, offline, with no credentials: apply Prometheus `metric_relabel_configs` regex semantics, Alloy stages, OTel Collector `filter`/`transform` conditions and Fluent Bit filters to the protected signal set, instead of guessing intent. Fails closed: unknown processors, Lua/WASM and templating it can't render are failures. Fails when the evaluated drop set touches a protected signal or a record, on an unacknowledged evidence gap, on a drop of warn-and-above logs, on a component missing from the target build, on a drop with no recorded owner confirmation, and when the manifest is older than `max_age_days` (default 7). Property tests: random relabel configs; whenever the evaluated drop set overlaps the protected set, `check` must fail. A GitHub Action wraps it.
+2. **Error-pattern guard on log rules.** Every generated log drop, sample or collapse rule also keeps lines matching `error|exception|traceback|critical|fatal`, in case a stream's level label is wrong. `check` fails a log rule without the guard.
+3. **Least-lossy order enforced.** `check` refuses a drop when a less lossy action from ADR 0010 would keep every reader working.
+4. **Replay protected queries before a label removal.** In `propose`, where tvt has backend access: run every protected query that touches the signal twice, as written and with the label removed (`sum without(label)` for counters and histograms; colliding gauges flagged), and compare series counts, label sets, empty results and values beyond a tolerance. The diff goes in the PR body; a query that goes empty or changes its grouping blocks the PR until the owner accepts it.
+5. **Lookback and detection limits.** A shorter retention or downsampling tier is refused when any reader (dashboard, rule, agent) has queried further back on that signal. Each alert's worst-case detection delay (scrape interval + range window + rule-group interval + `for` + Alertmanager `group_wait`) is computed and shown in the report; a scrape interval change is refused when any rate or increase window would hold fewer than four samples, when an alert's `for` is shorter than the new interval, or when an alert would pass its severity's detection objective (set in `tvt.yaml`, for example critical 5m).
+6. **Collapsed logs keep their counts.** Collapsing repeats changes every `count_over_time`, `rate` or `bytes_over_time` over those lines, so `check` refuses the collapse unless each such query is rewritten to sum the count attribute; `propose` includes the rewrite in the PR.
+7. **Attributes must exist where a statement runs.** Refuse a generated filter or transform whose condition reads an attribute no earlier processor or the source provides at that point, and a statement that reads an attribute an earlier statement deleted.
+
+## S9: owner workflow
+
+**Done when:** a lab drop goes from draft to ready only after a recorded confirmation, and changing its evidence reopens it.
+
+1. **Owners.** From the ownership map in `tvt.yaml`, CODEOWNERS, `team`/`service` labels and Backstage `catalog-info.yaml` (`spec.owner`, through the component's name or annotations). No owner means report only.
+2. **Draft until confirmed, bound to evidence.** Every drop or label removal opens as a draft PR assigned to its owner. The confirmation, recorded in the protection manifest, includes a hash of the evidence the owner saw (readers, cost, gaps); `check` refuses the merge if the usage graph has changed materially since (a new reader, a gap reopened).
+3. **Recommendation status.** Open, confirmed, or dismissed with a reason; a dismissal writes keep plus a review date to the manifest so tvt doesn't ask again. The owner review always asks whether the signal is read only at certain times of year; a yes writes keep plus a review date after the next season.
+4. **Decisions expire when their evidence changes.** Each manifest entry (keep, dismissal, confirmation) records the evidence it rested on; when that changes (reader gone, service renamed, owner moved teams), the entry is flagged for re-review instead of persisting or expiring silently. Review dates remain the backstop.
+5. **Expected end state.** Each recommendation states what should be true after the merge ("returns no series within an hour of deploy; no rule or panel goes empty; stream bytes fall about 40%"), for the owner to read before merging and for `tvt verify` to check later.
+6. **Capped queue and weekly digest** per owner instead of a stream of PRs.
+
+## S10: reduce before drop
+
+**Done when:** for each lab finding, `propose` picks the least-lossy action that `check` accepts.
+
+1. **Label removal and bucketing.** When a label is always aggregated away, keep the metric and remove the label (vmagent stream aggregation `without:`/`drop_input_labels`, Alloy or Collector equivalents, or a recording rule replacement). When every reader uses only a label's coarse form (`status_code=~"5.."`, a route rather than a raw path), bucket the values in the Collector instead; the replay check confirms readers' results don't change. Stream aggregation also replaces slow recording rules.
+2. **Retention and downsampling tiers** for dormant signals before archive and drop: Mimir per-tenant retention, VictoriaMetrics retention filters and downsampling. Respects S8's lookback limit.
+3. **Level-based log tiers.** For streams where nothing reads info or debug lines, route levels below warn to the cheapest tier (Loki `retention_stream` or a separate tenant, Fluent Bit `rewrite_tag`, Alloy `loki.process`). A reader of lower-level lines blocks it for that stream.
+4. **Collapse with a count, then sample.** The OTel Collector `logdedup` processor collapses identical lines over an interval into one with a count (confirm the count attribute name and settings in the contrib docs first); 1-in-N sampling (Alloy `stage.sampling`, Fluent Bit) comes after it. Each rule carries its saving.
+5. **Scrape interval increase.** When every reader of a job's metrics uses a step and range windows well above the scrape interval, raise the job's `scrape_interval` in Prometheus or Alloy instead of dropping anything, within S8's limits.
+6. **Staged drops with a revert.** Reroute to the archive first, drop after the quiet period (default 30 days) with no new reader. Every drop PR is generated with its revert PR.
+
+## S11: savings ledger
+
+**Done when:** the MVP gate is rehearsed on the lab: merge a tvt PR, and the next scan records measured savings.
+
+1. **Before and after per merged PR:** series or bytes and $/month from the scan before the merge and the first scan after it, stored in the graph and shown in the report.
+2. **Savings apart from growth.** What merged PRs saved, separate from what the bill did, with growth attributed to its cause (new metrics, replicas, a release).
+3. **Self-hosted results:** GiB freed and how many more days of retention now fit on the same volume (from `retention.size` and the volume size).
+
+## S12: release candidate
+
+**Done when:** `v0.1.0-rc1` is tagged, and the install guide works on a clean machine.
+
+1. **Supply chain:** reproducible builds verified in CI, cosign-signed releases, govulncheck, gitleaks, Dependabot, and a release checklist in `docs/`.
+2. **`SECURITY.md`** (Sprint 2 item 10, if not done) and an install guide checked against a clean install.
+3. **Docs for every command.**
+4. **The README claim:** "Every signal tvt marks unread had no reader in your evidence window, and every gap is listed. If you find a reader we missed, that's a bug, and the benchmark gets a new case."
