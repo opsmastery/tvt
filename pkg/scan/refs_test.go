@@ -636,3 +636,73 @@ func TestShownLabelsAndResultLabels(t *testing.T) {
 		}
 	}
 }
+
+// Grafana-managed rules (Sprint 2 item 5): one consumer per rule, keyed by
+// UID, tagged evaluated_by=grafana with its interval and datasources. Each
+// query resolves in its datasource's language, a query to another kind of
+// datasource reads nothing tvt tracks, and a Grafana recording rule's
+// output chains to its inputs like any recording rule.
+func TestGrafanaManagedRules(t *testing.T) {
+	in := baseInputs()
+	in.Rules = append(in.Rules,
+		collect.Rule{Source: "grafana", Namespace: "f1", Group: "g", Name: "Lag", UID: "lag", Kind: collect.RuleAlert,
+			EvaluatedBy: collect.EvaluatedByGrafana, Interval: 30 * time.Second, Expr: "A: …\nB: …\nC: …",
+			Queries: []collect.PanelQuery{
+				{DatasourceUID: "prometheus", DatasourceType: "prometheus", Expr: "max(node_load1)"},
+				{DatasourceUID: "loki", DatasourceType: "loki", Expr: `count_over_time({app="shop"} | json [5m])`},
+				{DatasourceUID: "es", DatasourceType: "elasticsearch", Expr: "status:500"},
+			}},
+		// Same title, another rule: the UID keeps them apart.
+		collect.Rule{Source: "grafana", Namespace: "f1", Group: "g", Name: "Lag", UID: "lag-2", Kind: collect.RuleAlert,
+			EvaluatedBy: collect.EvaluatedByGrafana, Queries: []collect.PanelQuery{{DatasourceUID: "prometheus", DatasourceType: "prometheus", Expr: "up"}}},
+		collect.Rule{Source: "grafana", Namespace: "f1", Group: "rec", Name: "job:cpu:rate5m", UID: "rec", Kind: collect.RuleRecord,
+			EvaluatedBy: collect.EvaluatedByGrafana, Interval: time.Minute,
+			Queries: []collect.PanelQuery{{DatasourceUID: "prometheus", DatasourceType: "prometheus", Expr: "sum by (job) (rate(node_cpu_seconds_total[5m]))"}}},
+	)
+	in.Dashboards = []collect.Dashboard{{UID: "d", Title: "D", Panels: []collect.Panel{{ID: 1, Title: "cpu",
+		Queries: []collect.PanelQuery{{DatasourceType: "prometheus", Expr: "job:cpu:rate5m"}}}}}}
+	out, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cons := map[string]graph.Consumer{}
+	for _, c := range out.Consumers {
+		cons[c.ID] = c
+	}
+	const lag, rec = "rule:grafana:f1/g/lag", "rule:grafana:f1/rec/rec"
+	c := cons[lag]
+	if c.Kind != graph.ConsumerAlertRule || c.Name != "Lag" || c.EvaluatedBy != "grafana" || c.Interval != 30*time.Second ||
+		!slices.Equal(c.Datasources, []string{"es", "loki", "prometheus"}) {
+		t.Errorf("Grafana alert consumer %+v", c)
+	}
+	if _, ok := cons["rule:grafana:f1/g/lag-2"]; !ok {
+		t.Error("second rule titled Lag is missing")
+	}
+	if c := cons[rec]; c.Kind != graph.ConsumerRecordingRule || c.Interval != time.Minute {
+		t.Errorf("Grafana recording rule consumer %+v", c)
+	}
+	refs := refIndex(out)
+	for _, k := range []string{
+		"prom:metric:node_load1 <- " + lag,
+		`loki:stream:{app="shop"} <- ` + lag,
+		"prom:metric:node_cpu_seconds_total <- " + rec,
+		"prom:metric:job:cpu:rate5m <- panel:1:d:1:0",
+		"prom:metric:node_cpu_seconds_total <- panel:1:d:1:0 via " + rec,
+	} {
+		r, ok := refs[k]
+		if !ok {
+			t.Errorf("missing %s", k)
+			continue
+		}
+		if want := cons[r.ConsumerID].Kind.Evidence(); r.Evidence != want {
+			t.Errorf("%s: evidence %s, want %s", k, r.Evidence, want)
+		}
+	}
+	// The Elasticsearch query reads nothing: the alert's only references
+	// are its Prometheus and Loki queries'.
+	for _, r := range out.References {
+		if r.ConsumerID == lag && r.SignalID != "prom:metric:node_load1" && r.SignalID != `loki:stream:{app="shop"}` {
+			t.Errorf("unexpected reference %s <- %s", r.SignalID, lag)
+		}
+	}
+}

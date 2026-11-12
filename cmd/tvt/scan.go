@@ -211,9 +211,16 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			}
 		}
 	}
-	fmt.Fprintf(out, "%-12s %s, %s, %s (org %d, as %s)\n", "grafana",
+	// Grafana-managed rules: Grafana evaluates them, so no datasource ruler
+	// lists them, and a metric only one reads would otherwise look unused.
+	grules, err := gc.Rules(ctx)
+	if err != nil {
+		return err
+	}
+	in.Rules = append(in.Rules, grules...)
+	fmt.Fprintf(out, "%-12s %s, %s, %s, %s (org %d, as %s)\n", "grafana",
 		plural(len(in.Dashboards), "dashboard", "dashboards"), plural(queries, "panel query", "panel queries"),
-		plural(vars, "variable", "variables"), in.OrgID, login)
+		plural(vars, "variable", "variables"), plural(len(grules), "Grafana-managed rule", "Grafana-managed rules"), in.OrgID, login)
 
 	// Usage evidence. Each source is recorded, configured or not, so the
 	// report can say what the scan couldn't see.
