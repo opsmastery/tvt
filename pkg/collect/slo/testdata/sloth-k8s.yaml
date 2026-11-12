@@ -1,0 +1,17 @@
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: payments
+spec:
+  service: payments
+  slos:
+    - name: availability
+      objective: 99.95
+      sli:
+        events:
+          errorQuery: sum(rate(payments_total{result="error"}[{{.window}}]))
+          totalQuery: sum(rate(payments_total[{{.window}}]))
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: [payments.yaml]

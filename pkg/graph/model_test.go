@@ -15,7 +15,7 @@ func TestSchemaEmbedded(t *testing.T) {
 
 func TestHardKeep(t *testing.T) {
 	hard := map[ConsumerKind]bool{
-		ConsumerAlertRule: true, ConsumerSLO: true, ConsumerExternal: true,
+		ConsumerAlertRule: true, ConsumerSLO: true, ConsumerExternal: true, ConsumerRunbook: true,
 		ConsumerRecordingRule: false, ConsumerDashboardPanel: false, ConsumerDashboardVariable: false,
 		ConsumerAdhocQuery: false, ConsumerAgentQuery: false,
 	}
@@ -29,7 +29,7 @@ func TestHardKeep(t *testing.T) {
 func TestEvidence(t *testing.T) {
 	want := map[ConsumerKind]EvidenceClass{
 		ConsumerAlertRule: EvidenceDeclared, ConsumerRecordingRule: EvidenceDeclared,
-		ConsumerSLO: EvidenceDeclared, ConsumerExternal: EvidenceDeclared,
+		ConsumerSLO: EvidenceDeclared, ConsumerExternal: EvidenceDeclared, ConsumerRunbook: EvidenceDeclared,
 		ConsumerDashboardPanel: EvidenceObserved, ConsumerDashboardVariable: EvidenceObserved,
 		ConsumerDashboardAnnotation: EvidenceObserved, ConsumerAdhocQuery: EvidenceObserved, ConsumerAgentQuery: EvidenceObserved,
 	}

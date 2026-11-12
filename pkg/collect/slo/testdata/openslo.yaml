@@ -1,0 +1,66 @@
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: search-availability
+spec:
+  service: search
+  indicatorRef: search-good-ratio
+  budgetingMethod: Occurrences
+  objectives:
+    - target: 0.99
+---
+apiVersion: openslo/v1
+kind: SLI
+metadata:
+  name: search-good-ratio
+spec:
+  ratioMetric:
+    counter: true
+    good:
+      metricSource:
+        type: Prometheus
+        spec:
+          query: sum(rate(search_requests_total{status="ok"}[5m]))
+    total:
+      metricSource:
+        type: Prometheus
+        spec:
+          query: sum(rate(search_requests_total[5m]))
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: ingest-logs
+spec:
+  service: ingest
+  indicator:
+    metadata:
+      name: ingest-errors
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Loki
+          spec:
+            query: sum(rate({app="ingest"} |= "error" [5m]))
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: datadog-one
+spec:
+  service: legacy
+  indicator:
+    spec:
+      thresholdMetric:
+        metricSource:
+          type: Datadog
+          spec:
+            query: avg:trace.http.request.duration{service:legacy}
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: dangling
+spec:
+  service: legacy
+  indicatorRef: missing
