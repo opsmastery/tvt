@@ -521,7 +521,12 @@ func TestUnparsedDatasourceTargets(t *testing.T) {
 			{"id":1,"title":"flame","datasource":{"type":"grafana-pyroscope-datasource","uid":"pyro"},
 			 "targets":[{"refId":"A","profileTypeId":"process_cpu:cpu:nanoseconds:cpu:nanoseconds","labelSelector":"{service_name=\"shop\"}","queryType":"profile"}]},
 			{"id":2,"title":"es","datasource":{"type":"elasticsearch","uid":"es"},"targets":[{"refId":"A","metrics":[{"type":"count"}]}]},
-			{"id":3,"title":"blank","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"refId":"A","expr":""}]}]}}`,
+			{"id":3,"title":"blank","datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"refId":"A","expr":""}]},
+			{"id":4,"title":"vm blank","datasource":{"type":"victoriametrics-metrics-datasource","uid":"vm"},"targets":[{"refId":"A","expr":""}]}],
+			"annotations":{"list":[
+			  {"name":"deploys","datasource":{"type":"elasticsearch","uid":"es"},"enable":true,"query":"type:deploy"},
+			  {"name":"incidents","datasource":{"type":"grafana-pagerduty-datasource","uid":"pd"},"enable":true},
+			  {"name":"blank prom","datasource":{"type":"prometheus","uid":"prometheus"},"enable":true}]}}}`,
 	})
 	got, err := New(srv.URL, "").Dashboards(context.Background())
 	if err != nil {
@@ -531,10 +536,21 @@ func TestUnparsedDatasourceTargets(t *testing.T) {
 		1: {{DatasourceUID: "pyro", DatasourceType: "grafana-pyroscope-datasource", Expr: `process_cpu:cpu:nanoseconds:cpu:nanoseconds{service_name="shop"}`}},
 		2: {{DatasourceUID: "es", DatasourceType: "elasticsearch"}},
 		3: nil,
+		4: nil, // VictoriaMetrics is parsed as PromQL: an empty target reads nothing
 	}
 	for _, p := range got[0].Panels {
 		if !reflect.DeepEqual(p.Queries, want[p.ID]) {
 			t.Errorf("panel %d queries %+v, want %+v", p.ID, p.Queries, want[p.ID])
 		}
+	}
+	// A top-level annotation query is read; an annotation on a datasource
+	// tvt doesn't parse is kept even with no query; an empty one on
+	// Prometheus reads nothing.
+	wantA := []collect.Annotation{
+		{Name: "deploys", Expr: "type:deploy", DatasourceUID: "es", DatasourceType: "elasticsearch", Enabled: true},
+		{Name: "incidents", DatasourceUID: "pd", DatasourceType: "grafana-pagerduty-datasource", Enabled: true},
+	}
+	if !reflect.DeepEqual(got[0].Annotations, wantA) {
+		t.Errorf("annotations %+v, want %+v", got[0].Annotations, wantA)
 	}
 }

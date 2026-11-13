@@ -74,6 +74,7 @@ type rawAnnotation struct {
 	Enable     *bool           `json:"enable"`
 	BuiltIn    int             `json:"builtIn"`
 	Expr       string          `json:"expr"`
+	Query      json.RawMessage `json:"query"`
 	// Prometheus and Loki annotations: templates and label names shown on
 	// each annotation.
 	TitleFormat string `json:"titleFormat"`
@@ -226,17 +227,17 @@ func (c *Client) convert(ctx context.Context, raw rawDashboard, h searchHit, dss
 			continue
 		}
 		expr := a.Expr
+		if expr == "" {
+			expr = stringOrQuery(a.Query)
+		}
 		if expr == "" && a.Target != nil {
 			expr = a.Target.Expr
 			if expr == "" {
 				expr = stringOrQuery(a.Target.Query)
 			}
 		}
-		if expr == "" {
-			continue
-		}
 		ds := r.resolve(a.Datasource)
-		if ds.skip || ds.mixed {
+		if ds.skip || ds.mixed || (expr == "" && !keepEmpty(ds.typ)) {
 			continue
 		}
 		if ds.needsList {
@@ -335,11 +336,7 @@ func (r *resolver) panelQueries(p rawPanel) ([]collect.PanelQuery, error) {
 		if expr == "" && t.ProfileTypeID != "" {
 			expr = t.ProfileTypeID + t.LabelSelector // Pyroscope's own query syntax
 		}
-		// A Prometheus or Loki target with no expression reads nothing. On
-		// any other datasource tvt can't tell, so the target is kept, even
-		// empty: the panel reads something tvt doesn't parse (Sprint 2
-		// item 19), which scan records as an assumed reader and a gap.
-		if expr == "" && (ds.typ == "prometheus" || ds.typ == "loki" || ds.typ == "") {
+		if expr == "" && !keepEmpty(ds.typ) {
 			continue
 		}
 		// Only a query that is actually emitted needs its datasource; a
@@ -350,6 +347,17 @@ func (r *resolver) panelQueries(p rawPanel) ([]collect.PanelQuery, error) {
 		out = append(out, collect.PanelQuery{DatasourceUID: ds.uid, DatasourceType: ds.typ, Expr: expr, Legend: t.LegendFormat})
 	}
 	return out, nil
+}
+
+// keepEmpty: a query with no text on a datasource of type typ is kept. A
+// query on a datasource tvt parses (collect.QueryLanguage) or an
+// unresolved one with no text reads nothing. On any other datasource tvt
+// can't tell, so it is kept, even empty: it reads something tvt doesn't
+// parse (Sprint 2 item 19), which scan records as an assumed reader and a
+// gap.
+func keepEmpty(typ string) bool {
+	_, parsed := collect.QueryLanguage(typ)
+	return !parsed && typ != ""
 }
 
 func (r *resolver) defaultDS() dsRef {

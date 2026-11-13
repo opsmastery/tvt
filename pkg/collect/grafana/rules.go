@@ -129,10 +129,12 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 					}
 					expr := modelExpr(d.Model)
 					if strings.TrimSpace(expr) == "" {
-						if ds.typ == "prometheus" || ds.typ == "loki" {
+						if _, parsed := collect.QueryLanguage(ds.typ); parsed {
 							return nil, fmt.Errorf("rule %q (%s): query %q for datasource %q has an empty or unreadable model", a.Title, a.UID, d.RefID, d.DatasourceUID)
 						}
-						continue
+						if !keepEmpty(ds.typ) {
+							continue
+						}
 					}
 					r.Queries = append(r.Queries, collect.PanelQuery{DatasourceUID: ds.uid, DatasourceType: ds.typ, Expr: expr})
 					exprs = append(exprs, d.RefID+": "+expr)
@@ -163,8 +165,10 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 // string query field.
 func modelExpr(raw json.RawMessage) string {
 	var m struct {
-		Expr  string          `json:"expr"`
-		Query json.RawMessage `json:"query"`
+		Expr          string          `json:"expr"`
+		Query         json.RawMessage `json:"query"`
+		ProfileTypeID string          `json:"profileTypeId"`
+		LabelSelector string          `json:"labelSelector"`
 	}
 	if json.Unmarshal(raw, &m) != nil {
 		return ""
@@ -172,5 +176,11 @@ func modelExpr(raw json.RawMessage) string {
 	if m.Expr != "" {
 		return m.Expr
 	}
-	return stringOrQuery(m.Query)
+	if q := stringOrQuery(m.Query); q != "" {
+		return q
+	}
+	if m.ProfileTypeID != "" {
+		return m.ProfileTypeID + m.LabelSelector // Pyroscope's own query syntax
+	}
+	return ""
 }

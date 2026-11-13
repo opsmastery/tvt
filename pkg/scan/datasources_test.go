@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,10 +20,18 @@ func TestUnknownDatasources(t *testing.T) {
 			Expr: `avg(rate(node_load1[5m])) + shop_not_collected_total`}}},
 		{ID: 3, Title: "Cart", Queries: []collect.PanelQuery{{DatasourceType: "prometheus", Expr: `sum by (op) (shop_cart_operations_total)`}}},
 		{ID: 4, Title: "Empty", Queries: []collect.PanelQuery{{DatasourceType: "elasticsearch"}}},
+		{ID: 5, Title: "AMP by name", Queries: []collect.PanelQuery{{DatasourceType: "grafana-amazonprometheus-datasource",
+			Expr: `{__name__=~"node_cpu_.+", mode="idle"}`}}},
 	}}}
-	in.Rules = append(in.Rules, collect.Rule{Source: "grafana", Namespace: "f", Group: "g", Name: "ES errors", UID: "es",
-		Kind: collect.RuleAlert, EvaluatedBy: collect.EvaluatedByGrafana, Expr: "A: status:500",
-		Queries: []collect.PanelQuery{{DatasourceUID: "es", DatasourceType: "elasticsearch", Expr: "status:500"}}})
+	in.Rules = append(in.Rules,
+		collect.Rule{Source: "grafana", Namespace: "f", Group: "g", Name: "ES errors", UID: "es",
+			Kind: collect.RuleAlert, EvaluatedBy: collect.EvaluatedByGrafana, Expr: "A: status:500",
+			Queries: []collect.PanelQuery{{DatasourceUID: "es", DatasourceType: "elasticsearch", Expr: "status:500"}}},
+		collect.Rule{Source: "grafana", Namespace: "f", Group: "g", Name: "Mixed", UID: "mixed",
+			Kind: collect.RuleAlert, EvaluatedBy: collect.EvaluatedByGrafana, Expr: "A: status:500\nB: up",
+			Queries: []collect.PanelQuery{{DatasourceUID: "es", DatasourceType: "elasticsearch", Expr: "status:500"},
+				{DatasourceUID: "pyro", DatasourceType: "grafana-pyroscope-datasource"},
+				{DatasourceUID: "es", DatasourceType: "elasticsearch"}}})
 	out, err := Build(in)
 	if err != nil {
 		t.Fatal(err)
@@ -34,13 +43,15 @@ func TestUnknownDatasources(t *testing.T) {
 		"panel:1:shop:3:0":    "",
 		"panel:1:shop:4:0":    "datasource type elasticsearch", // no query text: still a consumer
 		"rule:grafana:f/g/es": "datasource type elasticsearch",
+		// several types on one rule: all of them, not the last
+		"rule:grafana:f/g/mixed": "datasource types elasticsearch, grafana-pyroscope-datasource",
 	} {
 		c, ok := cons[id]
 		if !ok || c.Unparsed != want {
 			t.Errorf("%s: %+v (found %v), want Unparsed %q", id, c, ok, want)
 		}
 	}
-	var amp []string
+	var amp, amp5 []string
 	for _, r := range out.References {
 		switch r.ConsumerID {
 		case "panel:1:shop:2:0":
@@ -48,12 +59,18 @@ func TestUnknownDatasources(t *testing.T) {
 				t.Errorf("AMP panel ref %+v: want assumed, every label, with the reason", r)
 			}
 			amp = append(amp, r.SignalID)
-		case "panel:1:shop:1:0", "panel:1:shop:4:0", "rule:grafana:f/g/es":
+		case "panel:1:shop:5:0":
+			// a __name__ regex selector spells its metrics out
+			amp5 = append(amp5, r.SignalID)
+		case "panel:1:shop:1:0", "panel:1:shop:4:0", "rule:grafana:f/g/es", "rule:grafana:f/g/mixed":
 			t.Errorf("%s names no collected metric, but references %s", r.ConsumerID, r.SignalID)
 		}
 	}
 	if len(amp) != 1 || amp[0] != "prom:metric:node_load1" {
 		t.Errorf("AMP panel references %v, want only the collected node_load1", amp)
+	}
+	if len(amp5) == 0 || !slices.Contains(amp5, "prom:metric:node_cpu_seconds_total") {
+		t.Errorf("AMP {__name__=~...} panel references %v, want node_cpu_seconds_total", amp5)
 	}
 	if _, ok := signalIDs(out)["prom:metric:shop_not_collected_total"]; ok {
 		t.Error("an unparsed query created a signal for a metric nobody collected")
@@ -62,15 +79,16 @@ func TestUnknownDatasources(t *testing.T) {
 	for _, s := range out.Sources {
 		if s.Source == SourceDatasources {
 			src = s.Gap
-			// 5 queries (4 panels, 1 rule query), 4 on datasources tvt doesn't parse.
-			if !s.Configured || s.Coverage < 0.19 || s.Coverage > 0.21 {
+			// 9 queries (5 panels, 4 rule queries), 8 on datasources tvt doesn't parse.
+			if !s.Configured || s.Coverage < 0.11 || s.Coverage > 0.12 {
 				t.Errorf("datasources source %+v", s)
 			}
 		}
 	}
 	for _, want := range []string{
-		"elasticsearch: 2 queries tvt doesn't parse (ES errors, Shop / Empty)",
-		"grafana-pyroscope-datasource: 1 query tvt doesn't parse (Shop / CPU flame graph)",
+		"elasticsearch: 4 queries tvt doesn't parse (ES errors, Mixed, Shop / Empty)",
+		"grafana-pyroscope-datasource: 2 queries tvt doesn't parse (Mixed, Shop / CPU flame graph)",
+		"grafana-amazonprometheus-datasource: 2 queries tvt doesn't parse (Shop / AMP by name, Shop / Load (AMP))",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("datasources gap %q missing %q", src, want)
