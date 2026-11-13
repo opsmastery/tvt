@@ -27,6 +27,7 @@ type rawRuleGroup struct {
 }
 
 type rawRule struct {
+	Annotations  map[string]string `json:"annotations"`
 	GrafanaAlert struct {
 		UID             string `json:"uid"`
 		Title           string `json:"title"`
@@ -104,6 +105,9 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 					Kind:        collect.RuleAlert,
 					EvaluatedBy: collect.EvaluatedByGrafana,
 					Interval:    time.Duration(a.IntervalSeconds) * time.Second,
+				}
+				if len(raw.Annotations) > 0 {
+					r.Annotations = raw.Annotations
 				}
 				if r.Group == "" {
 					r.Group = g.Name

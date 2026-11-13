@@ -1,0 +1,30 @@
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: api-errors
+  namespace: monitoring
+spec:
+  target: "99"
+  window: 4w
+  indicator:
+    ratio:
+      errors:
+        metric: api_requests_total{code=~"5.."}
+      total:
+        metric: api_requests_total
+      grouping: [route]
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: api-latency
+  namespace: monitoring
+spec:
+  target: "95"
+  window: 4w
+  indicator:
+    latency:
+      success:
+        metric: api_duration_seconds_bucket{le="0.5"}
+      total:
+        metric: api_duration_seconds_count

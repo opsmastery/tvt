@@ -173,8 +173,10 @@ func TestRulesFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	kinds := map[string]collect.RuleKind{}
+	annotations := map[string]map[string]string{}
 	for _, r := range got {
 		kinds[r.Name] = r.Kind
+		annotations[r.Name] = r.Annotations
 		if r.Source != "prometheus" || r.Language != "promql" || r.Expr == "" ||
 			r.Namespace != "/etc/prometheus/rules/shop.yml" || r.Interval != 30*time.Second {
 			t.Errorf("bad rule %+v", r)
@@ -192,6 +194,10 @@ func TestRulesFixture(t *testing.T) {
 	}
 	if kinds["route:shop_http_request_duration_seconds:p99_5m"] != collect.RuleRecord {
 		t.Errorf("recording rule feeding ShopHighLatency missing: %v", kinds)
+	}
+	// Annotations carry the runbook link (Sprint 2 item 7).
+	if a := annotations["ShopPaymentQueueBacklog"]; !strings.HasSuffix(a["runbook_url"], "/runbooks/payment-queue-backlog.md") || a["summary"] == "" {
+		t.Errorf("ShopPaymentQueueBacklog annotations %v", a)
 	}
 }
 
