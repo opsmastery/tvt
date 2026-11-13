@@ -125,7 +125,7 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 					}
 					expr := modelExpr(d.Model)
 					if strings.TrimSpace(expr) == "" {
-						if ds.typ == "prometheus" || ds.typ == "loki" {
+						if _, known := collect.QueryLanguage(ds.typ); known {
 							return nil, fmt.Errorf("rule %q (%s): query %q for datasource %q has an empty or unreadable model", a.Title, a.UID, d.RefID, d.DatasourceUID)
 						}
 						continue

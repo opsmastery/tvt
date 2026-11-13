@@ -92,6 +92,13 @@ func TestRulesErrors(t *testing.T) {
 			  {"refId": "A", "datasourceUid": "prometheus", "model": {"expr": "  "}}]}}]}]}`),
 			"/api/datasources": testutil.File(t, "lab/grafana/datasources.json"),
 		}, `query "A" for datasource "prometheus" has an empty or unreadable model`},
+		// VictoriaMetrics queries are read as PromQL, so they fail closed
+		// the same way (Sprint 2 item 17).
+		{"empty VictoriaMetrics query", testutil.Routes{
+			"/api/ruler/grafana/api/v1/rules": body(`{"F": [{"name": "g", "rules": [{"grafana_alert": {"uid": "u", "title": "T", "data": [
+			  {"refId": "A", "datasourceUid": "vm", "model": {"expr": ""}}]}}]}]}`),
+			"/api/datasources": body(`[{"uid": "vm", "name": "VM", "type": "victoriametrics-metrics-datasource"}]`),
+		}, `query "A" for datasource "vm" has an empty or unreadable model`},
 		{"datasource by name without the list", testutil.Routes{
 			"/api/ruler/grafana/api/v1/rules": body(strings.Replace(alert, "%s", "Prometheus", 1)),
 			"/api/datasources":                status(403),
