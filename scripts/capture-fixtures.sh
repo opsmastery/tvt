@@ -97,13 +97,32 @@ if curl -fs -o /dev/null "$MIMIR/ready"; then
   get "$M/rules"            "$OUT/mimir/rules.json"
   get "$M/cardinality/label_values" "$OUT/mimir/label_values_name.json" -G \
     --data-urlencode 'label_names[]=__name__' --data-urlencode 'limit=500'
+  # Mimir caps limit at 500, so names are captured per prefix, and a prefix
+  # with more than 500 names is split again (plus the exact name, which no
+  # longer prefix matches), until every partition is complete.
+  CHARS='a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X Y Z 0 1 2 3 4 5 6 7 8 9 _ :'
+  sep=''
+  emit() { printf '%s%s' "$sep" "$1"; sep=','; }
+  names() { # selector
+    curl -fsS -G "$M/cardinality/label_values" --data-urlencode 'label_names[]=__name__' \
+      --data-urlencode "selector=$1" --data-urlencode 'limit=500'
+  }
+  part() { # prefix
+    body=$(names "{__name__=~\"$1.*\"}") || return 1
+    n=$(printf '%s' "$body" | sed -n 's/.*"label_values_count":\([0-9]*\).*/\1/p' | head -n 1)
+    if [ "${n:-0}" -le 500 ]; then
+      emit "$body"
+      return 0
+    fi
+    exact=$(names "{__name__=\"$1\"}") || return 1
+    emit "$exact"
+    for c in $CHARS; do part "$1$c" || return 1; done
+  }
   if {
-    printf '['; sep=''
-    for c in a b c d e f g h i j k l m n o p q r s t u v w x y z \
-             A B C D E F G H I J K L M N O P Q R S T U V W X Y Z _ :; do
-      printf '%s' "$sep"; sep=','
-      curl -fsS -G "$M/cardinality/label_values" --data-urlencode 'label_names[]=__name__' \
-        --data-urlencode "selector={__name__=~\"$c.*\"}" --data-urlencode 'limit=500' || exit 1
+    printf '['
+    for c in $CHARS; do
+      case $c in [0-9]) continue ;; esac   # metric names can't start with a digit
+      part "$c" || exit 1
     done
     printf ']\n'
   } > "$OUT/mimir/label_values_name_by_prefix.json"; then
@@ -139,5 +158,15 @@ if cp "$LAB_DIR/ground-truth.yaml" "$OUT/ground-truth.yaml"; then
 else
   echo "  FAIL ground-truth.yaml (is LAB_DIR=$LAB_DIR right?)" >&2
 fi
+
+# Declared dependencies the golden scan reads through tvt.yaml (Sprint 2
+# item 7): the lab's SLO definitions and runbooks, copied as they are.
+for d in slos runbooks; do
+  if [ -d "$LAB_DIR/$d" ] && rm -rf "${OUT:?}/$d" && cp -R "$LAB_DIR/$d" "$OUT/$d"; then
+    echo "  ok  $OUT/$d/"
+  else
+    echo "  FAIL $d/ (is LAB_DIR=$LAB_DIR right?)" >&2
+  fi
+done
 
 echo "Done. Review $OUT before committing."

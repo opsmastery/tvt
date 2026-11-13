@@ -21,6 +21,8 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/loki"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/mimir"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/prometheus"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect/runbook"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect/slo"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
@@ -140,13 +142,36 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	since := start.Add(-window)
 	in := scan.Inputs{Start: start, Window: window}
 	// tvt.yaml first: a typo there fails the scan before it touches any
-	// backend, rather than silently dropping an external consumer.
+	// backend, rather than silently dropping an external consumer. SLO
+	// files are local, so they're read now too: one tvt can't read fails
+	// the scan rather than leaving its SLI unprotected.
+	var rbReader runbook.Reader
 	if o.Config != "" {
 		cfg, err := config.Load(o.Config)
 		if err != nil {
 			return err
 		}
 		in.External, in.Owners = cfg.ExternalConsumers, cfg.Ownership.Owners
+		rbReader.Fetch = cfg.Runbooks.Fetch
+		for _, m := range cfg.Runbooks.Mirrors {
+			rbReader.Mirrors = append(rbReader.Mirrors, runbook.Mirror{URLPrefix: m.URLPrefix, Dir: m.Path})
+		}
+		if len(cfg.SLOs.Paths) > 0 {
+			in.SLOsConfigured = true
+			if in.SLOs, err = (slo.Files{Paths: cfg.SLOs.Paths}).SLOs(ctx); err != nil {
+				return err
+			}
+			unreadable := 0
+			for _, s := range in.SLOs {
+				if s.Unreadable != "" {
+					unreadable++
+				}
+			}
+			fmt.Fprintf(out, "%-12s %s, %d with an SLI tvt can't read\n", "slos", plural(len(in.SLOs), "SLO", "SLOs"), unreadable)
+		}
+	}
+	if !in.SLOsConfigured {
+		fmt.Fprintf(out, "%-12s not configured (slos.paths in tvt.yaml)\n", "slos")
 	}
 
 	// Query logs: each one tvt can probe gets the marker now, before
@@ -244,6 +269,20 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	fmt.Fprintf(out, "%-12s %s, %s, %s, %s (org %d, as %s)\n", "grafana",
 		plural(len(in.Dashboards), "dashboard", "dashboards"), plural(queries, "panel query", "panel queries"),
 		plural(vars, "variable", "variables"), plural(len(grules), "Grafana-managed rule", "Grafana-managed rules"), in.OrgID, login)
+
+	// Runbooks: links in alert annotations, read from mirrors or fetched
+	// (GET, no credentials) only when tvt.yaml allows it.
+	in.Runbooks = rbReader.Read(ctx, runbook.Links(in.Rules))
+	if len(in.Runbooks) > 0 {
+		failed := 0
+		for _, rb := range in.Runbooks {
+			if rb.Err != "" {
+				failed++
+			}
+		}
+		fmt.Fprintf(out, "%-12s %s from alert annotations, %d unreadable\n", "runbooks",
+			plural(len(in.Runbooks), "link", "links"), failed)
+	}
 
 	// Usage evidence. Each source is recorded, configured or not, so the
 	// report can say what the scan couldn't see.

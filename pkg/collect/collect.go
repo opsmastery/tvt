@@ -10,6 +10,8 @@ package collect
 import (
 	"context"
 	"time"
+
+	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 )
 
 // CardinalitySource reports active series per metric and per label.
@@ -22,6 +24,12 @@ type CardinalitySource interface {
 // RuleSource lists alerting and recording rules (Prometheus, Mimir and Loki rules APIs).
 type RuleSource interface {
 	Rules(ctx context.Context) ([]Rule, error)
+}
+
+// SLOSource lists service level objectives (Sloth, Pyrra and OpenSLO
+// files; Grafana SLO).
+type SLOSource interface {
+	SLOs(ctx context.Context) ([]SLO, error)
 }
 
 // DashboardSource lists dashboards with their panel queries and, where the
@@ -95,10 +103,45 @@ type Rule struct {
 	// its datasource (expressions left out). When set, they are what the
 	// rule reads, and Expr and Language are evidence only.
 	Queries []PanelQuery
+	// Annotations are an alert's annotations (runbook_url, summary, …):
+	// a runbook or Grafana link there can declare more dependencies.
+	Annotations map[string]string
 }
 
 // EvaluatedByGrafana marks a rule Grafana evaluates itself.
 const EvaluatedByGrafana = "grafana"
+
+// SLO is one service level objective. Whatever its SLI reads is a hard
+// keep: the SLO and its burn-rate alerts are evaluated from it.
+type SLO struct {
+	Format string // "sloth", "pyrra", "openslo", "grafana"
+	Name   string // service/name where the format has a service
+	// Origin is where it was read: a file path, or an API.
+	Origin string
+	// Queries are the SLI's queries. Empty with Unreadable set when tvt
+	// can't tell what the SLI reads (a Sloth plugin SLI, an OpenSLO metric
+	// source other than Prometheus or Loki): an evidence gap.
+	Queries    []SLOQuery
+	Unreadable string
+}
+
+// SLOQuery is one query an SLI evaluates.
+type SLOQuery struct {
+	Expr     string
+	Language string // "promql" or "logql"
+}
+
+// Runbook is what one link in alert annotations declares: the query steps
+// in the page it points to, or the Grafana Explore or dashboard link
+// itself. Every step that runs a query is a declared dependency.
+type Runbook struct {
+	URL string
+	// Alerts names the rules that link to it, as "source/name".
+	Alerts []string
+	Steps  []parse.RunbookStep
+	// Err says why it couldn't be read; Steps is then empty.
+	Err string
+}
 
 // Dashboard is a Grafana dashboard.
 type Dashboard struct {

@@ -21,6 +21,14 @@ func TestExampleLoads(t *testing.T) {
 	if len(c.Ownership.Owners) == 0 || c.Ownership.Owners[0].Tier == nil {
 		t.Errorf("owners %+v", c.Ownership.Owners)
 	}
+	// Relative paths resolve against tvt.yaml's directory.
+	examples := filepath.Join("..", "..", "examples")
+	if len(c.SLOs.Paths) != 1 || c.SLOs.Paths[0] != filepath.Join(examples, "slos") {
+		t.Errorf("slos %+v", c.SLOs)
+	}
+	if c.Runbooks.Fetch || len(c.Runbooks.Mirrors) != 1 || c.Runbooks.Mirrors[0].Path != filepath.Join(examples, "..", "..", "runbooks") {
+		t.Errorf("runbooks %+v", c.Runbooks)
+	}
 }
 
 func TestEmptyIsValid(t *testing.T) {
@@ -38,6 +46,9 @@ func TestStrict(t *testing.T) {
 		"external_consumer: []\n":                                                         "external_consumer",
 		"external_consumers:\n  - name: a\n    metric: [x]\n":                             "metric",
 		"external_consumers:\n  - metrics: [x]\n":                                         "name is required",
+		"slos:\n  paths: [\"\"]\n":                                                        "empty path",
+		"runbooks:\n  mirrors:\n    - url_prefix: https://x/\n":                           "url_prefix and path",
+		"runbooks:\n  fetch: yes-please\n":                                                "bool",
 		"external_consumers:\n  - name: a\n":                                              "needs metrics or streams",
 		"external_consumers:\n  - {name: a, metrics: [x]}\n  - {name: a, metrics: [y]}\n": "appears twice",
 		"external_consumers:\n  - name: a\n    metrics: ['(']\n":                          "missing closing",
