@@ -61,6 +61,9 @@ const (
 	ConsumerAdhocQuery          ConsumerKind = "adhoc_query"
 	ConsumerAgentQuery          ConsumerKind = "agent_query"
 	ConsumerExternal            ConsumerKind = "external" // declared by the user in tvt.yaml
+	// ConsumerRunbook is an alert's runbook (or a Grafana link in its
+	// annotations) whose steps run queries: the responder depends on them.
+	ConsumerRunbook ConsumerKind = "runbook"
 )
 
 // HardKeep reports whether a dependency of this kind always protects a
@@ -68,7 +71,7 @@ const (
 // transitively feed an alert or SLO; that is resolved in the graph, not here.
 func (k ConsumerKind) HardKeep() bool {
 	switch k {
-	case ConsumerAlertRule, ConsumerSLO, ConsumerExternal:
+	case ConsumerAlertRule, ConsumerSLO, ConsumerExternal, ConsumerRunbook:
 		return true
 	}
 	return false
@@ -79,7 +82,7 @@ func (k ConsumerKind) HardKeep() bool {
 // never decays, observed evidence does (Sprint 3's scoring).
 func (k ConsumerKind) Evidence() EvidenceClass {
 	switch k {
-	case ConsumerAlertRule, ConsumerRecordingRule, ConsumerSLO, ConsumerExternal:
+	case ConsumerAlertRule, ConsumerRecordingRule, ConsumerSLO, ConsumerExternal, ConsumerRunbook:
 		return EvidenceDeclared
 	}
 	return EvidenceObserved

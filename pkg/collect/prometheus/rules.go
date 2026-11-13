@@ -19,6 +19,8 @@ type rulesData struct {
 			Name  string `json:"name"`
 			Query string `json:"query"`
 			Type  string `json:"type"` // "alerting" or "recording"
+			// Annotations: alerting rules only.
+			Annotations map[string]string `json:"annotations"`
 		} `json:"rules"`
 	} `json:"groups"`
 }
@@ -55,8 +57,18 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 				Expr:      r.Query,
 				Language:  "promql",
 				Interval:  time.Duration(g.Interval * float64(time.Second)),
+
+				Annotations: nonEmpty(r.Annotations),
 			})
 		}
 	}
 	return out, nil
+}
+
+// nonEmpty returns m, or nil when it has no entries.
+func nonEmpty(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }

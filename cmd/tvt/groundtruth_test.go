@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -30,8 +31,18 @@ type groundTruth struct {
 		Viewed *bool  `yaml:"viewed"`
 	} `yaml:"dashboards"`
 	Streams map[string]gtEntry `yaml:"streams"`
-	Labels  map[string]gtEntry `yaml:"labels"`
-	Mimir   struct {
+	// Declared dependencies outside the rulers (Sprint 2 item 7).
+	SLOs map[string]struct {
+		Format string   `yaml:"format"`
+		File   string   `yaml:"file"`
+		Reads  []string `yaml:"reads"`
+	} `yaml:"slos"`
+	Runbooks map[string]struct {
+		Alerts []string `yaml:"alerts"`
+		Reads  []string `yaml:"reads"`
+	} `yaml:"runbooks"`
+	Labels map[string]gtEntry `yaml:"labels"`
+	Mimir  struct {
 		Rules   map[string]gtRule  `yaml:"rules"`
 		Metrics map[string]gtEntry `yaml:"metrics"`
 	} `yaml:"mimir"`
@@ -61,7 +72,8 @@ func loadGroundTruth(t *testing.T) groundTruth {
 			gt.Mimir.Rules[name] = r
 		}
 	}
-	if len(gt.Metrics) == 0 || len(gt.Rules) == 0 || len(gt.Dashboards) == 0 || len(gt.Streams) == 0 || len(gt.Mimir.Rules) == 0 {
+	if len(gt.Metrics) == 0 || len(gt.Rules) == 0 || len(gt.Dashboards) == 0 || len(gt.Streams) == 0 || len(gt.Mimir.Rules) == 0 ||
+		len(gt.SLOs) == 0 || len(gt.Runbooks) == 0 {
 		t.Fatalf("ground-truth.yaml is missing a section the golden test asserts: %+v", gt)
 	}
 	return gt
@@ -592,6 +604,41 @@ func assertClasses(t *testing.T, g scanGraph, src string, gt groundTruth) {
 		}
 		if e.Class == "hard_keep" && best != "hard_keep" || e.Class == "keep_high" && best == "" {
 			t.Errorf("stream %s (%s): best selector class %q", key, e.Class, best)
+		}
+	}
+}
+
+// assertDeclared: each ground-truth SLO and runbook is a consumer of its
+// kind, and every metric it reads has a declared reference from it (and
+// is a hard keep, checked by assertClasses).
+func assertDeclared(t *testing.T, g scanGraph, src string, gt groundTruth) {
+	t.Helper()
+	check := func(id string, kind graph.ConsumerKind, reads []string) {
+		t.Helper()
+		c, ok := g.consumers[id]
+		if !ok || c.Kind != kind {
+			t.Errorf("consumer %s: %+v (found %v), want kind %s", id, c, ok, kind)
+			return
+		}
+		for _, m := range reads {
+			found := false
+			for _, r := range g.refsTo(src + ":metric:" + m) {
+				if r.ConsumerID == id && r.Evidence == graph.EvidenceDeclared {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s: no declared reference from %s", m, id)
+			}
+		}
+	}
+	for name, s := range gt.SLOs {
+		check("slo:"+s.Format+":"+filepath.Join(lab, s.File)+":"+name, graph.ConsumerSLO, s.Reads)
+	}
+	for link, rb := range gt.Runbooks {
+		check("runbook:"+link, graph.ConsumerRunbook, rb.Reads)
+		if c := g.consumers["runbook:"+link]; len(rb.Alerts) > 0 && !strings.Contains(c.Name, strings.Join(rb.Alerts, ", ")) {
+			t.Errorf("runbook consumer %q doesn't name its alerts %v", c.Name, rb.Alerts)
 		}
 	}
 }
