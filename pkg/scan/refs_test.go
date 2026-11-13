@@ -389,8 +389,9 @@ func TestTemplatedStreams(t *testing.T) {
 	}
 }
 
-// Datasources tvt doesn't read (Tempo, a SQL database) still give consumers,
-// but no references.
+// Datasources tvt doesn't read (Tempo, a SQL database) still give consumers
+// marked Unparsed; a query that names no metric exactly gives no references
+// (TraceQL's braces mustn't become "every metric").
 func TestOtherDatasources(t *testing.T) {
 	in := baseInputs()
 	in.Dashboards = []collect.Dashboard{{UID: "d", Title: "D", Panels: []collect.Panel{{ID: 1, Title: "traces",
@@ -399,8 +400,8 @@ func TestOtherDatasources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := consumers(out)["panel:1:d:1:0"]; !ok {
-		t.Error("tempo panel is not a consumer")
+	if c, ok := consumers(out)["panel:1:d:1:0"]; !ok || c.Unparsed != "datasource type tempo" {
+		t.Errorf("tempo panel consumer %+v, %v", c, ok)
 	}
 	for _, r := range out.References {
 		if r.ConsumerID == "panel:1:d:1:0" {

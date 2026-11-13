@@ -71,7 +71,11 @@ CREATE TABLE IF NOT EXISTS consumers (
     -- if unknown). datasources: the UIDs it queries, one per line.
     evaluated_by TEXT NOT NULL DEFAULT '',
     interval_ms  INTEGER,
-    datasources  TEXT NOT NULL DEFAULT ''
+    datasources  TEXT NOT NULL DEFAULT '',
+    -- Schema version 7: why tvt couldn't read what the consumer queries
+    -- (a datasource type it doesn't parse), '' when it could. Such a
+    -- consumer reads unknown signals: never "reads nothing".
+    unparsed     TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS consumers_scan ON consumers (last_scan);
 
