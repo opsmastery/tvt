@@ -844,3 +844,33 @@ ownership:
 		t.Error("a scan with a bad config wrote a database")
 	}
 }
+
+func TestCheckTokenTransport(t *testing.T) {
+	tokens := func(name string) string {
+		return map[string]string{"TVT_GRAFANA_TOKEN": "g", "TVT_PROM_TOKEN": "p"}[name]
+	}
+	tests := []struct {
+		name    string
+		o       scanOptions
+		getenv  func(string) string
+		wantErr string
+	}{
+		{"https with token", scanOptions{Grafana: "https://grafana.example.com"}, tokens, ""},
+		{"http loopback with token", scanOptions{Grafana: "http://localhost:3000", Prom: "http://127.0.0.1:9090"}, tokens, ""},
+		{"http remote without token", scanOptions{Loki: "http://loki.example.com"}, tokens, ""},
+		{"http remote with token", scanOptions{Grafana: "http://grafana.example.com"}, tokens, "--grafana: TVT_GRAFANA_TOKEN"},
+		{"http remote mimir uses the prom token", scanOptions{Mimir: "http://mimir.example.com"}, tokens, "--mimir: TVT_PROM_TOKEN"},
+		{"override", scanOptions{Grafana: "http://grafana.example.com", AllowInsecureToken: true}, tokens, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.o.checkTokenTransport(tc.getenv)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("unexpected error: %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}

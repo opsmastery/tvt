@@ -355,18 +355,15 @@ func Build(in Inputs) (Output, error) {
 	return out, nil
 }
 
-// queryLanguage maps a datasource plugin type to the query language tvt
-// reads. An empty type (a datasource tvt couldn't resolve) is read as
-// PromQL; a LogQL query fails to parse as PromQL and then only resolves
-// against collected metrics, so it can't invent signals.
+// queryLanguage is collect.QueryLanguage with an empty type (a
+// datasource tvt couldn't resolve) read as PromQL: a LogQL query fails to
+// parse as PromQL and then only resolves against collected metrics, so it
+// can't invent signals.
 func queryLanguage(dsType string) (string, bool) {
-	switch dsType {
-	case "prometheus", "":
+	if dsType == "" {
 		return "promql", true
-	case "loki":
-		return "logql", true
 	}
-	return "", false
+	return collect.QueryLanguage(dsType)
 }
 
 // idSet hands out unique IDs, suffixing repeats with #2, #3, … Every ID
