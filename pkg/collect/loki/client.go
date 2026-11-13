@@ -14,10 +14,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/version"
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 )
 
@@ -57,7 +56,7 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 60 * time.Second}
+	return httpx.DefaultClient()
 }
 
 // httpError is a non-200 response. Body is at most 4 KiB, trimmed.
@@ -82,23 +81,12 @@ func (e *httpError) Unwrap() error {
 // response body on HTTP 200. The caller closes it. Any other status is an
 // *httpError.
 func (c *Client) get(ctx context.Context, path string, q url.Values, accept string) (io.ReadCloser, error) {
-	u, err := url.Parse(c.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("loki: base URL: %w", err)
-	}
-	u = u.JoinPath(path)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := httpx.NewRequest(ctx, c.BaseURL, path, q, c.Token)
 	if err != nil {
 		return nil, fmt.Errorf("loki: %s: %w", path, err)
 	}
 	req.Header.Set("Accept", accept)
-	req.Header.Set("User-Agent", "tvt/"+version.Version)
 	req.Header.Set("X-Query-Tags", "Source=tvt")
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
 
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
@@ -107,8 +95,7 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, accept stri
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, &httpError{Path: path, Status: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+		return nil, &httpError{Path: path, Status: resp.StatusCode, Body: httpx.ErrorBody(resp.Body)}
 	}
-	return resp.Body, nil
+	return httpx.Limit(resp.Body, httpx.MaxResponseBytes), nil
 }
