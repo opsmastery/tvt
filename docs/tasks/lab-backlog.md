@@ -5,7 +5,7 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 ## Sprint 2 (now)
 
 - Done Nov 12: a Sloth SLO over a metric nothing else reads, and an alert whose runbook has a query step (item 7).
-- An `absent()` alert on a shop metric: hard keep, and never a broken rule (item 18).
+- Done Nov 12: an `absent()` alert on a shop metric: hard keep, and never a broken rule (item 18).
 - A Grafana panel on a Pyroscope (or other unparsed) data source: an assumed reader and a gap, never an unused dashboard (item 19).
 - Decide the 21 seeded drops the dormant name rules hold back (node `*_errs_total`, `shop_cache_*` latency, error, eviction and lag gauges, the latency histograms' `_sum`/`_count`): narrow the rules, or mark them "dormant: confirm" in ground truth. Needed before S4.
 
