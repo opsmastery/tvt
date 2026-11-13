@@ -1,0 +1,19 @@
+version: "prometheus/v1"
+service: "checkout"
+slos:
+  - name: "requests-availability"
+    objective: 99.9
+    sli:
+      events:
+        error_query: sum(rate(http_requests_total{job="checkout",code=~"5.."}[{{.window}}]))
+        total_query: sum(rate(http_requests_total{job="checkout"}[{{ .window }}]))
+  - name: "latency"
+    objective: 99
+    sli:
+      raw:
+        error_ratio_query: 1 - (sum(rate(http_duration_bucket{le="0.5"}[{{.window}}])) / sum(rate(http_duration_count[{{.window}}])))
+  - name: "plugin"
+    objective: 99
+    sli:
+      plugin:
+        id: "sloth-common/kubernetes/apiserver/availability"

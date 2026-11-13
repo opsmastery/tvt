@@ -14,6 +14,8 @@
 //	panel:<org>:<dashboard uid>:<panel id>:<query index>
 //	var:<org>:<dashboard uid>:<variable name>
 //	annot:<org>:<dashboard uid>:<annotation name>
+//	slo:<format>:<file>:<name>           SLO definition (declared, hard keep)
+//	runbook:<link>                       alert runbook or Grafana link (declared, hard keep)
 //
 // References (see resolver) come from every consumer's query: rules,
 // panel targets, query variables and annotations. PromQL selectors resolve
@@ -69,7 +71,23 @@ type Inputs struct {
 	// select is a hard keep. Owners map signals to owners and tiers.
 	External []config.ExternalConsumer
 	Owners   []config.Owner
+	// SLOs are the SLO definitions read from tvt.yaml's slos.paths;
+	// SLOsConfigured says paths were given (an empty list then means none
+	// exist, not that tvt didn't look). Every signal an SLI reads is a
+	// hard keep.
+	SLOs           []collect.SLO
+	SLOsConfigured bool
+	// Runbooks are what the links in alert annotations declare. A step
+	// that runs a query makes its signals hard keeps.
+	Runbooks []collect.Runbook
 }
+
+// Evidence sources Build adds itself: definitions tvt reads, not usage
+// logs, so they're left out of LogCoverage.
+const (
+	SourceSLOs     = "slo definitions"
+	SourceRunbooks = "runbooks"
+)
 
 // Output is one scan's graph rows.
 type Output struct {
@@ -183,6 +201,13 @@ func Build(in Inputs) (Output, error) {
 		}
 	}
 
+	// SLOs: each SLI query is read like a rule's.
+	sloGaps := sloConsumers(in.SLOs, ids, &out, &queries)
+
+	// Runbooks: code blocks and Explore links are queries; a dashboard
+	// link stands for every query on that dashboard.
+	rbGaps, rbBad := runbookConsumers(in.Runbooks, in.Dashboards, res.metrics, ids, &out, &queries)
+
 	// Views: the latest browser view per dashboard sets last_viewed, and
 	// every load is kept, aggregated, as evidence.
 	org := strconv.FormatInt(in.OrgID, 10)
@@ -293,10 +318,17 @@ func Build(in Inputs) (Output, error) {
 		return Output{}, err
 	}
 
-	// Coverage.
+	// Coverage. SLO definitions and runbooks are sources too, so what tvt
+	// couldn't read shows up as a gap; they don't count toward
+	// LogCoverage, which is about usage logs.
+	sources := slices.Clone(in.Sources)
+	sources = append(sources,
+		definitionSource(SourceSLOs, in.SLOsConfigured, len(in.SLOs), len(sloGaps), sloGaps),
+		definitionSource(SourceRunbooks, len(in.Runbooks) > 0, len(in.Runbooks), rbBad, rbGaps))
 	seen := map[string]bool{}
 	var sum float64
-	for _, s := range in.Sources {
+	var logs int
+	for _, s := range sources {
 		if s.Coverage < 0 || s.Coverage > 1 {
 			return Output{}, fmt.Errorf("scan: source %q coverage %v outside 0..1", s.Source, s.Coverage)
 		}
@@ -311,10 +343,14 @@ func Build(in Inputs) (Output, error) {
 			s.WindowStart = since
 		}
 		out.Sources = append(out.Sources, s)
+		if s.Source == SourceSLOs || s.Source == SourceRunbooks {
+			continue
+		}
 		sum += s.Coverage
+		logs++
 	}
-	if len(out.Sources) > 0 {
-		out.LogCoverage = sum / float64(len(out.Sources))
+	if logs > 0 {
+		out.LogCoverage = sum / float64(logs)
 	}
 	return out, nil
 }

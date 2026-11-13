@@ -18,6 +18,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
 
@@ -141,6 +142,8 @@ func labOptions(l labServers, db string) scanOptions {
 		GrafanaLogs:   stringList{filepath.Join(lab, "grafana/grafana.log")},
 		PromQueryLogs: stringList{l.promLog},
 		ProbeWait:     2 * time.Second,
+		// The lab's SLO definitions and runbooks (Sprint 2 item 7).
+		Config: filepath.Join(lab, "tvt-lab.yaml"),
 	}
 }
 
@@ -245,6 +248,7 @@ func TestScanLab(t *testing.T) {
 	// scan didn't collect (all the lab's names exist).
 	assertReferences(t, g, "prom", gt)
 	assertClasses(t, g, "prom", gt)
+	assertDeclared(t, g, "prom", gt)
 	for _, r := range g.refs {
 		if r.Assumed {
 			t.Errorf("lab reference %+v is assumed: %v", r, r.Reasons)
@@ -272,15 +276,22 @@ func TestScanLab(t *testing.T) {
 
 	// The Grafana and Prometheus logs are configured, the probe proved the
 	// query log, and each covers part of the window; Loki's query log is
-	// recorded as not configured.
+	// recorded as not configured. SLO definitions and runbooks are read in
+	// full: the Sloth SLO and the ShopPaymentQueueBacklog runbook.
 	srcs, err := st.Sources(ctx, info.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(srcs) != 3 || l.probes.Load() != 1 {
+	if len(srcs) != 5 || l.probes.Load() != 1 {
 		t.Fatalf("sources = %+v, probes %d", srcs, l.probes.Load())
 	}
 	for _, s := range srcs {
+		if s.Source == scan.SourceSLOs || s.Source == scan.SourceRunbooks {
+			if !s.Configured || s.Coverage != 1 || s.Gap != "" {
+				t.Errorf("source %+v", s)
+			}
+			continue
+		}
 		if s.Source == sourceLokiQueryLog {
 			if s.Configured || s.Coverage != 0 || s.Gap != "" {
 				t.Errorf("source %+v", s)
@@ -345,7 +356,7 @@ func TestScanLabMimir(t *testing.T) {
 		t.Fatalf("scan: %v\n%s", err, out.String())
 	}
 	t.Log("\n" + out.String())
-	for _, want := range []string{"mimir        1498 metrics", "3 rules", "loki         1 rule (", "scan 1 written"} {
+	for _, want := range []string{"mimir        1549 metrics", "3 rules", "loki         1 rule (", "scan 1 written"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -819,5 +830,35 @@ ownership:
 	}
 	if _, statErr := os.Stat(o.DB); !os.IsNotExist(statErr) {
 		t.Error("a scan with a bad config wrote a database")
+	}
+}
+
+func TestCheckTokenTransport(t *testing.T) {
+	tokens := func(name string) string {
+		return map[string]string{"TVT_GRAFANA_TOKEN": "g", "TVT_PROM_TOKEN": "p"}[name]
+	}
+	tests := []struct {
+		name    string
+		o       scanOptions
+		getenv  func(string) string
+		wantErr string
+	}{
+		{"https with token", scanOptions{Grafana: "https://grafana.example.com"}, tokens, ""},
+		{"http loopback with token", scanOptions{Grafana: "http://localhost:3000", Prom: "http://127.0.0.1:9090"}, tokens, ""},
+		{"http remote without token", scanOptions{Loki: "http://loki.example.com"}, tokens, ""},
+		{"http remote with token", scanOptions{Grafana: "http://grafana.example.com"}, tokens, "--grafana: TVT_GRAFANA_TOKEN"},
+		{"http remote mimir uses the prom token", scanOptions{Mimir: "http://mimir.example.com"}, tokens, "--mimir: TVT_PROM_TOKEN"},
+		{"override", scanOptions{Grafana: "http://grafana.example.com", AllowInsecureToken: true}, tokens, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.o.checkTokenTransport(tc.getenv)
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Fatalf("unexpected error: %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Fatalf("error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
 	}
 }

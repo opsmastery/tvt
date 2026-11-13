@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,6 +21,8 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/loki"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/mimir"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/prometheus"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect/runbook"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect/slo"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
@@ -69,6 +72,9 @@ type scanOptions struct {
 	LabelTop int
 	// Config is tvt.yaml: external consumers and ownership. Optional.
 	Config string
+	// AllowInsecureToken permits sending a token over plain http to a host
+	// that is not loopback.
+	AllowInsecureToken bool
 }
 
 // stringList is a repeatable string flag.
@@ -94,6 +100,7 @@ func cmdScan(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&o.GrafanaLogs, "grafana-log", "Grafana log file or glob with router logging on (repeatable; .gz is read)")
 	fs.IntVar(&o.LabelTop, "label-top", 50, "collect per-label cardinality for this many of the largest metrics")
 	fs.StringVar(&o.Config, "config", "", "tvt.yaml with external_consumers and ownership (optional)")
+	fs.BoolVar(&o.AllowInsecureToken, "allow-insecure-token", false, "send tokens over plain http to non-loopback hosts (not recommended)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -105,6 +112,10 @@ func cmdScan(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	if err := o.validate(); err != nil {
+		fmt.Fprintf(stderr, "tvt scan: %v\n", err)
+		return exitUsage
+	}
+	if err := o.checkTokenTransport(os.Getenv); err != nil {
 		fmt.Fprintf(stderr, "tvt scan: %v\n", err)
 		return exitUsage
 	}
@@ -131,13 +142,36 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	since := start.Add(-window)
 	in := scan.Inputs{Start: start, Window: window}
 	// tvt.yaml first: a typo there fails the scan before it touches any
-	// backend, rather than silently dropping an external consumer.
+	// backend, rather than silently dropping an external consumer. SLO
+	// files are local, so they're read now too: one tvt can't read fails
+	// the scan rather than leaving its SLI unprotected.
+	var rbReader runbook.Reader
 	if o.Config != "" {
 		cfg, err := config.Load(o.Config)
 		if err != nil {
 			return err
 		}
 		in.External, in.Owners = cfg.ExternalConsumers, cfg.Ownership.Owners
+		rbReader.Fetch = cfg.Runbooks.Fetch
+		for _, m := range cfg.Runbooks.Mirrors {
+			rbReader.Mirrors = append(rbReader.Mirrors, runbook.Mirror{URLPrefix: m.URLPrefix, Dir: m.Path})
+		}
+		if len(cfg.SLOs.Paths) > 0 {
+			in.SLOsConfigured = true
+			if in.SLOs, err = (slo.Files{Paths: cfg.SLOs.Paths}).SLOs(ctx); err != nil {
+				return err
+			}
+			unreadable := 0
+			for _, s := range in.SLOs {
+				if s.Unreadable != "" {
+					unreadable++
+				}
+			}
+			fmt.Fprintf(out, "%-12s %s, %d with an SLI tvt can't read\n", "slos", plural(len(in.SLOs), "SLO", "SLOs"), unreadable)
+		}
+	}
+	if !in.SLOsConfigured {
+		fmt.Fprintf(out, "%-12s not configured (slos.paths in tvt.yaml)\n", "slos")
 	}
 
 	// Query logs: each one tvt can probe gets the marker now, before
@@ -235,6 +269,20 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	fmt.Fprintf(out, "%-12s %s, %s, %s, %s (org %d, as %s)\n", "grafana",
 		plural(len(in.Dashboards), "dashboard", "dashboards"), plural(queries, "panel query", "panel queries"),
 		plural(vars, "variable", "variables"), plural(len(grules), "Grafana-managed rule", "Grafana-managed rules"), in.OrgID, login)
+
+	// Runbooks: links in alert annotations, read from mirrors or fetched
+	// (GET, no credentials) only when tvt.yaml allows it.
+	in.Runbooks = rbReader.Read(ctx, runbook.Links(in.Rules))
+	if len(in.Runbooks) > 0 {
+		failed := 0
+		for _, rb := range in.Runbooks {
+			if rb.Err != "" {
+				failed++
+			}
+		}
+		fmt.Fprintf(out, "%-12s %s from alert annotations, %d unreadable\n", "runbooks",
+			plural(len(in.Runbooks), "link", "links"), failed)
+	}
 
 	// Usage evidence. Each source is recorded, configured or not, so the
 	// report can say what the scan couldn't see.
@@ -455,6 +503,39 @@ func (o scanOptions) validate() error {
 		return errors.New("--probe-wait must not be negative")
 	}
 	return nil
+}
+
+// checkTokenTransport refuses to send a bearer token over plain http to a
+// host that is not loopback, where anyone on the path could read it.
+func (o scanOptions) checkTokenTransport(getenv func(string) string) error {
+	if o.AllowInsecureToken {
+		return nil
+	}
+	backends := []struct{ flag, url, tokenEnv string }{
+		{"grafana", o.Grafana, "TVT_GRAFANA_TOKEN"},
+		{"prom", o.Prom, "TVT_PROM_TOKEN"},
+		{"mimir", o.Mimir, "TVT_PROM_TOKEN"},
+		{"loki", o.Loki, "TVT_LOKI_TOKEN"},
+	}
+	for _, b := range backends {
+		if b.url == "" || getenv(b.tokenEnv) == "" {
+			continue
+		}
+		u, err := url.Parse(b.url)
+		if err != nil || u.Scheme != "http" || isLoopback(u.Hostname()) {
+			continue
+		}
+		return fmt.Errorf("--%s: %s is set but %q is plain http: the token would be sent unencrypted; use https or pass --allow-insecure-token", b.flag, b.tokenEnv, b.url)
+	}
+	return nil
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func checkURL(raw string) error {
