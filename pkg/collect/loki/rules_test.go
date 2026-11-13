@@ -64,6 +64,8 @@ func TestRulesFixture(t *testing.T) {
 		Expr:      `sum(count_over_time({app="shop", component="audit"} |= "result=denied" [5m])) > 20`,
 		Language:  "logql",
 		Interval:  time.Minute, // no interval in the YAML: the effective one
+
+		Annotations: map[string]string{"summary": "Spike in denied actions in the shop audit log"},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("rules:\n got %+v\nwant %+v", got, want)

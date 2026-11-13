@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 
 	"go.yaml.in/yaml/v3"
@@ -26,6 +27,10 @@ type Config struct {
 	// hard keep.
 	ExternalConsumers []ExternalConsumer `yaml:"external_consumers"`
 	Ownership         Ownership          `yaml:"ownership"`
+	// SLOs are read from files; every signal an SLI reads is a hard keep.
+	SLOs SLOs `yaml:"slos"`
+	// Runbooks says how to read the runbooks alerts link to.
+	Runbooks Runbooks `yaml:"runbooks"`
 
 	// Read by later sprints; accepted so one tvt.yaml serves every command.
 	Grafana    yaml.Node `yaml:"grafana"`
@@ -44,6 +49,29 @@ type ExternalConsumer struct {
 	Metrics []string `yaml:"metrics"`
 	// Streams are LogQL stream selectors, such as {component="audit"}.
 	Streams []string `yaml:"streams"`
+}
+
+// SLOs lists where SLO definitions live.
+type SLOs struct {
+	// Paths are files or directories (walked recursively) holding Sloth,
+	// Pyrra or OpenSLO YAML. A repository is a path to its checkout.
+	// Relative paths are relative to tvt.yaml.
+	Paths []string `yaml:"paths"`
+}
+
+// Runbooks says how tvt reads alert runbooks. A link is read from the
+// first mirror whose url_prefix it starts with, else fetched over HTTP GET
+// when Fetch is true; anything else is a recorded gap.
+type Runbooks struct {
+	Fetch   bool            `yaml:"fetch"`
+	Mirrors []RunbookMirror `yaml:"mirrors"`
+}
+
+// RunbookMirror maps links under URLPrefix to files under Path (a
+// checked-out runbook repo). Relative paths are relative to tvt.yaml.
+type RunbookMirror struct {
+	URLPrefix string `yaml:"url_prefix"`
+	Path      string `yaml:"path"`
 }
 
 // Ownership says who owns which signals.
@@ -74,6 +102,13 @@ func Load(path string) (*Config, error) {
 	c, err := Parse(b)
 	if err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
+	}
+	dir := filepath.Dir(path)
+	for i, p := range c.SLOs.Paths {
+		c.SLOs.Paths[i] = relTo(dir, p)
+	}
+	for i, m := range c.Runbooks.Mirrors {
+		c.Runbooks.Mirrors[i].Path = relTo(dir, m.Path)
 	}
 	return c, nil
 }
@@ -127,7 +162,24 @@ func (c *Config) validate() error {
 			return err
 		}
 	}
+	for i, p := range c.SLOs.Paths {
+		if p == "" {
+			return fmt.Errorf("slos.paths[%d]: empty path", i)
+		}
+	}
+	for i, m := range c.Runbooks.Mirrors {
+		if m.URLPrefix == "" || m.Path == "" {
+			return fmt.Errorf("runbooks.mirrors[%d]: url_prefix and path are required", i)
+		}
+	}
 	return nil
+}
+
+func relTo(dir, p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(dir, p)
 }
 
 func checkSelectors(who string, metrics, streams []string) error {

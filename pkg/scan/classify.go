@@ -14,7 +14,7 @@ import (
 // classify sets every signal's class, owner and tier (Sprint 2 item 6).
 //
 //   - hard_keep: a hard-keep consumer (alert rule, Grafana-managed alert,
-//     SLO, external consumer) references it, directly or through a
+//     SLO, runbook step, external consumer) references it, directly or through a
 //     recording rule (chains give the alert a reference with Via set).
 //   - keep_high: a dashboard viewed in the window references it.
 //   - dormant: no consumer references it, and its name or its owner's
