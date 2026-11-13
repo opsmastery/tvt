@@ -16,9 +16,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/version"
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 )
 
 // Client reads from one Grafana organization's HTTP API.
@@ -43,7 +42,7 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 60 * time.Second}
+	return httpx.DefaultClient()
 }
 
 // httpError is a non-200 response.
@@ -59,21 +58,9 @@ func (e *httpError) Error() string {
 
 // getJSON GETs path (relative to BaseURL) and decodes the body into v.
 func (c *Client) getJSON(ctx context.Context, path string, q url.Values, v any) error {
-	u, err := url.Parse(c.BaseURL)
-	if err != nil {
-		return fmt.Errorf("grafana: base URL: %w", err)
-	}
-	u = u.JoinPath(path)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := httpx.NewRequest(ctx, c.BaseURL, path, q, c.Token)
 	if err != nil {
 		return fmt.Errorf("grafana: %s: %w", path, err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "tvt/"+version.Version)
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 
 	resp, err := c.httpClient().Do(req)
@@ -82,7 +69,7 @@ func (c *Client) getJSON(ctx context.Context, path string, q url.Values, v any) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, httpx.MaxErrorBytes))
 		var e struct {
 			Message string `json:"message"`
 		}
@@ -92,7 +79,7 @@ func (c *Client) getJSON(ctx context.Context, path string, q url.Values, v any) 
 		}
 		return &httpError{Path: path, Status: resp.StatusCode, Msg: msg}
 	}
-	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+	if err := json.NewDecoder(httpx.Limit(resp.Body, httpx.MaxResponseBytes)).Decode(v); err != nil {
 		return fmt.Errorf("grafana: %s: decode: %w", path, err)
 	}
 	return nil
