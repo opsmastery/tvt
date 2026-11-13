@@ -382,9 +382,11 @@ var labelListWords = map[string]bool{
 
 // fallbackRefs is the assumed result for a query that didn't parse: every
 // name outside strings, braces, brackets and label lists that isn't a
-// keyword or a function call could be a metric.
+// keyword, a function call or a MetricsQL WITH binding could be a metric
+// (see metricsql.go).
 func fallbackRefs(text string, vars []grafanaVar, perr error) []Ref {
 	reason := "query did not parse: " + firstLine(perr.Error())
+	with := parseWith(text)
 	seen := map[string]bool{}
 	var refs []Ref
 	add := func(name string) {
@@ -433,6 +435,12 @@ func fallbackRefs(text string, vars []grafanaVar, perr error) []Ref {
 			i = stringEnd(text, i)
 		case c == '{':
 			next := skipOrStep(text, i, '}')
+			if with.filterAt[i] {
+				// A WITH label filter, spliced into selectors that name
+				// their metric (or used bare, handled where it's used).
+				i = next
+				continue
+			}
 			if next > i+1 && !followsName(text, i) {
 				// A selector with no name before it names its metric, if
 				// at all, inside the braces.
@@ -457,11 +465,7 @@ func fallbackRefs(text string, vars []grafanaVar, perr error) []Ref {
 		case c == '[':
 			i = skipOrStep(text, i, ']')
 		case c == '#':
-			if nl := strings.IndexByte(text[i:], '\n'); nl >= 0 {
-				i += nl + 1
-			} else {
-				i = len(text)
-			}
+			i = lineEnd(text, i)
 		case c >= '0' && c <= '9' || c == '.':
 			// numbers and durations (5m, 1e3, 0x1f)
 			for i < len(text) && (isIdentByte(text[i]) || text[i] == '.') {
@@ -481,6 +485,13 @@ func fallbackRefs(text string, vars []grafanaVar, perr error) []Ref {
 			case labelListWords[word] && next < len(text) && text[next] == '(':
 				i = skipTo(text, next, ')')
 			case neverMetric[strings.ToLower(word)]:
+			case metricsqlOperators[strings.ToLower(word)] && operandBefore(text, start):
+			case with.defAt[start]:
+			case with.filters[word]:
+				// A WITH filter used as a whole selector: every metric
+				// carrying its labels.
+				addWildcard("WITH filter " + word + " is used as a selector, so any metric")
+			case with.names[word]:
 			case next < len(text) && text[next] == '(' && !strings.Contains(word, placeholderPrefix):
 				// function or aggregator call
 			default:
