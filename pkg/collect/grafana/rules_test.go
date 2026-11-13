@@ -133,3 +133,28 @@ func status(code int) http.Handler {
 		fmt.Fprint(w, `{"message":"nope"}`)
 	})
 }
+
+// Sprint 2 item 19: a Grafana-managed rule query on a datasource tvt
+// doesn't parse is kept, Pyroscope's model read as its own query syntax
+// and an empty one with no text, so scan records an assumed reader.
+func TestRulesUnparsedDatasources(t *testing.T) {
+	srv := testutil.NewServer(t, testutil.Routes{
+		"/api/ruler/grafana/api/v1/rules": body(`{"F": [{"name": "g", "rules": [{"grafana_alert": {"uid": "u", "title": "T", "data": [
+		  {"refId": "A", "datasourceUid": "pyro", "model": {"profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds", "labelSelector": "{service_name=\"shop\"}"}},
+		  {"refId": "B", "datasourceUid": "es", "model": {"metrics": [{"type": "count"}]}},
+		  {"refId": "C", "datasourceUid": "__expr__", "model": {"type": "threshold"}}]}}]}]}`),
+		"/api/datasources": body(`[{"uid": "pyro", "name": "Pyroscope", "type": "grafana-pyroscope-datasource"},
+		  {"uid": "es", "name": "ES", "type": "elasticsearch"}]`),
+	})
+	got, err := New(srv.URL, "").Rules(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []collect.PanelQuery{
+		{DatasourceUID: "pyro", DatasourceType: "grafana-pyroscope-datasource", Expr: `process_cpu:cpu:nanoseconds:cpu:nanoseconds{service_name="shop"}`},
+		{DatasourceUID: "es", DatasourceType: "elasticsearch"},
+	}
+	if len(got) != 1 || !reflect.DeepEqual(got[0].Queries, want) {
+		t.Fatalf("rules %+v, want one rule with queries %+v", got, want)
+	}
+}

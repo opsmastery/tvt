@@ -151,6 +151,12 @@ type Consumer struct {
 	EvaluatedBy string
 	Interval    time.Duration
 	Datasources []string
+	// Unparsed says why tvt couldn't read the consumer's query (a panel
+	// on a datasource type it doesn't parse, such as Pyroscope); empty
+	// when it could. Its references are assumed, and a consumer with
+	// Unparsed set reads unknown signals: it never makes its dashboard
+	// look unused.
+	Unparsed string
 }
 
 // Reference links a signal to a consumer that depends on it.
