@@ -1,54 +1,104 @@
 package parse
 
-// UsesAbsence reports whether a PromQL or LogQL query calls absent() or
-// absent_over_time() (Sprint 2 item 18). Such a query returns no series
-// by design while its metric is healthy, so "the rule returned nothing for
-// 30 days" (S6) must not call it broken. It still reads its metric and the
-// labels it matches like any query: those are hard keeps, and dropping a
-// matched label would fire the alert.
+import (
+	"strings"
+	"unicode/utf8"
+
+	"github.com/prometheus/prometheus/promql/parser"
+)
+
+// UsesAbsence reports whether a rule query's result comes from absent()
+// or absent_over_time() (Sprint 2 item 18): absent(m), absent(m) == 1,
+// x > 10 or absent(m), sum(absent_over_time(m[10m])). Such a query
+// returns no series by design while its metric is healthy, so Sprint 6's
+// "rule with no series for 30 days" finding must not call it broken.
+// Calling absent() somewhere else doesn't count: in x > 10 and absent(m)
+// the result is x's, and an x that never exists is still a broken rule.
 //
-// It scans tokens rather than parsing, so it also answers for queries the
-// parsers reject (MetricsQL, templates); names inside strings and comments
-// don't count.
+// The query reads its metric and the labels it matches like any other:
+// those are hard keeps either way.
+//
+// A query the PromQL parser accepts (Grafana variables substituted) is
+// read from its syntax tree. Anything else (MetricsQL, LogQL, templates)
+// counts only when its outermost call is absent() or absent_over_time(),
+// in any case, as MetricsQL function names are case-insensitive.
 func UsesAbsence(query string) bool {
-	for i := 0; i < len(query); {
-		c := query[i]
+	if strings.TrimSpace(query) == "" {
+		return false
+	}
+	if utf8.ValidString(query) {
+		text, _ := substituteGrafanaVars(query)
+		p := parser.NewParser(parser.Options{EnableExperimentalFunctions: true})
+		if expr, err := p.ParseExpr(text); err == nil {
+			return absenceResult(expr)
+		}
+	}
+	return outerAbsence(query)
+}
+
+func isAbsence(name string) bool {
+	return strings.EqualFold(name, "absent") || strings.EqualFold(name, "absent_over_time")
+}
+
+// absenceResult: the series e returns come from absent().
+func absenceResult(e parser.Node) bool {
+	switch n := e.(type) {
+	case *parser.Call:
+		if isAbsence(n.Func.Name) {
+			return true
+		}
+		// Functions that pass their vector argument's series through
+		// (label_replace, sort, clamp, ...).
+		for _, a := range n.Args {
+			if a.Type() == parser.ValueTypeVector {
+				return absenceResult(a)
+			}
+		}
+		return false
+	case *parser.ParenExpr:
+		return absenceResult(n.Expr)
+	case *parser.StepInvariantExpr:
+		return absenceResult(n.Expr)
+	case *parser.AggregateExpr:
+		return absenceResult(n.Expr)
+	case *parser.BinaryExpr:
 		switch {
-		case c == '"' || c == '\'' || c == '`':
-			i = stringEnd(query, i)
-		case c == '#':
-			for i < len(query) && query[i] != '\n' {
-				i++
-			}
-		case isIdentStart(c):
-			j := i
-			for j < len(query) && isIdentPart(query[j]) {
-				j++
-			}
-			word := query[i:j]
-			k := j
-			for k < len(query) && (query[k] == ' ' || query[k] == '\t' || query[k] == '\n' || query[k] == '\r') {
-				k++
-			}
-			if (word == "absent" || word == "absent_over_time") && k < len(query) && query[k] == '(' &&
-				(i == 0 || !isNamePrefix(query[i-1])) {
-				return true
-			}
-			i = j
+		case n.Op == parser.LOR:
+			// Either side's series: absent() makes the quiet side by design.
+			return absenceResult(n.LHS) || absenceResult(n.RHS)
+		case n.Op == parser.LAND || n.Op == parser.LUNLESS:
+			return absenceResult(n.LHS)
+		case n.LHS.Type() != parser.ValueTypeVector:
+			return absenceResult(n.RHS)
+		case n.RHS.Type() != parser.ValueTypeVector:
+			return absenceResult(n.LHS)
 		default:
-			i++
+			// vector op vector: a series needs a match on both sides.
+			return absenceResult(n.LHS) && absenceResult(n.RHS)
 		}
 	}
 	return false
 }
 
-func isIdentStart(c byte) bool {
-	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+// outerAbsence: the first token outside comments and opening parentheses
+// is absent or absent_over_time, called.
+func outerAbsence(q string) bool {
+	i := 0
+	for {
+		i = skipSpace(q, i)
+		if i < len(q) && q[i] == '(' {
+			i++
+			continue
+		}
+		break
+	}
+	start := i
+	for i < len(q) && isIdentByte(q[i]) {
+		i++
+	}
+	if !isAbsence(q[start:i]) {
+		return false
+	}
+	i = skipSpace(q, i)
+	return i < len(q) && q[i] == '('
 }
-
-func isIdentPart(c byte) bool {
-	return isIdentStart(c) || (c >= '0' && c <= '9') || c == ':'
-}
-
-// isNamePrefix: a byte that would make the word part of a longer name.
-func isNamePrefix(c byte) bool { return isIdentPart(c) || c == '.' }
