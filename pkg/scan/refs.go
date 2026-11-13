@@ -42,6 +42,27 @@ type query struct {
 	unparsed string
 }
 
+// namesMetric: the reference names its metric, by name or with a
+// __name__ matcher that selects some names and not every one
+// ({__name__="x"}, {__name__=~"node_.+"}).
+func namesMetric(r parse.Ref) bool {
+	if r.Metric != "" {
+		return true
+	}
+	for _, m := range r.Matchers {
+		if m.Label != "__name__" {
+			continue
+		}
+		switch {
+		case m.Op == parse.MatchEqual && m.Value != "":
+			return true
+		case m.Op == parse.MatchRegexp && m.Value != ".*" && m.Value != ".+" && m.Value != "":
+			return true
+		}
+	}
+	return false
+}
+
 // varValues are the values a dashboard variable can take. any: it can take
 // values tvt doesn't know (a textbox, label_values() from a backend, an
 // "All" option with a custom value), so a matcher on it matches every value.
@@ -191,7 +212,7 @@ func (r *resolver) resolve(q query) {
 			// Only names the query spells out: a wildcard from another
 			// language's syntax (TraceQL's { .service.name = "x" }) would
 			// otherwise protect every metric.
-			if pr.Metric == "" {
+			if !namesMetric(pr) {
 				continue
 			}
 			pr.Assumed, pr.AllLabels = true, true

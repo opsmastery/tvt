@@ -172,7 +172,7 @@ func (d *dsQueries) query(c *graph.Consumer, dsType, expr, name string) query {
 		d.byType = map[string][]string{}
 	}
 	d.byType[dsType] = append(d.byType[dsType], name)
-	c.Unparsed = "datasource type " + dsType
+	c.Unparsed = addUnparsed(c.Unparsed, dsType)
 	return query{expr: expr, lang: "promql", collectedOnly: true,
 		unparsed: "on a " + dsType + " datasource, which tvt doesn't parse: read as PromQL against collected metrics"}
 }
@@ -190,8 +190,28 @@ func (d *dsQueries) gaps() []string {
 		if len(shown) > 3 {
 			shown = append(shown[:3:3], fmt.Sprintf("%d more", len(names)-3))
 		}
-		out = append(out, fmt.Sprintf("%s: %d %s tvt doesn't parse (%s)", t, len(d.byType[t]),
-			map[bool]string{true: "query", false: "queries"}[len(d.byType[t]) == 1], strings.Join(shown, ", ")))
+		noun := "queries"
+		if len(d.byType[t]) == 1 {
+			noun = "query"
+		}
+		out = append(out, fmt.Sprintf("%s: %d %s tvt doesn't parse (%s)", t, len(d.byType[t]), noun, strings.Join(shown, ", ")))
 	}
 	return out
+}
+
+// addUnparsed adds a datasource type to a consumer's Unparsed reason (a
+// Grafana-managed rule can query several), keeping the types sorted.
+func addUnparsed(reason, dsType string) string {
+	types := strings.Split(strings.TrimPrefix(strings.TrimPrefix(reason, "datasource types "), "datasource type "), ", ")
+	if reason == "" {
+		types = nil
+	}
+	if !slices.Contains(types, dsType) {
+		types = append(types, dsType)
+		slices.Sort(types)
+	}
+	if len(types) == 1 {
+		return "datasource type " + types[0]
+	}
+	return "datasource types " + strings.Join(types, ", ")
 }
