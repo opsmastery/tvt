@@ -520,7 +520,7 @@ func dashboardVars(d collect.Dashboard, metrics []string) map[string]varValues {
 		case "custom", "constant":
 			vv = varValues{values: v.Values, any: len(v.Values) == 0}
 		case "query":
-			if v.DatasourceType == "prometheus" {
+			if lang, _ := collect.QueryLanguage(v.DatasourceType); lang == "promql" {
 				if names, ok := metricNameValues(v.Query, metrics); ok {
 					vv = varValues{values: names, any: len(names) == 0}
 				}
