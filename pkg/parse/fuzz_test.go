@@ -75,6 +75,10 @@ func FuzzLogQL(f *testing.F) {
 // something (assumed, every label), never nothing; placeholder text never
 // leaks; and a metric name comes from the query text.
 func FuzzPromQL(f *testing.F) {
+	// MetricsQL (Sprint 2 item 17): WITH templates and operators.
+	f.Add(`WITH (cf = {job="api"}, r(m) = rate(m{cf}[5m])) r(x) default 0 keep_metric_names`)
+	f.Add(`with (a = {b="c"}, ) a`)
+	f.Add(`WITH (f(x = {`)
 	for _, s := range []string{
 		`sum by (job) (rate(http_requests_total{job="shop"}[5m]))`,
 		`a * on (job) group_left (team) b`,

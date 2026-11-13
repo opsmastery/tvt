@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -239,4 +240,53 @@ func TestRedactLogQL(t *testing.T) {
 			t.Errorf("redacting %q changed its refs:\n got %+v (%v)\nwant %+v (%v)", q, got, gerr, want, werr)
 		}
 	}
+}
+
+// TestMetricsQLCorpus (Sprint 2 item 17): MetricsQL extends PromQL, so the
+// PromQL parser rejects some VictoriaMetrics queries. Each entry states
+// whether the PromQL parser accepts it and the metric names it reads. A
+// rejected query must come back as assumed, every-label references to
+// exactly those names: none lost, and none invented (no keyword, WITH
+// binding or match-every-metric wildcard).
+func TestMetricsQLCorpus(t *testing.T) {
+	b, err := os.ReadFile("testdata/metricsql-corpus/queries.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus []struct {
+		Source string   `json:"source"`
+		Expr   string   `json:"expr"`
+		PromQL bool     `json:"promql"`
+		Names  []string `json:"names"`
+	}
+	if err := json.Unmarshal(b, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	parsed := 0
+	for _, q := range corpus {
+		refs, err := PromQL(q.Expr)
+		if (err == nil) != q.PromQL {
+			t.Errorf("%s: PromQL parse error %v, want parses=%v", q.Source, err, q.PromQL)
+		}
+		if err == nil {
+			parsed++
+		}
+		var got []string
+		for _, r := range refs {
+			if r.Metric == "" {
+				t.Errorf("%s: a reference with no metric name (wildcard or regex): %+v", q.Source, r)
+				continue
+			}
+			if err != nil && (!r.Assumed || !r.AllLabels) {
+				t.Errorf("%s: a ref from a query that didn't parse must be assumed and read every label: %+v", q.Source, r)
+			}
+			got = append(got, r.Metric)
+		}
+		got = sortedSet(got)
+		want := sortedSet(q.Names)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: references %v, want exactly %v (err %v)", q.Source, got, want, err)
+		}
+	}
+	t.Logf("MetricsQL corpus: PromQL parses %d/%d; the rest are assumed references", parsed, len(corpus))
 }
