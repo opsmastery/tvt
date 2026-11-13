@@ -438,6 +438,32 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 		}
 	}
 
+	// hard_keep labels: a hard-keep consumer reads the label on its metric
+	// (or every label), so no drop_label can be recommended for it.
+	for key, e := range gt.Labels {
+		if e.Class != "hard_keep" {
+			continue
+		}
+		metric, label, _ := strings.Cut(key, "/")
+		var readers []string
+		for _, r := range g.refsTo(src + ":metric:" + metric) {
+			if !g.consumers[r.ConsumerID].Kind.HardKeep() {
+				continue
+			}
+			for _, l := range r.Labels {
+				if l.Name == label {
+					readers = append(readers, r.ConsumerID)
+				}
+			}
+			if r.AllLabels {
+				readers = append(readers, r.ConsumerID)
+			}
+		}
+		if len(readers) == 0 {
+			t.Errorf("hard_keep label %s: no hard-keep consumer reads it", key)
+		}
+	}
+
 	// Streams: keep_high is read by a viewed dashboard; route_cold by
 	// nothing.
 	for key := range groundTruthConflicts {

@@ -18,6 +18,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
@@ -167,7 +168,7 @@ func TestScanLab(t *testing.T) {
 		t.Fatalf("scan: %v\n%s", err, out.String())
 	}
 	t.Log("\n" + out.String())
-	for _, want := range []string{"prom ", "5 rules", "loki         1 rule (", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "19 dashboard loads (19 in a browser)", ", 19 dashboard loads,", " references, "} {
+	for _, want := range []string{"prom ", "6 rules", "loki         1 rule (", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "19 dashboard loads (19 in a browser)", ", 19 dashboard loads,", " references, "} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -249,6 +250,17 @@ func TestScanLab(t *testing.T) {
 	assertReferences(t, g, "prom", gt)
 	assertClasses(t, g, "prom", gt)
 	assertDeclared(t, g, "prom", gt)
+	// Sprint 2 item 18: the lab's one absence alert is the only consumer S6
+	// must skip when it looks for rules that return nothing.
+	var absence []string
+	for _, c := range g.consumers {
+		if parse.UsesAbsence(c.Expr) {
+			absence = append(absence, c.Name)
+		}
+	}
+	if len(absence) != 1 || absence[0] != "ShopInventorySyncMissing" {
+		t.Errorf("consumers using absent(): %v, want [ShopInventorySyncMissing]", absence)
+	}
 	for _, r := range g.refs {
 		if r.Assumed {
 			t.Errorf("lab reference %+v is assumed: %v", r, r.Reasons)
@@ -356,7 +368,7 @@ func TestScanLabMimir(t *testing.T) {
 		t.Fatalf("scan: %v\n%s", err, out.String())
 	}
 	t.Log("\n" + out.String())
-	for _, want := range []string{"mimir        1549 metrics", "3 rules", "loki         1 rule (", "scan 1 written"} {
+	for _, want := range []string{"mimir        1550 metrics", "3 rules", "loki         1 rule (", "scan 1 written"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q", want)
 		}
