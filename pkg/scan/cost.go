@@ -2,6 +2,7 @@ package scan
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -172,6 +173,9 @@ func resolveStorage(card cost.PriceCard, m *collect.Storage, bytesPerDay func(bp
 		st.Retention, st.RetentionFrom = time.Duration(h.RetentionDays*24*float64(time.Hour)), FromCard
 	case m != nil && m.RetentionTime > 0:
 		st.Retention, st.RetentionFrom = m.RetentionTime, FromRetentionTime
+	case m != nil && m.RetentionBytes > 0:
+		// Size-only retention: no time limit, so the cap below decides.
+		st.Retention, st.RetentionFrom = time.Duration(math.MaxInt64), FromRetentionSize
 	default:
 		return st, fmt.Errorf("price card %q is self_hosted: set self_hosted.retention_days (the backend doesn't report its retention)", card.Name)
 	}
@@ -182,10 +186,13 @@ func resolveStorage(card cost.PriceCard, m *collect.Storage, bytesPerDay func(bp
 		}
 		if perDay := bytesPerDay(st.BytesPerSample * overhead); perDay > 0 {
 			days := float64(m.RetentionBytes-m.HeadBytes) / perDay
-			if d := time.Duration(days * 24 * float64(time.Hour)); d > 0 && d < st.Retention {
-				st.Retention, st.RetentionFrom = d, FromRetentionSize
+			if hours := days * 24; hours > 0 && hours < st.Retention.Hours() {
+				st.Retention, st.RetentionFrom = time.Duration(hours*float64(time.Hour)), FromRetentionSize
 			}
 		}
+	}
+	if st.Retention == time.Duration(math.MaxInt64) {
+		return st, fmt.Errorf("price card %q is self_hosted: the server's size-only retention can't be modeled yet (no samples priced); set self_hosted.retention_days", card.Name)
 	}
 	return st, nil
 }

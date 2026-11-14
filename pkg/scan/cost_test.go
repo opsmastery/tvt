@@ -140,6 +140,15 @@ func TestResolveStorage(t *testing.T) {
 	if st.Retention != 9*24*time.Hour || st.RetentionFrom != FromRetentionSize {
 		t.Errorf("size cap: %v %s", st.Retention, st.RetentionFrom)
 	}
+	// Size-only retention (no time flag): the cap decides.
+	sizeOnly := &collect.Storage{BytesPerSample: 1, RetentionBytes: 10e9, HeadBytes: 1e9}
+	st, err = resolveStorage(card, sizeOnly, func(bps float64) float64 { return bps / 1.2 * 1e9 })
+	if err != nil || st.Retention != 9*24*time.Hour || st.RetentionFrom != FromRetentionSize {
+		t.Errorf("size only: %v %s %v", st.Retention, st.RetentionFrom, err)
+	}
+	if _, err := resolveStorage(card, sizeOnly, none); err == nil {
+		t.Error("size only with nothing to price: no error")
+	}
 	// A cap that doesn't fill first leaves the time limit.
 	m.RetentionBytes = 1e15
 	st, _ = resolveStorage(card, m, func(bps float64) float64 { return bps / 1.2 * 1e9 })
