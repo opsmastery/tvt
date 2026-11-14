@@ -35,7 +35,9 @@ CREATE TABLE IF NOT EXISTS scans (
     bytes_per_sample_from TEXT NOT NULL DEFAULT '',
     retention_ms          INTEGER NOT NULL DEFAULT 0,
     retention_from        TEXT NOT NULL DEFAULT '',
-    head_bytes_per_series REAL NOT NULL DEFAULT 0
+    head_bytes_per_series REAL NOT NULL DEFAULT 0,
+    -- 1 when Loki's volume API hit its series limit: stream bytes are low.
+    volume_truncated      INTEGER NOT NULL DEFAULT 0
 );
 
 -- Coverage of each usage-evidence source for a scan, configured or not.
@@ -138,6 +140,17 @@ CREATE TABLE IF NOT EXISTS costs (
     -- Self-hosted: bytes on disk over retention, replicas included.
     disk_bytes    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (signal_id, scan_id)
+);
+
+-- Every Loki stream's ingest in a scan (the volume API), by its full label
+-- set as a canonical selector. Stream signals' costs.bytes_per_day sum the
+-- streams their selector matches; these rows let any selector or label drop
+-- be priced without rescanning.
+CREATE TABLE IF NOT EXISTS stream_volumes (
+    scan_id       INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    selector      TEXT NOT NULL,
+    bytes_per_day INTEGER NOT NULL,
+    PRIMARY KEY (scan_id, selector)
 );
 
 -- Dashboard loads in a scan's window, per login and kind. browser = 1 is a
