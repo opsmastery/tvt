@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
@@ -110,6 +112,7 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 		"/api/v1/targets":          "prometheus/targets.json",
 		"/api/v1/targets/metadata": "prometheus/targets_metadata.json",
 		"/api/v1/status/flags":     "prometheus/flags.json",
+		"/metrics":                 "prometheus/metrics.txt",
 	}, promOverride)
 	graf := fixtureServer(t, map[string]string{
 		"/api/search":                       "grafana/search.json",
@@ -160,6 +163,61 @@ func setNow(t *testing.T) {
 	old := scanNow
 	scanNow = func() time.Time { return scanTime }
 	t.Cleanup(func() { scanNow = old })
+}
+
+// The self-hosted card prices the same lab by disk: every metric gets bytes
+// over the lab's measured 45d retention at its measured bytes per sample.
+func TestScanLabSelfHosted(t *testing.T) {
+	setNow(t)
+	l := newLab(t, nil)
+	db := filepath.Join(t.TempDir(), "tvt.db")
+	o := labOptions(l, db)
+	o.Config = filepath.Join(lab, "tvt-lab-selfhosted.yaml")
+	var out bytes.Buffer
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	t.Log("\n" + out.String())
+	for _, want := range []string{"pricecard    lab-self-hosted (USD, self-hosted)", "disk model   0.62 bytes/sample (measured", "1080h0m0s retention (measured"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q", want)
+		}
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	info, err := st.LatestScan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.PriceKind != cost.KindSelfHosted || info.PricePreset || info.SelfHosted == nil ||
+		info.SelfHosted.Retention != 45*24*time.Hour || info.SelfHosted.HeadBytesPerSeries <= 0 {
+		t.Fatalf("scan = %+v %+v", info, info.SelfHosted)
+	}
+	costs, err := st.Costs(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metrics int
+	var disk, total float64
+	for _, c := range costs {
+		if !strings.HasPrefix(c.SignalID, "prom:metric:") || c.ActiveSeries == 0 {
+			continue
+		}
+		metrics++
+		disk += float64(c.DiskBytes)
+		total += c.MonthlyCost
+		if c.DiskBytes <= 0 || math.Abs(c.MonthlyCost-float64(c.DiskBytes)/1e9*0.08) > 1e-6 {
+			t.Errorf("%s: disk %d monthly %v", c.SignalID, c.DiskBytes, c.MonthlyCost)
+		}
+	}
+	if metrics == 0 {
+		t.Fatal("no metric costs")
+	}
+	t.Logf("%d metrics hold %.1f GB (2 replicas), %.2f USD/month", metrics, disk/1e9, total)
 }
 
 func TestScanLab(t *testing.T) {
