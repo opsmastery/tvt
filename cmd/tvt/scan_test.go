@@ -22,6 +22,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
+	"github.com/Opsmastery-Summit/tvt/pkg/score"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
 
@@ -355,6 +356,35 @@ func TestScanLabAgents(t *testing.T) {
 	if !finance {
 		t.Error("the finance agent's read of shop_revenue_dollars_total isn't a read")
 	}
+
+	// The sweep keeps nothing on its own: a candidate only the sweep
+	// touched weighs as a sweep, below a stale dashboard, and ranks by
+	// its cost.
+	read, sweptBy := map[string]bool{}, map[string]bool{}
+	for _, r := range g.refs {
+		if r.Sweep {
+			sweptBy[r.SignalID] = true
+		} else {
+			read[r.SignalID] = true
+		}
+	}
+	scores := assertScores(t, db)
+	var sweptOnly int
+	for id, r := range scores {
+		if read[id] || !sweptBy[id] {
+			continue
+		}
+		sweptOnly++
+		if r.Strongest != "sweep" || r.UsageWeight > score.DefaultWeights.Sweep || r.UsageWeight >= score.DefaultWeights.StaleDashboard {
+			t.Errorf("%s, touched only by the sweep, scores %+v", id, r)
+		}
+	}
+	if sweptOnly == 0 {
+		t.Error("no candidate is touched only by the sweep")
+	}
+	if r, ok := scores["prom:metric:shop_revenue_dollars_total"]; ok && r.Strongest != "adhoc_query" {
+		t.Errorf("the finance read weighs as %+v", r)
+	}
 	if !rule {
 		t.Error("the Grafana-managed rule's evaluations don't join to Shop order export lag")
 	}
@@ -383,6 +413,14 @@ func TestScanLab(t *testing.T) {
 	assertCosts(t, db, "prom", "grafana-cloud-pro", false)
 	assertStreamCosts(t, db)
 	assertLoggedClients(t, db)
+	for id, r := range assertScores(t, db) {
+		if r.Held != "" {
+			t.Errorf("%s held (%s) in a 30-day window", id, r.Held)
+		}
+	}
+	if !strings.Contains(out.String(), "candidates ranked; top ") {
+		t.Errorf("output has no scores line")
+	}
 
 	ctx := context.Background()
 	st, err := store.Open(ctx, db)
@@ -1085,5 +1123,39 @@ func TestCheckTokenTransport(t *testing.T) {
 				t.Fatalf("error = %v, want it to contain %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// A window shorter than window_days recommends nothing: every candidate is
+// scored with confidence 0 and the scan says why. A second scan reads the
+// first's history: signals it already saw keep an unknown age.
+func TestScanScoresWindowAndHistory(t *testing.T) {
+	setNow(t)
+	l := newLab(t, nil)
+	db := filepath.Join(t.TempDir(), "tvt.db")
+	o := labOptions(l, db)
+	o.Window = 14
+	var out bytes.Buffer
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "none recommendable: the window is shorter than window_days (30)") {
+		t.Errorf("output doesn't say the window is too short:\n%s", out.String())
+	}
+	for id, r := range assertScores(t, db) {
+		if r.Confidence != 0 || r.Held != score.HeldWindow {
+			t.Errorf("%s in a 14-day window: %+v", id, r)
+		}
+	}
+
+	o.Window = 30
+	out.Reset()
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatalf("second scan: %v\n%s", err, out.String())
+	}
+	for id, r := range assertScores(t, db) {
+		if r.Held != "" {
+			t.Errorf("%s held (%s) on the second scan", id, r.Held)
+		}
 	}
 }
