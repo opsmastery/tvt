@@ -796,8 +796,14 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 	sc.Abort()
 }
 
-// v11Drops turns a current database's tables back into version 10's.
-var v11Drops = []string{
+// v12Drops turns a current database's tables back into version 11's.
+var v12Drops = []string{
+	`ALTER TABLE consumers DROP COLUMN client`,
+}
+
+// v11Drops turns a current database's tables back into version 10's
+// (v12Drops first).
+var v11Drops = append(append([]string{}, v12Drops...),
 	`ALTER TABLE scans DROP COLUMN tsdb_measured`,
 	`ALTER TABLE scans DROP COLUMN tsdb_bytes_per_sample`,
 	`ALTER TABLE scans DROP COLUMN tsdb_head_series`,
@@ -805,7 +811,7 @@ var v11Drops = []string{
 	`ALTER TABLE scans DROP COLUMN tsdb_blocks_bytes`,
 	`ALTER TABLE scans DROP COLUMN tsdb_retention_ms`,
 	`ALTER TABLE scans DROP COLUMN tsdb_retention_bytes`,
-}
+)
 
 // v10Drops turns a current database's tables back into version 9's
 // (v11Drops first).
@@ -1033,5 +1039,36 @@ func TestUpgradeFromVersion10AndTSDB(t *testing.T) {
 	must(t, err)
 	if info.TSDB == nil || *info.TSDB != want {
 		t.Errorf("tsdb = %+v", info.TSDB)
+	}
+}
+
+// Version 11 databases gain consumers.client.
+func TestUpgradeFromVersion11AndClient(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v11.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	old := graph.Consumer{ID: "qlog:prometheus:abc", Kind: graph.ConsumerAdhocQuery, Name: "q", Expr: "up"}
+	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutConsumer(ctx, old)) })
+	for _, q := range append(append([]string{}, v12Drops...), `UPDATE meta SET value = '11' WHERE key = 'schema_version'`) {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	got, err := s.Consumers(ctx, 1)
+	must(t, err)
+	if len(got) != 1 || got[0].Client != "" {
+		t.Fatalf("upgraded consumers = %+v", got)
+	}
+	c := graph.Consumer{ID: "qlog:prometheus:agent:finance:abc", Kind: graph.ConsumerAgentQuery, Name: "agent finance", Expr: "up", Client: "agent"}
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) { must(t, sc.PutConsumer(ctx, c)) })
+	got, err = s.Consumers(ctx, id)
+	must(t, err)
+	if len(got) != 1 || got[0].Client != "agent" {
+		t.Errorf("consumers = %+v", got)
 	}
 }

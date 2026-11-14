@@ -90,7 +90,16 @@ The cost of query logging is disk and log volume, not query latency.
 1. Drop rule evaluations (`ruleGroup`, `component=ruler`).
 2. Drop Loki sub-queries and metadata calls (keep `component=frontend` with `query_type` in `limited`, `filter`, `metric`).
 3. Drop tvt's own queries (`source=tvt`, `user_agent=tvt/...`) and Mimir remote-ruler evaluations (`user_agent=mimir/...`).
-4. Attribute: Mimir headers → dashboard, panel and (with `send_user_header`) user; Grafana IP or user agent → "Grafana, unattributed" (match against panel expressions); anything else → "other API client" (ad hoc weight).
+4. Attribute (S3 item 5): every logged query gets a client, stored on its consumer (`consumers.client`):
+   - `dashboard`: Mimir's headers name the panel, or the normalized query matches a collected panel target, variable or annotation query (Grafana variables match any text, `[$__rate_interval]` folds like `[40s]`). Evidence for that panel: it ran (`last_viewed`).
+   - `rule`: it matches the query of a rule Grafana evaluates (Grafana-managed). Evidence of evaluations, for S6's cost per rule.
+   - `agent`: an agent named in `tvt.yaml` `clients.agents` (user agent regex, address or CIDR, or the actor its token belongs to), or a user agent that says `mcp`. On Prometheus only the address works.
+   - `explore`: Grafana sent it (user agent `Grafana/`, an address in `clients.grafana`, or, without that, an address that sent a matching query) and it matches nothing.
+   - `api`: anyone else.
+
+   A query matching several collected queries is evidence for each: unknown means used. With `clients.grafana` set, only Grafana's addresses are matched against templates.
+
+   Container addresses are reused: in the lab, after a restart the agent got the address Grafana had before, so a 30-day Prometheus log can hold both under one IP. Matching on text comes first for that reason, and an inferred Grafana address only counts within an hour of its matching queries. Configure `clients.grafana` where addresses are stable.
 
 ## Proving a query log (Sprint 2 item 4)
 
