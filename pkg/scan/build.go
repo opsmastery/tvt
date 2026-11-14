@@ -95,6 +95,11 @@ type Inputs struct {
 	// Storage is what a Prometheus server reports about its TSDB, for a
 	// self_hosted price card; nil when the backend doesn't (Mimir).
 	Storage *collect.Storage
+	// StreamVolumes is every Loki stream's ingest (the volume API); nil
+	// when it wasn't collected, which leaves stream signals without costs.
+	StreamVolumes []collect.StreamVolume
+	// VolumeTruncated: the volume API hit its series limit.
+	VolumeTruncated bool
 }
 
 // Evidence sources Build adds itself: definitions tvt reads, not usage
@@ -127,6 +132,10 @@ type Output struct {
 	// Storage is the self-hosted model's resolved inputs; nil for a vendor
 	// card.
 	Storage *cost.Storage
+	// StreamVolumes is every Loki stream's bytes per day, by its full label
+	// set, so any selector or label drop can be priced later.
+	StreamVolumes   []graph.StreamVolume
+	VolumeTruncated bool
 }
 
 // Build maps inputs to graph rows. It rejects inputs a scan should never
@@ -346,6 +355,14 @@ func Build(in Inputs) (Output, error) {
 	res.chains()
 	res.labelRefs()
 	out.Signals = append(out.Signals, res.newSignals...)
+	if in.StreamVolumes != nil {
+		costs, vols, err := streamCosts(in.StreamVolumes, out.Signals, in.Start)
+		if err != nil {
+			return Output{}, err
+		}
+		out.Costs, out.StreamVolumes = append(out.Costs, costs...), vols
+		out.VolumeTruncated = in.VolumeTruncated
+	}
 	out.References = res.sorted()
 	if err := classify(out.Signals, out.Consumers, out.References, in.Owners, since, in.Start); err != nil {
 		return Output{}, err

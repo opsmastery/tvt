@@ -2,6 +2,7 @@ package parse
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -164,4 +165,32 @@ func skipSpace(q string, i int) int {
 
 func isIdent(c byte, first bool) bool {
 	return c == '_' || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || (!first && '0' <= c && c <= '9')
+}
+
+// MatchesLabels reports whether a stream (or series) with labels is
+// selected by every matcher, as Loki and Prometheus evaluate them: a
+// missing label is the empty string, and regexes are fully anchored.
+func MatchesLabels(ms []Matcher, labels map[string]string) (bool, error) {
+	for _, m := range ms {
+		v := labels[m.Label]
+		var ok bool
+		switch m.Op {
+		case MatchEqual:
+			ok = v == m.Value
+		case MatchNotEqual:
+			ok = v != m.Value
+		case MatchRegexp, MatchNotRegex:
+			re, err := regexp.Compile("^(?:" + m.Value + ")$")
+			if err != nil {
+				return false, fmt.Errorf("matcher %s%s%q: %w", m.Label, m.Op, m.Value, err)
+			}
+			ok = re.MatchString(v) == (m.Op == MatchRegexp)
+		default:
+			return false, fmt.Errorf("matcher %s: unknown operator %q", m.Label, m.Op)
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	return true, nil
 }

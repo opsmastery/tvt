@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"math"
 	"path"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -268,26 +268,11 @@ func selectorMatches(t *testing.T, sel string, labels map[string]string) bool {
 	if err != nil || len(refs) != 1 {
 		t.Fatalf("stream signal %q: %v", sel, err)
 	}
-	for _, m := range refs[0].Matchers {
-		v := labels[m.Label]
-		var ok bool
-		switch m.Op {
-		case parse.MatchEqual:
-			ok = v == m.Value
-		case parse.MatchNotEqual:
-			ok = v != m.Value
-		case parse.MatchRegexp, parse.MatchNotRegex:
-			re, err := regexp.Compile("^(?:" + m.Value + ")$")
-			if err != nil {
-				t.Fatalf("stream signal %q: %v", sel, err)
-			}
-			ok = re.MatchString(v) == (m.Op == parse.MatchRegexp)
-		}
-		if !ok {
-			return false
-		}
+	ok, err := parse.MatchesLabels(refs[0].Matchers, labels)
+	if err != nil {
+		t.Fatalf("stream signal %q: %v", sel, err)
 	}
-	return true
+	return ok
 }
 
 // fixtureLag lists ground-truth entries the recorded fixtures predate:
@@ -729,4 +714,53 @@ func assertCosts(t *testing.T, db, src, card string, assumed bool) {
 		t.Errorf("only %d of %d metric intervals measured", measured, metrics)
 	}
 	t.Logf("%d metrics cost %.2f %s/month on %s", metrics, total, info.Currency, card)
+}
+
+// assertStreamCosts: the lab's five streams are stored with their bytes,
+// and every stream signal costs the streams its selector matches, at the
+// card's log price.
+func assertStreamCosts(t *testing.T, db string) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	info, err := st.LatestScan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vols, err := st.StreamVolumes(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vols) != 5 || info.VolumeTruncated {
+		t.Fatalf("stream volumes %+v (truncated %v)", vols, info.VolumeTruncated)
+	}
+	costs, err := st.Costs(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var streams int
+	for _, c := range costs {
+		sel, ok := strings.CutPrefix(c.SignalID, "loki:stream:")
+		if !ok {
+			continue
+		}
+		streams++
+		var want int64
+		for _, v := range vols {
+			if selectorMatches(t, sel, streamLabels(t, v.Selector)) {
+				want += v.BytesPerDay
+			}
+		}
+		if c.BytesPerDay != want || math.Abs(c.MonthlyCost-float64(want)/1e9*30*0.45) > 1e-9 {
+			t.Errorf("%s: %d bytes/day %v/month, want %d", c.SignalID, c.BytesPerDay, c.MonthlyCost, want)
+		}
+	}
+	if streams == 0 {
+		t.Fatal("no stream costs")
+	}
+	t.Logf("%d stream signals priced from %d streams", streams, len(vols))
 }

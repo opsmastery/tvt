@@ -219,6 +219,13 @@ type Cost struct {
 	DiskBytes int64
 }
 
+// StreamVolume is one Loki stream's ingest in a scan: its full label set as
+// a canonical selector, and its bytes per day.
+type StreamVolume struct {
+	Selector    string
+	BytesPerDay int64
+}
+
 // DashboardLoad aggregates loads of one dashboard by one login in a scan's
 // window. Browser loads (from the dashboard page) are views; API loads by
 // anyone but tvt are recorded as evidence of use but not counted as views.
