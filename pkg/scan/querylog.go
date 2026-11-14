@@ -264,10 +264,11 @@ func (m clientMatcher) sawMatch(q collect.LoggedQuery) {
 }
 
 // mayBeGrafana reports whether a query from q's client can be matched to
-// a template: with Grafana's addresses configured, only theirs (or a
-// Grafana user agent); otherwise any client but a known other one.
+// a template: with Grafana's addresses configured, only theirs, a Grafana
+// user agent, or an unknown sender (Loki logs no address); otherwise any
+// client.
 func (m clientMatcher) mayBeGrafana(q collect.LoggedQuery) bool {
-	if m.grafana == nil {
+	if m.grafana == nil || q.Client == "" {
 		return true
 	}
 	if _, err := netip.ParseAddr(q.Client); err != nil && q.Client != "" && !strings.HasPrefix(q.Client, "Grafana/") {
@@ -320,6 +321,8 @@ func loggedConsumers(logged []collect.LoggedQuery, dashboards []collect.Dashboar
 		matches []*graph.Consumer
 	}
 	var entries []entry
+	// Distinct queries are few next to log lines: match each text once.
+	matched := map[string][]*graph.Consumer{}
 	for _, q := range logged {
 		lang, ok := map[string]string{"promql": "promql", "logql": "logql"}[q.Language]
 		if !ok || q.Expr == "" {
@@ -327,11 +330,16 @@ func loggedConsumers(logged []collect.LoggedQuery, dashboards []collect.Dashboar
 		}
 		e := entry{q: q, lang: lang, norm: normalizeQuery(q.Expr), agent: cm.agent(q)}
 		if q.DashboardUID == "" && e.agent == "" && cm.mayBeGrafana(q) {
-			for i := range tmpls {
-				if tmpls[i].match(e.norm) {
-					e.matches = append(e.matches, &tmpls[i].consumer)
+			ms, ok := matched[e.norm]
+			if !ok {
+				for i := range tmpls {
+					if tmpls[i].match(e.norm) {
+						ms = append(ms, &tmpls[i].consumer)
+					}
 				}
+				matched[e.norm] = ms
 			}
+			e.matches = ms
 			if len(e.matches) > 0 {
 				cm.sawMatch(q)
 			}
