@@ -795,11 +795,20 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 	sc.Abort()
 }
 
-// Version 6 databases gain consumers.unparsed (Sprint 2 item 19): old rows
-// read back with none, and a scan stores why a panel couldn't be read.
+// v9Drops turns a current database's tables back into version 8's.
+var v9Drops = []string{
+	`ALTER TABLE scans DROP COLUMN price_kind`,
+	`ALTER TABLE scans DROP COLUMN bytes_per_sample`,
+	`ALTER TABLE scans DROP COLUMN bytes_per_sample_from`,
+	`ALTER TABLE scans DROP COLUMN retention_ms`,
+	`ALTER TABLE scans DROP COLUMN retention_from`,
+	`ALTER TABLE scans DROP COLUMN head_bytes_per_series`,
+	`ALTER TABLE costs DROP COLUMN disk_bytes`,
+}
+
 // v8Drops turns a current database's tables back into version 7's, for the
-// upgrade tests that start from an older version.
-var v8Drops = []string{
+// upgrade tests that start from an older version (v9Drops first).
+var v8Drops = append(append([]string{}, v9Drops...),
 	`ALTER TABLE scans DROP COLUMN pricecard`,
 	`ALTER TABLE scans DROP COLUMN currency`,
 	`ALTER TABLE scans DROP COLUMN price_preset`,
@@ -807,7 +816,7 @@ var v8Drops = []string{
 	`ALTER TABLE costs DROP COLUMN interval_assumed`,
 	`ALTER TABLE costs DROP COLUMN buckets`,
 	`ALTER TABLE costs DROP COLUMN exemplars`,
-}
+)
 
 // Version 7 databases gain the scan's price card and the cost columns for
 // scrape intervals and histograms; old cost rows keep their numbers.
@@ -839,7 +848,7 @@ func TestUpgradeFromVersion7AndCostColumns(t *testing.T) {
 	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) {
 		must(t, sc.PutSignal(ctx, bucket))
 		must(t, sc.PutCost(ctx, c))
-		must(t, sc.SetPriceCard(ctx, "grafana-cloud-pro", "USD", true))
+		must(t, sc.SetPriceCard(ctx, "grafana-cloud-pro", "USD", true, "vendor"))
 	})
 	got, err = s.Costs(ctx, id)
 	must(t, err)
@@ -854,6 +863,8 @@ func TestUpgradeFromVersion7AndCostColumns(t *testing.T) {
 	}
 }
 
+// Version 6 databases gain consumers.unparsed (Sprint 2 item 19): old rows
+// read back with none, and a scan stores why a panel couldn't be read.
 func TestUpgradeFromVersion6AndUnparsed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v6.db")
 	s, err := Open(ctx, path)
@@ -885,5 +896,54 @@ func TestUpgradeFromVersion6AndUnparsed(t *testing.T) {
 	must(t, err)
 	if len(got) != 1 || !reflect.DeepEqual(got[0], flame) {
 		t.Errorf("consumers = %+v, want %+v", got, flame)
+	}
+}
+
+// Version 8 databases gain the price card's kind, the self-hosted model's
+// inputs and costs.disk_bytes; a card already recorded was a vendor card.
+func TestUpgradeFromVersion8AndSelfHosted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v8.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	sig := graph.Signal{ID: "prom:metric:up", Kind: graph.KindMetric, Name: "up", Source: "prom"}
+	scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutCost(ctx, graph.Cost{SignalID: sig.ID, ActiveSeries: 6, MonthlyCost: 0.5, ObservedAt: t0}))
+	})
+	if _, err := s.db.Exec(`UPDATE scans SET pricecard = 'grafana-cloud', currency = 'USD', price_preset = 1`); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range append(append([]string{}, v9Drops...), `UPDATE meta SET value = '8' WHERE key = 'schema_version'`) {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	info, err := s.LatestScan(ctx)
+	must(t, err)
+	if info.PriceKind != "vendor" || info.SelfHosted != nil {
+		t.Errorf("upgraded scan = %+v", info)
+	}
+	c := graph.Cost{SignalID: sig.ID, ActiveSeries: 6, MonthlyCost: 0.02, ObservedAt: t0.Add(time.Hour), DiskBytes: 123456789}
+	sh := SelfHosted{BytesPerSample: 0.62, BytesPerSampleFrom: "measured", Retention: 45 * 24 * time.Hour, RetentionFrom: "measured", HeadBytesPerSeries: 4000}
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutCost(ctx, c))
+		must(t, sc.SetPriceCard(ctx, "on-prem", "USD", false, "self_hosted"))
+		must(t, sc.SetSelfHosted(ctx, sh))
+	})
+	got, err := s.Costs(ctx, id)
+	must(t, err)
+	if len(got) != 1 || got[0].DiskBytes != c.DiskBytes {
+		t.Errorf("costs = %+v", got)
+	}
+	info, err = s.LatestScan(ctx)
+	must(t, err)
+	if info.PriceKind != "self_hosted" || info.SelfHosted == nil || *info.SelfHosted != sh {
+		t.Errorf("scan = %+v %+v", info, info.SelfHosted)
 	}
 }

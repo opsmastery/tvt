@@ -1,0 +1,12 @@
+# tvt.yaml for the self-hosted golden lab scan (cmd/tvt/scan_test.go): the
+# same as tvt-lab.yaml with a self_hosted price card. Paths are relative
+# to this file: the lab's SLO definitions and runbooks, vendored by
+# scripts/capture-fixtures.sh.
+pricecard: pricecard-selfhosted.yaml
+slos:
+  paths: [slos]
+runbooks:
+  fetch: false
+  mirrors:
+    - url_prefix: https://github.com/Opsmastery-Summit/tvt-lab/blob/main/
+      path: .

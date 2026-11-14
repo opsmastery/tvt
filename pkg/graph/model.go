@@ -214,6 +214,9 @@ type Cost struct {
 	// Exemplars is true when exemplar storage is on for it.
 	Buckets   int64
 	Exemplars bool
+	// DiskBytes is what a metric (or a label's share) holds on disk over
+	// retention, replicas included; set only by a self_hosted price card.
+	DiskBytes int64
 }
 
 // DashboardLoad aggregates loads of one dashboard by one login in a scan's

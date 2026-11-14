@@ -19,12 +19,18 @@ const (
 // docs/pricecard.md). Any price left at zero is free. Prices are marginal:
 // the rate of the next unit, so a saving comes off the top tier.
 type PriceCard struct {
-	Version  int           `json:"version" yaml:"version"`
+	Version int `json:"version" yaml:"version"`
+	// Kind is "" or "vendor" (prices per series, sample, GB) or
+	// "self_hosted" (series become disk; SelfHosted holds the rates).
+	Kind     string        `json:"kind,omitempty" yaml:"kind,omitempty"`
 	Name     string        `json:"name" yaml:"name"`
 	Currency string        `json:"currency" yaml:"currency"`
 	Metrics  MetricPricing `json:"metrics" yaml:"metrics"`
 	Logs     LogPricing    `json:"logs" yaml:"logs"`
 	Traces   TracePricing  `json:"traces" yaml:"traces"`
+	// SelfHosted prices metrics on infrastructure you run (kind
+	// self_hosted).
+	SelfHosted *SelfHostedPricing `json:"self_hosted,omitempty" yaml:"self_hosted,omitempty"`
 	// Preset marks a vendor preset: approximate, never billing-accurate.
 	// A preset says where its numbers came from and when.
 	Preset bool   `json:"preset,omitempty" yaml:"preset,omitempty"`
@@ -52,6 +58,48 @@ type LogPricing struct {
 	IncludedGBMonth float64 `json:"included_gb_month" yaml:"included_gb_month"`
 }
 
+// Price card kinds.
+const (
+	KindVendor     = "vendor"
+	KindSelfHosted = "self_hosted"
+)
+
+// SelfHostedPricing turns series into disk (docs/pricecard.md):
+// series × samples kept over the retention × bytes per sample × overhead
+// × replicas, plus each series' share of the WAL and head chunks.
+type SelfHostedPricing struct {
+	StorageGBMonth float64 `json:"storage_gb_month" yaml:"storage_gb_month"`
+	Replicas       int     `json:"replicas" yaml:"replicas"`
+	// Overhead is the index and compaction overhead; 0 means 1.2.
+	Overhead float64 `json:"overhead" yaml:"overhead"`
+	// BytesPerSample overrides the measured value; 0 means measure it
+	// (Prometheus), else 1.5, marked assumed.
+	BytesPerSample float64 `json:"bytes_per_sample" yaml:"bytes_per_sample"`
+	// RetentionDays overrides the measured retention; 0 means measure it.
+	// Required where tvt can't measure it (Mimir).
+	RetentionDays float64 `json:"retention_days" yaml:"retention_days"`
+	// FixedMonthly is the floor that doesn't shrink with series (compute,
+	// replicas); never counted as a saving.
+	FixedMonthly float64 `json:"fixed_monthly" yaml:"fixed_monthly"`
+	// NodeSizes are the storage nodes in use. A cut saves compute only when
+	// it crosses a node step (NodeStep). One size for now.
+	NodeSizes []NodeSize `json:"node_sizes" yaml:"node_sizes"`
+}
+
+// NodeSize is a storage node: its usable disk and its monthly cost.
+type NodeSize struct {
+	Name    string  `json:"name" yaml:"name"`
+	DiskGB  float64 `json:"disk_gb" yaml:"disk_gb"`
+	Monthly float64 `json:"monthly" yaml:"monthly"`
+}
+
+// DefaultOverhead and DefaultBytesPerSample are the self-hosted model's
+// fallbacks.
+const (
+	DefaultOverhead       = 1.2
+	DefaultBytesPerSample = 1.5
+)
+
 // TracePricing charges per span or per GB ingested.
 type TracePricing struct {
 	PerMillionSpans float64 `json:"per_million_spans" yaml:"per_million_spans"`
@@ -70,6 +118,18 @@ func (p PriceCard) Validate() error {
 	}
 	if p.Currency == "" {
 		return errors.New("price card: currency is required")
+	}
+	switch p.Kind {
+	case "", KindVendor:
+		if p.SelfHosted != nil {
+			return errors.New("price card: self_hosted is only read with kind: self_hosted")
+		}
+	case KindSelfHosted:
+		if err := p.SelfHosted.validate(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("price card: kind %q is not vendor or self_hosted", p.Kind)
 	}
 	prices := map[string]float64{
 		"metrics.per_active_series_month": p.Metrics.PerActiveSeriesMonth,
@@ -90,7 +150,7 @@ func (p PriceCard) Validate() error {
 		}
 		set = set || v > 0
 	}
-	if !set {
+	if !set && p.Kind != KindSelfHosted {
 		return errors.New("price card: no prices set")
 	}
 	if p.Logs.RetentionDays < 0 {
@@ -162,4 +222,101 @@ func (p PriceCard) LogsBillable(gross float64, bytesPerDay int64) float64 {
 	gbMonth := float64(bytesPerDay) / bytesPerGB * daysPerMonth
 	included := min(gbMonth, p.Logs.IncludedGBMonth)
 	return max(0, gross-included*p.Logs.PerGBIngested)
+}
+
+func (h *SelfHostedPricing) validate() error {
+	if h == nil {
+		return errors.New("price card: kind self_hosted needs a self_hosted section")
+	}
+	finite := func(name string, v float64, positive bool) error {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || (positive && v == 0) {
+			want := "a finite, non-negative number"
+			if positive {
+				want = "a finite, positive number"
+			}
+			return fmt.Errorf("price card: self_hosted.%s must be %s", name, want)
+		}
+		return nil
+	}
+	for _, f := range []struct {
+		name     string
+		v        float64
+		positive bool
+	}{
+		{"storage_gb_month", h.StorageGBMonth, true},
+		{"overhead", h.Overhead, false},
+		{"bytes_per_sample", h.BytesPerSample, false},
+		{"retention_days", h.RetentionDays, false},
+		{"fixed_monthly", h.FixedMonthly, false},
+	} {
+		if err := finite(f.name, f.v, f.positive); err != nil {
+			return err
+		}
+	}
+	if h.Overhead != 0 && h.Overhead < 1 {
+		return errors.New("price card: self_hosted.overhead is a multiplier, at least 1")
+	}
+	if h.Replicas < 1 {
+		return errors.New("price card: self_hosted.replicas must be at least 1")
+	}
+	if len(h.NodeSizes) > 1 {
+		return errors.New("price card: self_hosted.node_sizes: one node size is supported for now")
+	}
+	for _, n := range h.NodeSizes {
+		if err := finite("node_sizes.disk_gb", n.DiskGB, true); err != nil {
+			return err
+		}
+		if err := finite("node_sizes.monthly", n.Monthly, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Storage is what the self-hosted model needs to know about the TSDB.
+type Storage struct {
+	// BytesPerSample on disk after compression; BytesPerSampleFrom says
+	// where it came from (the card, a measurement, or an assumption).
+	BytesPerSample     float64
+	BytesPerSampleFrom string
+	// Retention is how long samples are kept; RetentionFrom says why.
+	Retention     time.Duration
+	RetentionFrom string
+	// HeadBytesPerSeries is each active series' share of the WAL and head
+	// chunks; 0 when unknown.
+	HeadBytesPerSeries float64
+}
+
+// SelfHostedMetric is the disk a metric's series occupy, in bytes, and
+// its monthly storage cost: series × (retention ÷ interval) samples ×
+// bytes per sample × overhead, plus the head and WAL share, × replicas.
+// The fixed floor and node steps aren't per signal (NodeStep).
+func (p PriceCard) SelfHostedMetric(series int64, interval time.Duration, st Storage) (diskBytes, monthly float64) {
+	h := p.SelfHosted
+	if h == nil || series <= 0 || interval <= 0 {
+		return 0, 0
+	}
+	overhead := h.Overhead
+	if overhead == 0 {
+		overhead = DefaultOverhead
+	}
+	samples := st.Retention.Seconds() / interval.Seconds()
+	perSeries := samples*st.BytesPerSample*overhead + st.HeadBytesPerSeries
+	diskBytes = float64(series) * perSeries * float64(h.Replicas)
+	return diskBytes, diskBytes / bytesPerGB * h.StorageGBMonth
+}
+
+// NodeStep says what freeing freedBytes of totalBytes does to the node
+// count: nodes before and after (each holding node_sizes[0].disk_gb), and
+// the monthly compute saved, which is zero unless the cut crosses a step.
+// Without node sizes it returns zeros.
+func (p PriceCard) NodeStep(totalBytes, freedBytes float64) (before, after int, monthly float64) {
+	if p.SelfHosted == nil || len(p.SelfHosted.NodeSizes) == 0 {
+		return 0, 0, 0
+	}
+	n := p.SelfHosted.NodeSizes[0]
+	per := n.DiskGB * bytesPerGB
+	nodes := func(b float64) int { return max(1, int(math.Ceil(b/per))) }
+	before, after = nodes(totalBytes), nodes(max(0, totalBytes-freedBytes))
+	return before, after, float64(before-after) * n.Monthly
 }
