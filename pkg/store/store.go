@@ -28,7 +28,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -199,6 +199,22 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 8 {
+		for _, q := range []string{
+			`ALTER TABLE scans ADD COLUMN pricecard TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE scans ADD COLUMN currency TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE scans ADD COLUMN price_preset INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE costs ADD COLUMN interval_ms INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE costs ADD COLUMN interval_assumed TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE costs ADD COLUMN buckets INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE costs ADD COLUMN exemplars INTEGER NOT NULL DEFAULT 0`,
+			`UPDATE meta SET value = '8' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -209,6 +225,11 @@ type ScanInfo struct {
 	FinishedAt  time.Time
 	WindowDays  int
 	LogCoverage float64
+	// PriceCard, Currency and PricePreset describe the card the scan's
+	// costs use; PriceCard is empty when none was configured.
+	PriceCard   string
+	Currency    string
+	PricePreset bool
 }
 
 // LatestScan returns the most recent completed scan, or ErrNoScan.
@@ -230,7 +251,7 @@ func (s *Store) Scans(ctx context.Context) ([]ScanInfo, error) {
 
 func (s *Store) scans(ctx context.Context, tail string) ([]ScanInfo, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, started_at, finished_at, window_days, log_coverage FROM scans `+tail)
+		`SELECT id, started_at, finished_at, window_days, log_coverage, pricecard, currency, price_preset FROM scans `+tail)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +260,7 @@ func (s *Store) scans(ctx context.Context, tail string) ([]ScanInfo, error) {
 	for rows.Next() {
 		var si ScanInfo
 		var started, finished int64
-		if err := rows.Scan(&si.ID, &started, &finished, &si.WindowDays, &si.LogCoverage); err != nil {
+		if err := rows.Scan(&si.ID, &started, &finished, &si.WindowDays, &si.LogCoverage, &si.PriceCard, &si.Currency, &si.PricePreset); err != nil {
 			return nil, err
 		}
 		si.StartedAt, si.FinishedAt = fromMillis(started), fromMillis(finished)
@@ -382,7 +403,8 @@ func (s *Store) LastReads(ctx context.Context) ([]SignalRead, error) {
 // Costs returns the costs observed in scan scanID, ordered by signal.
 func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost
+		`SELECT signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost,
+		        interval_ms, interval_assumed, buckets, exemplars
 		 FROM costs WHERE scan_id = ? ORDER BY signal_id`, scanID)
 	if err != nil {
 		return nil, err
@@ -391,11 +413,13 @@ func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 	var out []graph.Cost
 	for rows.Next() {
 		var c graph.Cost
-		var observed int64
-		if err := rows.Scan(&c.SignalID, &c.ScanID, &observed, &c.ActiveSeries, &c.DistinctValues, &c.BytesPerDay, &c.SpansPerDay, &c.MonthlyCost); err != nil {
+		var observed, interval int64
+		if err := rows.Scan(&c.SignalID, &c.ScanID, &observed, &c.ActiveSeries, &c.DistinctValues, &c.BytesPerDay, &c.SpansPerDay, &c.MonthlyCost,
+			&interval, &c.IntervalAssumed, &c.Buckets, &c.Exemplars); err != nil {
 			return nil, err
 		}
 		c.ObservedAt = fromMillis(observed)
+		c.Interval = time.Duration(interval) * time.Millisecond
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -545,13 +569,16 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 					WHEN excluded.last_seen IS NULL THEN refs.last_seen
 					ELSE max(refs.last_seen, excluded.last_seen) END,
 				last_scan = excluded.last_scan`},
-		{&sc.cost, `INSERT INTO costs (signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		{&sc.cost, `INSERT INTO costs (signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost,
+				interval_ms, interval_assumed, buckets, exemplars)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (signal_id, scan_id) DO UPDATE SET
 				observed_at = excluded.observed_at, active_series = excluded.active_series,
 				distinct_values = excluded.distinct_values,
 				bytes_per_day = excluded.bytes_per_day, spans_per_day = excluded.spans_per_day,
-				monthly_cost = excluded.monthly_cost`},
+				monthly_cost = excluded.monthly_cost, interval_ms = excluded.interval_ms,
+				interval_assumed = excluded.interval_assumed, buckets = excluded.buckets,
+				exemplars = excluded.exemplars`},
 		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start, gap)
 			VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
@@ -650,7 +677,8 @@ func (sc *Scan) PutCost(ctx context.Context, c graph.Cost) error {
 		observed = sc.started
 	}
 	_, err := sc.cost.ExecContext(ctx, c.SignalID, sc.ID, millis(observed),
-		c.ActiveSeries, c.DistinctValues, c.BytesPerDay, c.SpansPerDay, c.MonthlyCost)
+		c.ActiveSeries, c.DistinctValues, c.BytesPerDay, c.SpansPerDay, c.MonthlyCost,
+		c.Interval.Milliseconds(), c.IntervalAssumed, c.Buckets, c.Exemplars)
 	return wrap("cost", c.SignalID, err)
 }
 
@@ -671,6 +699,17 @@ func (sc *Scan) PutSource(ctx context.Context, src graph.SourceCoverage) error {
 }
 
 // PutLoad records aggregated dashboard loads. Each (org, dashboard, login,
+// SetPriceCard records the price card this scan's costs use: its name, its
+// currency, and whether it is a vendor preset (approximate).
+func (sc *Scan) SetPriceCard(ctx context.Context, name, currency string, preset bool) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	_, err := sc.tx.ExecContext(ctx, `UPDATE scans SET pricecard = ?, currency = ?, price_preset = ? WHERE id = ?`,
+		name, currency, preset, sc.ID)
+	return wrap("price card", name, err)
+}
+
 // browser) is put once per scan; the caller aggregates.
 func (sc *Scan) PutLoad(ctx context.Context, l graph.DashboardLoad) error {
 	if err := sc.check(); err != nil {

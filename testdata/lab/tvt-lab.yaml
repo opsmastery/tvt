@@ -1,6 +1,7 @@
 # tvt.yaml for the golden lab scans (cmd/tvt/scan_test.go). Paths are relative
 # to this file: the lab's SLO definitions and runbooks, vendored by
 # scripts/capture-fixtures.sh.
+pricecard: grafana-cloud
 slos:
   paths: [slos]
 runbooks:
