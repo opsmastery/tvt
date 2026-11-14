@@ -157,6 +157,9 @@ type Consumer struct {
 	// Unparsed set reads unknown signals: it never makes its dashboard
 	// look unused.
 	Unparsed string
+	// Client is who sent a query-log consumer's query: dashboard, rule,
+	// explore, agent or api (scan.Client*). Empty for collected consumers.
+	Client string
 }
 
 // Reference links a signal to a consumer that depends on it.

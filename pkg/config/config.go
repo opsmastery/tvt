@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,6 +36,9 @@ type Config struct {
 	// PriceCard is a price card file (docs/pricecard.md), relative to
 	// tvt.yaml, or the name of a shipped preset such as grafana-cloud.
 	PriceCard string `yaml:"pricecard"`
+	// Clients says who sent logged queries where the log can't (the
+	// Prometheus query log records only an IP).
+	Clients Clients `yaml:"clients"`
 
 	// Read by later sprints; accepted so one tvt.yaml serves every command.
 	Grafana    yaml.Node `yaml:"grafana"`
@@ -42,6 +46,30 @@ type Config struct {
 	Logs       yaml.Node `yaml:"logs"`
 	WindowDays yaml.Node `yaml:"window_days"`
 	Pipelines  yaml.Node `yaml:"pipelines"`
+}
+
+// Clients identifies query-log clients.
+type Clients struct {
+	// Grafana is the addresses (IPs or CIDRs) Grafana's queries come from,
+	// as the backends see them. Without it, an address that sent a query
+	// matching a panel or Grafana-managed rule is taken to be Grafana's.
+	Grafana []string `yaml:"grafana"`
+	// Agents are AI agents and other automated clients, by name.
+	Agents []Agent `yaml:"agents"`
+}
+
+// Agent is one automated client. A logged query is the agent's when any
+// of its identifiers matches.
+type Agent struct {
+	Name string `yaml:"name"`
+	// UserAgent is a regular expression over the logged user agent
+	// (Mimir), unanchored.
+	UserAgent string `yaml:"user_agent"`
+	// Addresses are IPs or CIDRs (the Prometheus query log's client IP).
+	Addresses []string `yaml:"addresses"`
+	// Actors are logins or service-account names its token belongs to, as
+	// forwarded in X-Grafana-User.
+	Actors []string `yaml:"actors"`
 }
 
 // ExternalConsumer is one consumer declared by the user.
@@ -178,7 +206,47 @@ func (c *Config) validate() error {
 			return fmt.Errorf("runbooks.mirrors[%d]: url_prefix and path are required", i)
 		}
 	}
+	for _, a := range c.Clients.Grafana {
+		if _, err := ParseAddress(a); err != nil {
+			return fmt.Errorf("clients.grafana: %w", err)
+		}
+	}
+	agents := map[string]bool{}
+	for i, a := range c.Clients.Agents {
+		if a.Name == "" {
+			return fmt.Errorf("clients.agents[%d]: name is required", i)
+		}
+		if agents[a.Name] {
+			return fmt.Errorf("clients.agents: %q appears twice", a.Name)
+		}
+		agents[a.Name] = true
+		if a.UserAgent == "" && len(a.Addresses) == 0 && len(a.Actors) == 0 {
+			return fmt.Errorf("agent %q: needs user_agent, addresses or actors", a.Name)
+		}
+		if a.UserAgent != "" {
+			if _, err := regexp.Compile(a.UserAgent); err != nil {
+				return fmt.Errorf("agent %q: user_agent: %w", a.Name, err)
+			}
+		}
+		for _, ad := range a.Addresses {
+			if _, err := ParseAddress(ad); err != nil {
+				return fmt.Errorf("agent %q: %w", a.Name, err)
+			}
+		}
+	}
 	return nil
+}
+
+// ParseAddress reads an IP or a CIDR as a prefix (an IP is a /32 or /128).
+func ParseAddress(s string) (netip.Prefix, error) {
+	if p, err := netip.ParsePrefix(s); err == nil {
+		return p.Masked(), nil
+	}
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Prefix{}, fmt.Errorf("address %q: not an IP or CIDR", s)
+	}
+	return netip.PrefixFrom(a, a.BitLen()), nil
 }
 
 // isPath reports whether a pricecard value names a file rather than a
