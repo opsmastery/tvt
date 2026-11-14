@@ -7,6 +7,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 )
 
 // Sprint 2 item 6: classes, owners and tiers on every signal.
@@ -134,5 +135,32 @@ func TestStreamOwnerRequiresImpliedSelector(t *testing.T) {
 				t.Fatalf("owner %q, want %q", got.Name, tt.want)
 			}
 		})
+	}
+}
+
+func TestMatcherMatches(t *testing.T) {
+	for _, c := range []struct {
+		op    parse.MatchOp
+		value string
+		in    string
+		want  bool
+	}{
+		{parse.MatchEqual, "debug", "debug", true},
+		{parse.MatchEqual, "debug", "info", false},
+		{parse.MatchNotEqual, "debug", "info", true},
+		{parse.MatchNotEqual, "debug", "debug", false},
+		{parse.MatchRegexp, "info|warn", "warn", true},
+		{parse.MatchRegexp, "info|warn", "debug", false},
+		{parse.MatchRegexp, "deb", "debug", false}, // anchored, like Prometheus
+		{parse.MatchRegexp, "", "", true},
+		{parse.MatchNotRegex, "info|warn", "debug", true},
+		{parse.MatchNotRegex, "info|warn", "info", false},
+		{parse.MatchRegexp, "(", "(", false}, // an invalid regexp never matches
+		{parse.MatchNotRegex, "(", "x", false},
+		{parse.MatchOp("??"), "x", "x", false},
+	} {
+		if got := matcherMatches(parse.Matcher{Label: "level", Op: c.op, Value: c.value}, c.in); got != c.want {
+			t.Errorf("matcherMatches(%v %q, %q) = %v, want %v", c.op, c.value, c.in, got, c.want)
+		}
 	}
 }

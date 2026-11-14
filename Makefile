@@ -7,7 +7,7 @@ LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.Commit=$(COMMIT) \
 	-X $(MODULE)/internal/version.Date=$(DATE)
 
-.PHONY: all build test race vet fmt fmt-check lint clean hooks
+.PHONY: all build test race vet fmt fmt-check lint clean hooks e2e
 
 all: lint test build
 
@@ -30,6 +30,14 @@ fmt-check:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
 lint: fmt-check vet
+
+# Live-lab end-to-end suite (build tag e2e; CI and the pre-push hook skip
+# it). Needs the tvt-lab running beside this checkout and TVT_GRAFANA_TOKEN
+# in the environment. Exports Grafana's log first so loads are current.
+LAB_DIR ?= ../tvt-lab
+e2e:
+	$(MAKE) -C "$(LAB_DIR)" export-logs
+	TVT_LAB_DIR="$$(cd "$(LAB_DIR)" && pwd)" go test -tags e2e -count=1 -timeout 20m -v -run E2E ./cmd/tvt
 
 # Git hooks in .githooks: pre-commit (blocked files, gofmt, vet, go mod
 # tidy, schema tests, gitleaks), pre-push (go test), post-checkout and
