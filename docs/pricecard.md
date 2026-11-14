@@ -112,6 +112,12 @@ A month is 30 days.
 
 **Included allotments** come off the total (`MetricsBillable`, `LogsBillable`), at the marginal rate, never below zero; each signal keeps its marginal cost.
 
+## What-if pricing
+
+A stored scan can be priced at any other card without rescanning: "what would this usage cost on vendor X, or on our own disks?" is answered with your own series, intervals and bytes. `cost.Reprice(card, costs, tsdb)` takes a scan's stored cost rows and its stored TSDB measurements (`scans.tsdb_*`, read from Prometheus's `/metrics` on every Prometheus scan whatever the card) and returns the costs that card gives. It's exactly what a scan with that card would have recorded; the golden test checks this signal by signal, there and back. `tvt report --price-card <file|preset>` exposes it in S4.
+
+Limits: Mimir scans and scans from before schema v11 have no TSDB measurements, so a self-hosted card needs `retention_days` to price them (bytes per sample is then assumed, 1.5). A self-hosted card has no log rates, so streams cost zero on it.
+
 ## Status
 
-Loader, presets and metric and label costs: S3 item 1. The self-hosted kind for metrics: item 2. Log streams from Loki's volume API: item 3. A self-hosted card has no log rates yet, so streams on it record bytes with zero money. Item 8 checks the disk model against the lab's real TSDB size. `per_million_events_indexed` is read and validated, but no backend reports indexed events yet. Not yet: Grafana Cloud Adaptive Metrics ("already handled" series, never counted as savings), which comes with the Cloud adapters (Sprint 2 item 11).
+Loader, presets and metric and label costs: S3 item 1. The self-hosted kind for metrics: item 2. Log streams from Loki's volume API: item 3. What-if pricing (`cost.Reprice`): item 4. A self-hosted card has no log rates yet, so streams on it record bytes with zero money. Item 8 checks the disk model against the lab's real TSDB size. `per_million_events_indexed` is read and validated, but no backend reports indexed events yet. Not yet: Grafana Cloud Adaptive Metrics ("already handled" series, never counted as savings), which comes with the Cloud adapters (Sprint 2 item 11).

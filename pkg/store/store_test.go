@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 )
 
@@ -795,11 +796,23 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 	sc.Abort()
 }
 
-// v10Drops turns a current database's tables back into version 9's.
-var v10Drops = []string{
+// v11Drops turns a current database's tables back into version 10's.
+var v11Drops = []string{
+	`ALTER TABLE scans DROP COLUMN tsdb_measured`,
+	`ALTER TABLE scans DROP COLUMN tsdb_bytes_per_sample`,
+	`ALTER TABLE scans DROP COLUMN tsdb_head_series`,
+	`ALTER TABLE scans DROP COLUMN tsdb_head_bytes`,
+	`ALTER TABLE scans DROP COLUMN tsdb_blocks_bytes`,
+	`ALTER TABLE scans DROP COLUMN tsdb_retention_ms`,
+	`ALTER TABLE scans DROP COLUMN tsdb_retention_bytes`,
+}
+
+// v10Drops turns a current database's tables back into version 9's
+// (v11Drops first).
+var v10Drops = append(append([]string{}, v11Drops...),
 	`DROP TABLE stream_volumes`,
 	`ALTER TABLE scans DROP COLUMN volume_truncated`,
-}
+)
 
 // v9Drops turns a current database's tables back into version 8's
 // (v10Drops first).
@@ -991,5 +1004,34 @@ func TestUpgradeFromVersion9AndStreamVolumes(t *testing.T) {
 	}
 	if info, _ := s.LatestScan(ctx); !info.VolumeTruncated {
 		t.Error("truncation not recorded")
+	}
+}
+
+// Version 10 databases gain the scan's TSDB measurements.
+func TestUpgradeFromVersion10AndTSDB(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v10.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	scan(t, s, t0, func(sc *Scan) {})
+	for _, q := range append(append([]string{}, v11Drops...), `UPDATE meta SET value = '10' WHERE key = 'schema_version'`) {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	if info, err := s.LatestScan(ctx); err != nil || info.TSDB != nil {
+		t.Fatalf("upgraded scan = %+v, %v", info, err)
+	}
+	want := collect.Storage{BytesPerSample: 0.62, HeadSeries: 60239, HeadBytes: 2.4e8, BlocksBytes: 2.3e9,
+		RetentionTime: 45 * 24 * time.Hour, RetentionBytes: 21474836480}
+	scan(t, s, t0.Add(time.Hour), func(sc *Scan) { must(t, sc.SetTSDB(ctx, want)) })
+	info, err := s.LatestScan(ctx)
+	must(t, err)
+	if info.TSDB == nil || *info.TSDB != want {
+		t.Errorf("tsdb = %+v", info.TSDB)
 	}
 }
