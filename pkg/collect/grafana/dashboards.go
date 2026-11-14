@@ -450,9 +450,17 @@ func (r *resolver) lookupVar(name, raw, typ string) dsRef {
 }
 
 // varName reports whether s is a template variable reference ($ds, ${ds},
-// ${ds:raw}) and returns the variable name.
+// ${ds:raw}, or the legacy [[ds]] / [[ds:raw]] that older dashboards
+// still carry) and returns the variable name.
 func varName(s string) (string, bool) {
-	if !strings.HasPrefix(s, "$") {
+	switch {
+	case strings.HasPrefix(s, "[[") && strings.HasSuffix(s, "]]") && len(s) > 4:
+		s = s[2 : len(s)-2]
+		if i := strings.IndexByte(s, ':'); i >= 0 {
+			s = s[:i]
+		}
+		return s, s != ""
+	case !strings.HasPrefix(s, "$"):
 		return "", false
 	}
 	s = strings.TrimPrefix(s, "$")
