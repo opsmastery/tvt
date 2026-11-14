@@ -40,6 +40,10 @@ func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.R
 			facts[r.SignalID] = f
 		}
 		c := byID[r.ConsumerID]
+		if r.Sweep {
+			f.Swept = true // weak: keeps nothing on its own
+			continue
+		}
 		f.Read = true
 		f.HardKeep = f.HardKeep || c.Kind.HardKeep()
 		if isDashboard(c.Kind) && !c.LastViewed.IsZero() && !c.LastViewed.Before(since) && !c.LastViewed.After(until) {

@@ -290,10 +290,13 @@ var groundTruthConflicts = map[string]string{
 }
 
 // refsTo returns every reference to a signal with its consumer.
+// refsTo is a signal's references, sweeps left out: a sweep (S3 item 6)
+// is weak evidence that keeps nothing on its own, so ground truth's reads
+// never count it.
 func (g scanGraph) refsTo(signalID string) []graph.Reference {
 	var out []graph.Reference
 	for _, r := range g.refs {
-		if r.SignalID == signalID {
+		if r.SignalID == signalID && !r.Sweep {
 			out = append(out, r)
 		}
 	}
@@ -333,7 +336,7 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 			hard = hard || c.Kind.HardKeep()
 			dash = dash || isDashboard(c.Kind)
 			viewed = viewed || isDashboard(c.Kind) && !c.LastViewed.IsZero()
-			adhoc = adhoc || c.Kind == graph.ConsumerAdhocQuery && !r.LastSeen.IsZero()
+			adhoc = adhoc || (c.Kind == graph.ConsumerAdhocQuery || c.Kind == graph.ConsumerAgentQuery) && !r.LastSeen.IsZero()
 		}
 		var ok bool
 		switch e.Class {
@@ -391,7 +394,7 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 				continue
 			}
 			for _, r := range g.refsTo(id) {
-				if k := g.consumers[r.ConsumerID].Kind; k.HardKeep() || isDashboard(k) || k == graph.ConsumerAdhocQuery {
+				if k := g.consumers[r.ConsumerID].Kind; k.HardKeep() || isDashboard(k) || k == graph.ConsumerAdhocQuery || k == graph.ConsumerAgentQuery {
 					t.Errorf("%s matches drop_metric glob %s, but %s reads it", s.Name, name, r.ConsumerID)
 				}
 			}
