@@ -50,6 +50,11 @@ func TestValidate(t *testing.T) {
 		{"no currency", PriceCard{Logs: LogPricing{PerGBIngested: 0.5}}, "currency"},
 		{"no prices", PriceCard{Currency: "USD"}, "no prices"},
 		{"negative", PriceCard{Currency: "USD", Metrics: MetricPricing{PerActiveSeriesMonth: -1}}, "negative"},
+		// Non-finite prices (YAML .nan, .inf) next to a valid one, which the
+		// "no prices" check can't catch: every cost would be NaN or +Inf.
+		{"nan", PriceCard{Currency: "USD", Metrics: MetricPricing{PerActiveSeriesMonth: math.NaN()}, Logs: LogPricing{PerGBIngested: 0.5}}, "not a finite number"},
+		{"+inf", PriceCard{Currency: "USD", Traces: TracePricing{PerGBIngested: math.Inf(1)}, Logs: LogPricing{PerGBIngested: 0.5}}, "not a finite number"},
+		{"-inf", PriceCard{Currency: "USD", Logs: LogPricing{PerGBIngested: 0.5, PerGBMonthRetained: math.Inf(-1)}}, "not a finite number"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
