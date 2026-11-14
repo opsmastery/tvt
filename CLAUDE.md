@@ -85,6 +85,7 @@ Testing (Nov 13): live-lab end-to-end suite, `cmd/tvt/e2e_test.go` behind build 
 
 Bug fixes (Nov 13, from the test-suite bug hunt):
 - `httpx.DefaultClient` refuses a redirect from https to plain http (`httpx.CheckRedirect`): Go strips Authorization only when a redirect changes host, so a same-host downgrade re-sent the bearer token unencrypted.
+- Mimir cardinality reads names whose next character is outside the partition alphabet (dotted OpenTelemetry names, UTF-8, a leading digit) as one more partition, `{__name__=~"<prefix>[^<alphabet>].*"}`, instead of failing the scan; only that partition being cut off too is `ErrTruncated`. `testutil.MimirNames` now evaluates `=~` selectors as regexes.
 
 Sprint 2's must-haves are done except item 11 (Grafana Cloud), which waits on the Cloud test stack and now also carries Grafana SLO. Carry-overs per `docs/tasks/2026-11-sprint2.md`. Next: S3 (`docs/tasks/s03-cost-and-scoring.md`).
 

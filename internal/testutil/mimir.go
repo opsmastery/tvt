@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,9 +68,14 @@ func (m *MimirNames) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	match := func(string) bool { return true }
 	switch {
 	case sel == "":
-	case strings.HasPrefix(sel, `{__name__=~"`) && strings.HasSuffix(sel, `.*"}`):
-		p := strings.TrimSuffix(strings.TrimPrefix(sel, `{__name__=~"`), `.*"}`)
-		match = func(n string) bool { return strings.HasPrefix(n, p) }
+	case strings.HasPrefix(sel, `{__name__=~`) && strings.HasSuffix(sel, `}`):
+		expr, err := strconv.Unquote(strings.TrimSuffix(strings.TrimPrefix(sel, `{__name__=~`), `}`))
+		re, rerr := regexp.Compile("^(?:" + expr + ")$")
+		if err != nil || rerr != nil {
+			m.T.Errorf("MimirNames: bad selector %q: %v %v", sel, err, rerr)
+		} else {
+			match = re.MatchString
+		}
 	case strings.HasPrefix(sel, `{__name__="`) && strings.HasSuffix(sel, `"}`):
 		x := strings.TrimSuffix(strings.TrimPrefix(sel, `{__name__="`), `"}`)
 		match = func(n string) bool { return n == x }
