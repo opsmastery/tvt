@@ -16,6 +16,10 @@
 //	annot:<org>:<dashboard uid>:<annotation name>
 //	slo:<format>:<file>:<name>           SLO definition (declared, hard keep)
 //	runbook:<link>                       alert runbook or Grafana link (declared, hard keep)
+//	qlog:<src>:<hash>                    query-log query: Explore or another API client
+//	qlog:<src>:panel:<org>:<uid>:<id>:<hash>   attributed by the log's headers (Mimir)
+//	qlog:<src>:match:<consumer>:<hash>   matched to a collected panel, variable, annotation or Grafana-managed rule
+//	qlog:<src>:agent:<name>:<hash>       an agent's query
 //
 // References (see resolver) come from every consumer's query: rules,
 // panel targets, query variables and annotations. PromQL selectors resolve
@@ -72,6 +76,8 @@ type Inputs struct {
 	// select is a hard keep. Owners map signals to owners and tiers.
 	External []config.ExternalConsumer
 	Owners   []config.Owner
+	// Clients identifies query-log clients the logs can't name.
+	Clients config.Clients
 	// SLOs are the SLO definitions read from tvt.yaml's slos.paths;
 	// SLOsConfigured says paths were given (an empty list then means none
 	// exist, not that tvt didn't look). Every signal an SLI reads is a
@@ -346,7 +352,7 @@ func Build(in Inputs) (Output, error) {
 
 	// Query logs: one consumer per distinct query (per panel, when the log
 	// attributes it).
-	logged, lq := loggedConsumers(in.Queries, in.Dashboards, in.OrgID, ids)
+	logged, lq := loggedConsumers(in.Queries, in.Dashboards, out.Consumers, in.Clients, in.OrgID, ids)
 	out.Consumers = append(out.Consumers, logged...)
 	queries = append(queries, lq...)
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 )
 
@@ -132,4 +133,133 @@ func FuzzNormalizeQuery(f *testing.F) {
 			t.Fatalf("not idempotent: %q -> %q -> %q", q, n, nn)
 		}
 	})
+}
+
+// Item 5: every logged query is tagged with its client, and Grafana's
+// unattributed queries that match a panel or a Grafana-managed rule become
+// evidence for it.
+func TestLoggedClients(t *testing.T) {
+	at := start.Add(-time.Hour)
+	in := baseInputs()
+	in.Dashboards = []collect.Dashboard{{UID: "shop", Title: "Shop", Panels: []collect.Panel{
+		{ID: 1, Title: "Requests", Queries: []collect.PanelQuery{{DatasourceType: "prometheus",
+			Expr: `sum by (route) (rate(shop_http_requests_total{route=~"$route"}[$__rate_interval]))`}}},
+		{ID: 2, Title: "Requests again", Queries: []collect.PanelQuery{{DatasourceType: "prometheus",
+			Expr: `sum by (route) (rate(shop_http_requests_total{route=~"$route"}[$__rate_interval]))`}}},
+	}}}
+	in.Rules = append(in.Rules, collect.Rule{Source: "grafana", Namespace: "f", Group: "g", Name: "Lag", UID: "lag",
+		Kind: collect.RuleAlert, Language: "promql", EvaluatedBy: collect.EvaluatedByGrafana,
+		Expr:    "max(node_load1)\nsum(node_cpu_seconds_total)",
+		Queries: []collect.PanelQuery{{DatasourceType: "prometheus", Expr: "max(node_load1)"}, {DatasourceType: "prometheus", Expr: "sum(node_cpu_seconds_total)"}}})
+	in.Clients = config.Clients{Agents: []config.Agent{{Name: "finance", Addresses: []string{"10.0.0.23"}}}}
+	in.Queries = []collect.LoggedQuery{
+		// Grafana (10.0.0.6) running both panels' query and the rule's.
+		{Source: "prometheus", Language: "promql", Expr: `sum by (route) (rate(shop_http_requests_total{route=~".*"}[1m]))`, At: at, Client: "10.0.0.6"},
+		{Source: "prometheus", Language: "promql", Expr: "sum(node_cpu_seconds_total)", At: at, Client: "10.0.0.6"},
+		// ... and something else from Grafana: Explore.
+		{Source: "prometheus", Language: "promql", Expr: "node_load1 > 2", At: at, Client: "10.0.0.6"},
+		// Grafana's address a day later, after a restart gave it to
+		// someone else: not Grafana any more.
+		{Source: "prometheus", Language: "promql", Expr: "node_load1 < 0", At: at.Add(24 * time.Hour), Client: "10.0.0.6"},
+		// Another address, no match: another API client.
+		{Source: "prometheus", Language: "promql", Expr: "node_load1", At: at, Client: "10.0.0.9"},
+		// The configured agent, even when its query matches a panel.
+		{Source: "prometheus", Language: "promql", Expr: "sum(node_cpu_seconds_total)", At: at, Client: "10.0.0.23"},
+		// Mimir: an MCP user agent, and Grafana's user agent unmatched.
+		{Source: "mimir", Language: "promql", Expr: `count by (__name__) ({__name__=~".+"})`, At: at, Client: "sweep-agent/1.0 (mcp)"},
+		{Source: "mimir", Language: "promql", Expr: "node_load1 * 2", At: at, Client: "Grafana/12.1.0", Actor: "alice"},
+	}
+	out, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]graph.Consumer{}
+	for _, c := range out.Consumers {
+		if strings.HasPrefix(c.ID, "qlog:") {
+			got[c.ID[:strings.LastIndex(c.ID, ":")]+" "+c.Client] = c
+		}
+	}
+	for _, want := range []struct{ key, name string }{
+		{"qlog:prometheus:match:panel:1:shop:1:0 dashboard", "Shop / Requests (prometheus query log)"},
+		{"qlog:prometheus:match:panel:1:shop:2:0 dashboard", "Shop / Requests again (prometheus query log)"},
+		{"qlog:prometheus:match:rule:grafana:f/g/lag rule", "Lag (evaluations in the prometheus query log)"},
+		{"qlog:prometheus explore", "Explore prometheus query"},
+		{"qlog:prometheus api", ""}, // two: 10.0.0.9's and 10.0.0.6's a day later
+		{"qlog:prometheus:agent:finance agent", "agent finance (prometheus query log)"},
+		{"qlog:mimir:agent:sweep-agent agent", "agent sweep-agent (mimir query log)"},
+		{"qlog:mimir explore", "Explore mimir query by alice"},
+	} {
+		c, ok := got[want.key]
+		if !ok || (want.name != "" && c.Name != want.name) {
+			t.Errorf("%s: %+v (have %v)", want.key, c, keys(got))
+		}
+	}
+	apis := 0
+	for _, c := range out.Consumers {
+		if c.Client == ClientAPI {
+			apis++
+		}
+	}
+	if len(got) != 8 || apis != 2 {
+		t.Errorf("%d query-log consumers: %v", len(got), keys(got))
+	}
+	if c := got["qlog:prometheus:match:panel:1:shop:1:0 dashboard"]; c.Kind != graph.ConsumerDashboardPanel || !c.LastViewed.Equal(at) {
+		t.Errorf("matched panel %+v", c)
+	}
+	if c := got["qlog:prometheus:match:rule:grafana:f/g/lag rule"]; c.Kind != graph.ConsumerAlertRule || c.EvaluatedBy != "grafana" || !c.LastViewed.IsZero() {
+		t.Errorf("matched rule %+v", c)
+	}
+	if c := got["qlog:prometheus:agent:finance agent"]; c.Kind != graph.ConsumerAgentQuery {
+		t.Errorf("agent %+v", c)
+	}
+	// The agent's reference names it as the actor.
+	for _, r := range out.References {
+		if strings.HasPrefix(r.ConsumerID, "qlog:prometheus:agent:finance:") && r.Actor != "finance" {
+			t.Errorf("agent ref actor %q", r.Actor)
+		}
+	}
+
+	// With Grafana's addresses configured, another address's matching
+	// query isn't attributed to the panel.
+	in.Clients.Grafana = []string{"10.0.0.6"}
+	in.Queries = []collect.LoggedQuery{
+		{Source: "prometheus", Language: "promql", Expr: "sum(node_cpu_seconds_total)", At: at, Client: "10.0.0.7"},
+		// Loki logs no sender: still matched.
+		{Source: "loki", Language: "logql", Expr: "max(node_load1)", At: at},
+	}
+	out, err = Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range out.Consumers {
+		switch {
+		case strings.HasPrefix(c.ID, "qlog:prometheus:") && c.Client != ClientAPI:
+			t.Errorf("unconfigured address: %+v", c)
+		case strings.HasPrefix(c.ID, "qlog:loki:") && c.Client != ClientRule:
+			t.Errorf("loki query without a sender: %+v", c)
+		}
+	}
+}
+
+func TestTemplates(t *testing.T) {
+	for _, c := range []struct {
+		tmpl, logged string
+		want         bool
+	}{
+		{`rate(x{a=~"$a"}[$__rate_interval])`, `rate(x{a=~"b|c"}[2m])`, true},
+		{`rate(x{a=~"$a"}[$__rate_interval])`, `rate(y{a=~"b"}[2m])`, false},
+		{`sum(rate({app="x"}[$__auto]))`, `sum(rate({app="x"}[1m]))`, true},
+		{`x{a="${a:regex}"} offset [[off]]`, `x{a="q"} offset 1h`, true},
+		{`up`, `up`, true},
+		{`up`, `up == 1`, false},
+		{`a.b+(c)`, `aXb+(c)`, false}, // literal text is quoted
+	} {
+		tm, ok := newTemplate(graph.Consumer{Expr: c.tmpl})
+		if !ok {
+			t.Fatalf("%s: no template", c.tmpl)
+		}
+		if got := tm.match(normalizeQuery(c.logged)); got != c.want {
+			t.Errorf("%s ~ %s: %v, want %v", c.tmpl, c.logged, got, c.want)
+		}
+	}
 }

@@ -1,5 +1,5 @@
 # Example tvt config. Copy to ./tvt.yaml (git-ignored). `tvt scan --config tvt.yaml`
-# reads external_consumers, ownership, slos and runbooks; the other sections are accepted and read
+# reads external_consumers, ownership, slos, runbooks, pricecard and clients; the other sections are accepted and read
 # by later sprints (backends still come from flags). Unknown keys are errors.
 grafana:
   url: http://localhost:3000
@@ -11,6 +11,17 @@ logs:
   loki: http://localhost:3100
 pricecard: ./pricecard.yaml
 window_days: 30
+
+# Who sent logged queries, where the log can't say (the Prometheus query log
+# records only a client IP). Without grafana, an address that sent a query
+# matching a panel or Grafana-managed rule is taken to be Grafana's.
+clients:
+  grafana: [10.0.0.6]
+  agents:
+    - name: finance-agent
+      user_agent: "^finance-agent/"   # Mimir logs the user agent
+      addresses: [10.0.4.0/24]        # Prometheus logs only the IP
+      actors: [sa-finance-agent]      # the login its token belongs to (X-Grafana-User)
 
 # Consumers tvt can't see in logs (remote-write targets, federation, external
 # tools). Matching signals are treated as hard keeps.

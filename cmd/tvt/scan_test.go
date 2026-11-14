@@ -307,6 +307,7 @@ func TestScanLab(t *testing.T) {
 	}
 	assertCosts(t, db, "prom", "grafana-cloud-pro", false)
 	assertStreamCosts(t, db)
+	assertLoggedClients(t, db)
 
 	ctx := context.Background()
 	st, err := store.Open(ctx, db)
