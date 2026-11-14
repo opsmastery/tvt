@@ -2,7 +2,6 @@ package scan
 
 import (
 	"math"
-	"strings"
 	"testing"
 	"time"
 
@@ -94,7 +93,7 @@ func TestPriceCostsSelfHosted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.BytesPerSampleFrom != FromCompaction || st.RetentionFrom != FromRetentionTime || st.HeadBytesPerSeries != 1000 {
+	if st.BytesPerSampleFrom != cost.FromCompaction || st.RetentionFrom != cost.FromRetentionTime || st.HeadBytesPerSeries != 1000 {
 		t.Errorf("storage %+v", st)
 	}
 	// 100 series × (259200 samples × 0.6 B × 1.2 + 1000 B) × 2 replicas.
@@ -104,56 +103,6 @@ func TestPriceCostsSelfHosted(t *testing.T) {
 	}
 	if l := costs[1]; math.Abs(float64(l.DiskBytes)-wantDisk*0.75) > 2 || math.Abs(l.MonthlyCost-costs[0].MonthlyCost*0.75) > 1e-9 {
 		t.Errorf("label disk %d monthly %v", l.DiskBytes, l.MonthlyCost)
-	}
-}
-
-func TestResolveStorage(t *testing.T) {
-	none := func(float64) float64 { return 0 }
-	card := *selfHostedCard()
-	// Mimir: nothing reported, so retention must come from the card.
-	if _, err := resolveStorage(card, nil, none); err == nil || !strings.Contains(err.Error(), "retention_days") {
-		t.Errorf("no retention: %v", err)
-	}
-	card.SelfHosted.RetentionDays = 400
-	st, err := resolveStorage(card, nil, none)
-	if err != nil || st.Retention != 400*24*time.Hour || st.RetentionFrom != FromCard ||
-		st.BytesPerSample != cost.DefaultBytesPerSample || st.BytesPerSampleFrom != AssumedNoStorage || st.HeadBytesPerSeries != 0 {
-		t.Errorf("mimir: %+v %v", st, err)
-	}
-	// A fresh Prometheus: no compaction yet.
-	card.SelfHosted.RetentionDays = 0
-	st, _ = resolveStorage(card, &collect.Storage{RetentionTime: time.Hour}, none)
-	if st.BytesPerSampleFrom != AssumedNoCompact {
-		t.Errorf("fresh: %+v", st)
-	}
-	// The card's bytes per sample wins over a measurement.
-	card.SelfHosted.BytesPerSample = 2
-	st, _ = resolveStorage(card, &collect.Storage{BytesPerSample: 0.6, RetentionTime: time.Hour}, none)
-	if st.BytesPerSample != 2 || st.BytesPerSampleFrom != FromCard {
-		t.Errorf("override: %+v", st)
-	}
-	// A 10 GB cap at 1 GB a day (after the 1.2 overhead) fills in 9 days
-	// once the 1 GB head is counted, before the 30d time limit.
-	card.SelfHosted.BytesPerSample = 0
-	m := &collect.Storage{BytesPerSample: 1, RetentionTime: 30 * 24 * time.Hour, RetentionBytes: 10e9, HeadBytes: 1e9}
-	st, _ = resolveStorage(card, m, func(bps float64) float64 { return bps / 1.2 * 1e9 })
-	if st.Retention != 9*24*time.Hour || st.RetentionFrom != FromRetentionSize {
-		t.Errorf("size cap: %v %s", st.Retention, st.RetentionFrom)
-	}
-	// Size-only retention (no time flag): the cap decides.
-	sizeOnly := &collect.Storage{BytesPerSample: 1, RetentionBytes: 10e9, HeadBytes: 1e9}
-	st, err = resolveStorage(card, sizeOnly, func(bps float64) float64 { return bps / 1.2 * 1e9 })
-	if err != nil || st.Retention != 9*24*time.Hour || st.RetentionFrom != FromRetentionSize {
-		t.Errorf("size only: %v %s %v", st.Retention, st.RetentionFrom, err)
-	}
-	if _, err := resolveStorage(card, sizeOnly, none); err == nil {
-		t.Error("size only with nothing to price: no error")
-	}
-	// A cap that doesn't fill first leaves the time limit.
-	m.RetentionBytes = 1e15
-	st, _ = resolveStorage(card, m, func(bps float64) float64 { return bps / 1.2 * 1e9 })
-	if st.RetentionFrom != FromRetentionTime {
-		t.Errorf("loose cap: %s", st.RetentionFrom)
 	}
 }
 

@@ -136,6 +136,9 @@ type Output struct {
 	// set, so any selector or label drop can be priced later.
 	StreamVolumes   []graph.StreamVolume
 	VolumeTruncated bool
+	// TSDB is what the Prometheus server reported (Inputs.Storage), stored
+	// so the scan can be repriced; nil when it wasn't read.
+	TSDB *collect.Storage
 }
 
 // Build maps inputs to graph rows. It rejects inputs a scan should never
@@ -407,7 +410,7 @@ func Build(in Inputs) (Output, error) {
 	if err != nil {
 		return Output{}, err
 	}
-	out.PriceCard, out.Storage = in.PriceCard, st
+	out.PriceCard, out.Storage, out.TSDB = in.PriceCard, st, in.Storage
 	return out, nil
 }
 
