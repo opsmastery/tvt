@@ -100,7 +100,10 @@ CREATE TABLE IF NOT EXISTS consumers (
     -- Schema version 7: why tvt couldn't read what the consumer queries
     -- (a datasource type it doesn't parse), '' when it could. Such a
     -- consumer reads unknown signals: never "reads nothing".
-    unparsed     TEXT NOT NULL DEFAULT ''
+    unparsed     TEXT NOT NULL DEFAULT '',
+    -- Query-log consumers: who sent the query (dashboard, rule, explore,
+    -- agent, api); '' for collected consumers.
+    client       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS consumers_scan ON consumers (last_scan);
 
