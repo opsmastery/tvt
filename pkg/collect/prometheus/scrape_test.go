@@ -69,3 +69,31 @@ func TestScrapeExemplarsAndErrors(t *testing.T) {
 		t.Errorf("bad interval: %v", err)
 	}
 }
+
+// Metadata is read one job at a time, from a few targets each: unfiltered,
+// the API returns every target's copy of every metric.
+func TestScrapeMetadataPerJob(t *testing.T) {
+	var asked []string
+	routes := testutil.Routes{
+		"/api/v1/targets":      testutil.File(t, "lab/prometheus/targets.json"),
+		"/api/v1/status/flags": testutil.File(t, "lab/prometheus/flags.json"),
+		"/api/v1/targets/metadata": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			q := r.URL.Query()
+			if q.Get("limit") != "5" || !strings.HasPrefix(q.Get("match_target"), `{job="`) {
+				t.Errorf("unbounded metadata request: %s", r.URL.RawQuery)
+			}
+			asked = append(asked, q.Get("match_target"))
+			w.Write([]byte(`{"status":"success","data":[{"target":{"job":"shop"},"metric":"shop_x","type":"gauge"}]}`))
+		}),
+	}
+	got, err := New(testutil.NewServer(t, routes).URL, "").Scrape(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 6 || asked[0] != `{job="alertmanager"}` {
+		t.Errorf("metadata requests %q, want one per job in order", asked)
+	}
+	if got.Intervals["shop_x"] != 10*time.Second {
+		t.Errorf("shop_x interval %v", got.Intervals["shop_x"])
+	}
+}

@@ -3,6 +3,9 @@ package prometheus
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,8 +15,12 @@ import (
 
 var _ collect.ScrapeSource = (*Client)(nil)
 
+// metadataTargets is how many targets per job Scrape reads metadata from.
+const metadataTargets = 5
+
 // Scrape reads each job's scrape interval (/api/v1/targets), which jobs
-// expose which metric families and their types (/api/v1/targets/metadata),
+// expose which metric families and their types (/api/v1/targets/metadata,
+// per job, a few targets each),
 // and whether exemplar storage is on (/api/v1/status/flags). A metric
 // exposed by several jobs takes the shortest interval: the costliest.
 func (c *Client) Scrape(ctx context.Context) (collect.Scrape, error) {
@@ -24,7 +31,7 @@ func (c *Client) Scrape(ctx context.Context) (collect.Scrape, error) {
 			ScrapeInterval string            `json:"scrapeInterval"`
 		} `json:"activeTargets"`
 	}
-	if _, err := getJSON(ctx, c, "/api/v1/targets", map[string][]string{"state": {"active"}}, &targets); err != nil {
+	if _, err := getJSON(ctx, c, "/api/v1/targets", url.Values{"state": {"active"}}, &targets); err != nil {
 		return collect.Scrape{}, err
 	}
 	out := collect.Scrape{
@@ -46,22 +53,40 @@ func (c *Client) Scrape(ctx context.Context) (collect.Scrape, error) {
 		}
 	}
 
-	var meta []struct {
-		Target map[string]string `json:"target"`
-		Metric string            `json:"metric"`
-		Type   string            `json:"type"`
+	// Target metadata, one job at a time and at most metadataTargets
+	// targets each: unfiltered, the API returns every target's copy of every
+	// metric, hundreds of MB on a large server. A metric only some targets
+	// of a large job expose may be missed; Family then finds no interval
+	// and the scan records the job interval it assumes instead.
+	jobs := make([]string, 0, len(out.JobIntervals))
+	for job := range out.JobIntervals {
+		jobs = append(jobs, job)
 	}
-	if _, err := getJSON(ctx, c, "/api/v1/targets/metadata", nil, &meta); err != nil {
-		return collect.Scrape{}, err
-	}
-	for _, m := range meta {
-		if m.Metric == "" {
-			continue
+	sort.Strings(jobs)
+	for _, job := range jobs {
+		var meta []struct {
+			Target map[string]string `json:"target"`
+			Metric string            `json:"metric"`
+			Type   string            `json:"type"`
 		}
-		if _, ok := out.Types[m.Metric]; !ok || out.Types[m.Metric] == "unknown" {
-			out.Types[m.Metric] = m.Type
+		q := url.Values{
+			"match_target": {fmt.Sprintf("{job=%q}", job)},
+			"limit":        {strconv.Itoa(metadataTargets)},
 		}
-		if d, ok := out.JobIntervals[m.Target["job"]]; ok {
+		if _, err := getJSON(ctx, c, "/api/v1/targets/metadata", q, &meta); err != nil {
+			return collect.Scrape{}, err
+		}
+		for _, m := range meta {
+			if m.Metric == "" {
+				continue
+			}
+			if t, ok := out.Types[m.Metric]; !ok || t == "unknown" {
+				out.Types[m.Metric] = m.Type
+			}
+			d, ok := out.JobIntervals[m.Target["job"]]
+			if !ok {
+				d = out.JobIntervals[job]
+			}
 			if cur, ok := out.Intervals[m.Metric]; !ok || d < cur {
 				out.Intervals[m.Metric] = d
 			}
