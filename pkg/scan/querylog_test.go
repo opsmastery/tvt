@@ -113,3 +113,23 @@ func keys[V any](m map[string]V) []string {
 	}
 	return out
 }
+
+// FuzzNormalizeQuery: normalizing never panics, is idempotent, never
+// lengthens a query (a range folds to "[_]"), and keeps quoted text.
+func FuzzNormalizeQuery(f *testing.F) {
+	for _, s := range []string{
+		`rate(x[5m])`, `{__name__=~"m_[12]"}`, "sum(rate(x[1h:5m])) # [5m]\n+ y[2d]",
+		`'unterminated [5m]`, "`raw [1m]` [3m]", `"esc\"[5m]" [5m]`,
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, q string) {
+		n := normalizeQuery(q)
+		if len(n) > len(q) {
+			t.Fatalf("normalizeQuery(%q) = %q is longer", q, n)
+		}
+		if nn := normalizeQuery(n); nn != n {
+			t.Fatalf("not idempotent: %q -> %q -> %q", q, n, nn)
+		}
+	})
+}

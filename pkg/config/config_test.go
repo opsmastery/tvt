@@ -90,3 +90,17 @@ func errUnwrapAll(err error) error {
 		err = u.Unwrap()
 	}
 }
+
+func TestRelTo(t *testing.T) {
+	for _, c := range []struct{ dir, p, want string }{
+		{"/etc/tvt", "slos", "/etc/tvt/slos"},
+		{"/etc/tvt", "../shared/slos", "/etc/shared/slos"},
+		{"/etc/tvt", "/abs/slos", "/abs/slos"},
+		{"/etc/tvt", ".", "/etc/tvt"},
+		{"", "slos", "slos"},
+	} {
+		if got := relTo(c.dir, c.p); got != filepath.FromSlash(c.want) {
+			t.Errorf("relTo(%q, %q) = %q, want %q", c.dir, c.p, got, c.want)
+		}
+	}
+}
