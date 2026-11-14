@@ -764,3 +764,51 @@ func assertStreamCosts(t *testing.T, db string) {
 	}
 	t.Logf("%d stream signals priced from %d streams", streams, len(vols))
 }
+
+// assertLoggedClients (S3 item 5, Sprint 2 item 15): Grafana's Shop
+// Overview queries in the Prometheus log (from 10.89.0.6, no headers) join
+// to their panels, and the viewer's direct query (10.89.0.9) stays another
+// API client.
+func assertLoggedClients(t *testing.T, db string) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	info, err := st.LatestScan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cons, err := st.Consumers(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	panels := map[string]bool{}
+	clients := map[string]int{}
+	for _, c := range cons {
+		if !strings.HasPrefix(c.ID, "qlog:") {
+			continue
+		}
+		clients[c.Client]++
+		if rest, ok := strings.CutPrefix(c.ID, "qlog:prometheus:match:panel:1:shop-overview:"); ok && c.Client == "dashboard" {
+			panels[rest[:strings.IndexByte(rest, ':')]] = true
+			if c.LastViewed.IsZero() {
+				t.Errorf("%s: matched panel without a last run", c.ID)
+			}
+		}
+		if strings.Contains(c.Expr, "node_memory_MemAvailable_bytes") && c.Client != "api" {
+			t.Errorf("viewer's direct query: client %q", c.Client)
+		}
+	}
+	for _, p := range []string{"1", "2", "3", "4", "5"} {
+		if !panels[p] {
+			t.Errorf("shop-overview panel %s: no query-log match (have %v)", p, panels)
+		}
+	}
+	if clients[""] > 0 {
+		t.Errorf("%d query-log consumers without a client", clients[""])
+	}
+	t.Logf("query-log consumers by client: %v", clients)
+}
