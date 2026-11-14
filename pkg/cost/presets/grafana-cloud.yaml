@@ -1,0 +1,18 @@
+# Grafana Cloud Pro, pay as you go. Approximate: list prices, before volume
+# discounts or contracts. Checked against the public page on the as_of date.
+version: 1
+name: grafana-cloud-pro
+currency: USD
+preset: true
+source: https://grafana.com/pricing/
+as_of: 2026-11-14
+metrics:
+  per_active_series_month: 0.0065   # "Starts at $6.50 / 1k series"
+  included_active_series: 10000     # "10k active series per month" in the Pro platform fee
+logs:
+  per_gb_ingested: 0.45             # $0.050/GB processing + $0.400/GB writing
+  included_gb_month: 50             # "50 GB ingested per month"
+  # 30 days' retention is included. The page lists $0.100/GB "Retaining"
+  # without saying per what, so retention beyond 30 days isn't priced here.
+traces:
+  per_gb_ingested: 0.45             # $0.05/GB processing + $0.40/GB writing (50 GB/month included, not modeled in v1)
