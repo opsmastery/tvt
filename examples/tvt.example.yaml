@@ -1,5 +1,5 @@
 # Example tvt config. Copy to ./tvt.yaml (git-ignored). `tvt scan --config tvt.yaml`
-# reads external_consumers, ownership, slos, runbooks, pricecard and clients; the other sections are accepted and read
+# reads external_consumers, ownership, slos, runbooks, pricecard, clients, sweep_share and window_days; the other sections are accepted and read
 # by later sprints (backends still come from flags). Unknown keys are errors.
 grafana:
   url: http://localhost:3000
@@ -10,6 +10,8 @@ metrics:
 logs:
   loki: http://localhost:3100
 pricecard: ./pricecard.yaml
+# The shortest observation window anything is recommended from: a scan with a
+# shorter --window scores every candidate with confidence 0 (default 30).
 window_days: 30
 
 # Who sent logged queries, where the log can't say (the Prometheus query log

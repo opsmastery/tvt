@@ -796,10 +796,16 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 	sc.Abort()
 }
 
-// v13Drops turns a current database's tables back into version 12's.
-var v13Drops = []string{
-	`ALTER TABLE refs DROP COLUMN sweep`,
+// v14Drops turns a current database's tables back into version 13's.
+var v14Drops = []string{
+	`DROP TABLE scores`,
 }
+
+// v13Drops turns a current database's tables back into version 12's
+// (v14Drops first).
+var v13Drops = append(append([]string{}, v14Drops...),
+	`ALTER TABLE refs DROP COLUMN sweep`,
+)
 
 // v12Drops turns a current database's tables back into version 11's
 // (v13Drops first).
@@ -1126,5 +1132,82 @@ func TestUpgradeFromVersion12AndSweep(t *testing.T) {
 	})
 	if got, _ = s.References(ctx, id); len(got) != 1 || got[0].Sweep {
 		t.Errorf("named read after sweep = %+v", got)
+	}
+}
+
+// Version 13 databases gain scores; a scan's scores read back highest
+// priority first, and bad rows are refused.
+func TestUpgradeFromVersion13AndScores(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v13.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	a := graph.Signal{ID: "prom:metric:a", Kind: graph.KindMetric, Name: "a", Source: "prom", Class: "candidate"}
+	b := graph.Signal{ID: "prom:metric:b", Kind: graph.KindMetric, Name: "b", Source: "prom", Class: "candidate"}
+	scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, a))
+	})
+	for _, q := range append(append([]string{}, v14Drops...), `UPDATE meta SET value = '13' WHERE key = 'schema_version'`) {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	if got, err := s.Scores(ctx, 1); err != nil || len(got) != 0 {
+		t.Fatalf("upgraded scores = %+v, %v", got, err)
+	}
+	want := []graph.Score{
+		{SignalID: b.ID, MonthlyCost: 40, UsageWeight: 0.25, Strongest: "sweep", Confidence: 1, Priority: 32},
+		{SignalID: a.ID, MonthlyCost: 10, UsageWeight: 0, Strongest: "none", Confidence: 0, Priority: 0, Held: "window"},
+	}
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, a))
+		must(t, sc.PutSignal(ctx, b))
+		must(t, sc.PutScore(ctx, want[1]))
+		must(t, sc.PutScore(ctx, want[0]))
+	})
+	got, err := s.Scores(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Scores\n got  %+v\n want %+v", got, want)
+	}
+
+	sc, err := s.BeginScan(ctx, t0.Add(2*time.Hour), 30)
+	must(t, err)
+	defer sc.Abort()
+	must(t, sc.PutSignal(ctx, a))
+	for _, bad := range []graph.Score{
+		{SignalID: a.ID},
+		{SignalID: a.ID, Strongest: "none", Confidence: 1.5},
+		{SignalID: a.ID, Strongest: "none", Held: "maybe"},
+		{SignalID: a.ID, Strongest: "none", UsageWeight: -1},
+	} {
+		if err := sc.PutScore(ctx, bad); err == nil {
+			t.Errorf("stored bad score %+v", bad)
+		}
+	}
+}
+
+// A sweep over every metric name is not a read: LastReads skips it, so it
+// can't make an unread signal look recently read.
+func TestLastReadsSkipSweeps(t *testing.T) {
+	s, _ := open(t)
+	sig := graph.Signal{ID: "prom:metric:m", Kind: graph.KindMetric, Name: "m", Source: "prom"}
+	named := graph.Consumer{ID: "qlog:prometheus:named", Kind: graph.ConsumerAdhocQuery, Name: "q", Expr: "m"}
+	sweep := graph.Consumer{ID: "qlog:prometheus:agent:sweep:1", Kind: graph.ConsumerAgentQuery, Name: "sweep", Expr: `count by (__name__) ({__name__=~".+"})`}
+	scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutConsumer(ctx, named))
+		must(t, sc.PutConsumer(ctx, sweep))
+		must(t, sc.PutReference(ctx, graph.Reference{SignalID: sig.ID, ConsumerID: named.ID, Evidence: graph.EvidenceObserved, LastSeen: t0.Add(-48 * time.Hour)}))
+		must(t, sc.PutReference(ctx, graph.Reference{SignalID: sig.ID, ConsumerID: sweep.ID, Evidence: graph.EvidenceObserved, LastSeen: t0.Add(-time.Hour), Sweep: true}))
+	})
+	reads, err := s.LastReads(ctx)
+	must(t, err)
+	if len(reads) != 1 || reads[0].ConsumerID != named.ID || !reads[0].At.Equal(t0.Add(-48*time.Hour)) {
+		t.Errorf("LastReads = %+v", reads)
 	}
 }
