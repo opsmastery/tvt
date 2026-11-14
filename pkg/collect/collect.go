@@ -68,6 +68,28 @@ type ScrapeSource interface {
 	Scrape(ctx context.Context) (Scrape, error)
 }
 
+// StorageSource reports what a self-hosted TSDB stores, from the server's
+// own metrics (no query: tvt never runs PromQL against a backend).
+type StorageSource interface {
+	Storage(ctx context.Context) (Storage, error)
+}
+
+// Storage is a TSDB's on-disk footprint and limits.
+type Storage struct {
+	// BytesPerSample is compacted chunk bytes over samples since the
+	// server started (prometheus_tsdb_compaction_chunk_{size_bytes,
+	// samples}_sum); 0 before its first compaction.
+	BytesPerSample float64
+	HeadSeries     int64
+	// HeadBytes is the WAL plus the head chunks on disk.
+	HeadBytes   int64
+	BlocksBytes int64
+	// RetentionTime and RetentionBytes are the effective limits; zero when
+	// unset.
+	RetentionTime  time.Duration
+	RetentionBytes int64
+}
+
 // Scrape is how a backend's metrics are scraped.
 type Scrape struct {
 	// Intervals maps a metric family name, as target metadata reports it

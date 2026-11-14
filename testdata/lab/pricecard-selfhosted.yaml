@@ -1,0 +1,13 @@
+# An illustrative self-hosted card for the golden lab scans: block storage
+# at a typical cloud-disk list price, two replicas (an HA pair). Bytes per
+# sample and retention come from the lab Prometheus's /metrics.
+version: 1
+kind: self_hosted
+name: lab-self-hosted
+currency: USD
+source: illustrative, not a quote
+self_hosted:
+  storage_gb_month: 0.08
+  replicas: 2
+  node_sizes:
+    - {name: storage, disk_gb: 500, monthly: 400}
