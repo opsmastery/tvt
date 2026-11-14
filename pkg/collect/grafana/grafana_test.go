@@ -97,6 +97,7 @@ const edgeDashboard = `{"dashboard":{"uid":"edge","title":"Edge cases",
  "templating":{"list":[
   {"name":"ds","type":"datasource","query":"prometheus","current":{"value":"mimir"}},
   {"name":"anyprom","type":"datasource","query":"prometheus","current":{"value":"${DS_PROM}"}},
+  {"name":"logs","type":"datasource","query":"loki","current":{"value":"loki"}},
   {"name":"job","type":"query","datasource":"$ds","query":"label_values(up, job)"},
   {"name":"step","type":"interval","query":"1m,5m"},
   {"name":"env","type":"custom","query":"Production : prod, staging,a\\,b","includeAll":true,"allValue":".*"},
@@ -128,7 +129,8 @@ const edgeDashboard = `{"dashboard":{"uid":"edge","title":"Edge cases",
   {"id":9,"title":"deleted library panel","libraryPanel":{"uid":"gone"}},
   {"id":10,"title":"target overrides panel","datasource":{"uid":"prometheus"},"targets":[
     {"datasource":{"uid":"mimir"},"expr":"c"},{"expr":""}]},
-  {"id":11,"title":"query object","datasource":{"type":"loki","uid":"loki"},"targets":[{"query":{"query":"{app=\"z\"}"}}]}
+  {"id":11,"title":"query object","datasource":{"type":"loki","uid":"loki"},"targets":[{"query":{"query":"{app=\"z\"}"}}]},
+  {"id":12,"title":"legacy [[var]]","datasource":"[[logs]]","targets":[{"expr":"{app=\"shop\"}"}]}
  ]}}`
 
 func TestDashboardEdgeCases(t *testing.T) {
@@ -167,6 +169,9 @@ func TestDashboardEdgeCases(t *testing.T) {
 		8:  {{"prometheus", "prometheus", "node_cpu_seconds_total"}},
 		10: {{"mimir", "prometheus", "c"}},
 		11: {{"loki", "loki", `{app="z"}`}},
+		// Grafana's legacy [[var]] syntax is a datasource variable too, so
+		// the panel's LogQL isn't read as PromQL.
+		12: {{"$logs", "loki", `{app="shop"}`}},
 	}
 	for id, w := range want {
 		if fmt.Sprint(panels[id]) != fmt.Sprint(w) {
@@ -552,5 +557,17 @@ func TestUnparsedDatasourceTargets(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got[0].Annotations, wantA) {
 		t.Errorf("annotations %+v, want %+v", got[0].Annotations, wantA)
+	}
+}
+
+func TestVarName(t *testing.T) {
+	for in, want := range map[string]string{
+		"$ds": "ds", "${ds}": "ds", "${ds:raw}": "ds", "[[ds]]": "ds", "[[ds:raw]]": "ds",
+		"ds": "", "$": "", "${}": "", "[[]]": "", "[[ds": "", "ds]]": "", "[ds]": "",
+	} {
+		got, ok := varName(in)
+		if got != want || ok != (want != "") {
+			t.Errorf("varName(%q) = %q, %v; want %q", in, got, ok, want)
+		}
 	}
 }
