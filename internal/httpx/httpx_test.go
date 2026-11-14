@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -71,5 +73,69 @@ func TestErrorBodyIsBounded(t *testing.T) {
 	got := ErrorBody(strings.NewReader("  " + strings.Repeat("x", 10000)))
 	if len(got) > MaxErrorBytes {
 		t.Fatalf("len = %d, want at most %d", len(got), MaxErrorBytes)
+	}
+}
+
+// An https backend redirecting to plain http on the same host must not get
+// the bearer token re-sent unencrypted: Go strips Authorization only when
+// the host changes. The redirect is refused and the error names no token.
+func TestRedirectNeverDowngradesToken(t *testing.T) {
+	var leaked string
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = r.Header.Get("Authorization")
+	}))
+	defer plain.Close()
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer tls.Close()
+
+	c := DefaultClient()
+	c.Transport = tls.Client().Transport
+	req, err := NewRequest(context.Background(), tls.URL, "/api/search", nil, "secret-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := c.Do(req)
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("https->http redirect was followed")
+	}
+	if leaked != "" {
+		t.Fatalf("plain-http server received Authorization %q", leaked)
+	}
+	if strings.Contains(err.Error(), "secret-token") || !strings.Contains(err.Error(), "refusing redirect from https") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// Redirects that keep or upgrade the scheme still work, up to 10.
+func TestRedirectAllowed(t *testing.T) {
+	mk := func(s string) *http.Request { r, _ := http.NewRequest(http.MethodGet, s, nil); return r }
+	for _, c := range []struct {
+		to   string
+		via  []string
+		fail bool
+	}{
+		{"https://g/b", []string{"https://g/a"}, false},
+		{"http://g/b", []string{"http://g/a"}, false},
+		{"https://g/b", []string{"http://g/a"}, false},
+		{"http://g/c", []string{"https://g/a", "https://g/b"}, true},
+		{"http://g/c", []string{"https://g/a", "http://g/b"}, true}, // the chain started on https
+	} {
+		var via []*http.Request
+		for _, v := range c.via {
+			via = append(via, mk(v))
+		}
+		if err := CheckRedirect(mk(c.to), via); (err != nil) != c.fail {
+			t.Errorf("%v -> %s: err %v, want failure %v", c.via, c.to, err, c.fail)
+		}
+	}
+	via := make([]*http.Request, 10)
+	for i := range via {
+		via[i] = mk("https://g/a")
+	}
+	if CheckRedirect(mk("https://g/b"), via) == nil {
+		t.Error("11th redirect followed")
 	}
 }
