@@ -43,13 +43,16 @@ type Config struct {
 	// the series, naming no metric and restricting no label, is a sweep
 	// (weak evidence). 0 means the default, 0.5.
 	SweepShare float64 `yaml:"sweep_share"`
+	// WindowDays is the shortest observation window anything is
+	// recommended from: a scan with a shorter --window scores every
+	// candidate with confidence 0. 0 means the default, 30.
+	WindowDays int `yaml:"window_days"`
 
 	// Read by later sprints; accepted so one tvt.yaml serves every command.
-	Grafana    yaml.Node `yaml:"grafana"`
-	Metrics    yaml.Node `yaml:"metrics"`
-	Logs       yaml.Node `yaml:"logs"`
-	WindowDays yaml.Node `yaml:"window_days"`
-	Pipelines  yaml.Node `yaml:"pipelines"`
+	Grafana   yaml.Node `yaml:"grafana"`
+	Metrics   yaml.Node `yaml:"metrics"`
+	Logs      yaml.Node `yaml:"logs"`
+	Pipelines yaml.Node `yaml:"pipelines"`
 }
 
 // Clients identifies query-log clients.
@@ -209,6 +212,9 @@ func (c *Config) validate() error {
 		if m.URLPrefix == "" || m.Path == "" {
 			return fmt.Errorf("runbooks.mirrors[%d]: url_prefix and path are required", i)
 		}
+	}
+	if c.WindowDays < 0 {
+		return fmt.Errorf("window_days %d: want a number of days", c.WindowDays)
 	}
 	if c.SweepShare < 0 || c.SweepShare > 1 || c.SweepShare != c.SweepShare {
 		return fmt.Errorf("sweep_share %v: want a share between 0 and 1", c.SweepShare)

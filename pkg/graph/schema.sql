@@ -169,6 +169,21 @@ CREATE TABLE IF NOT EXISTS stream_volumes (
     PRIMARY KEY (scan_id, selector)
 );
 
+-- Schema version 14: each candidate signal's rank in a scan (graph.Score).
+-- strongest names the evidence the usage weight came from; held says why
+-- confidence is 0 ('window', 'coverage', 'new'), '' when it isn't.
+CREATE TABLE IF NOT EXISTS scores (
+    scan_id      INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    signal_id    TEXT NOT NULL REFERENCES signals (id) DEFERRABLE INITIALLY DEFERRED,
+    monthly_cost REAL NOT NULL,
+    usage_weight REAL NOT NULL CHECK (usage_weight >= 0),
+    strongest    TEXT NOT NULL,
+    confidence   REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+    priority     REAL NOT NULL,
+    held         TEXT NOT NULL DEFAULT '' CHECK (held IN ('', 'window', 'coverage', 'new')),
+    PRIMARY KEY (scan_id, signal_id)
+);
+
 -- Dashboard loads in a scan's window, per login and kind. browser = 1 is a
 -- view from the dashboard page; 0 is an API client other than tvt.
 CREATE TABLE IF NOT EXISTS dashboard_loads (

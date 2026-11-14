@@ -33,10 +33,10 @@ import (
 
 // Evidence source names, as stored in scan_sources.
 const (
-	sourcePromQueryLog  = "prometheus query log"
-	sourceMimirQueryLog = "mimir query log"
-	sourceLokiQueryLog  = "loki query log"
-	sourceGrafanaLog    = "grafana router log"
+	sourcePromQueryLog  = scan.SourcePromQueryLog
+	sourceMimirQueryLog = scan.SourceMimirQueryLog
+	sourceLokiQueryLog  = scan.SourceLokiQueryLog
+	sourceGrafanaLog    = scan.SourceGrafanaLog
 )
 
 // Test seams.
@@ -153,6 +153,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			return err
 		}
 		in.External, in.Owners, in.Clients, in.SweepShare = cfg.ExternalConsumers, cfg.Ownership.Owners, cfg.Clients, cfg.SweepShare
+		in.MinWindowDays = cfg.WindowDays
 		if cfg.PriceCard != "" {
 			card, err := cost.Load(cfg.PriceCard)
 			if err != nil {
@@ -386,6 +387,9 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		in.Queries = append(in.Queries, queries...)
 	}
 
+	if in.History, err = history(ctx, o.DB); err != nil {
+		return err
+	}
 	g, err := scan.Build(in)
 	if err != nil {
 		return err
@@ -406,6 +410,8 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		classes[string(score.ClassHardKeep)], classes[string(score.ClassKeepHigh)], classes[string(score.ClassDormant)],
 		classes[string(score.ClassCandidate)], len(in.External))
 
+	fmt.Fprintf(out, "%-12s %s\n", "scores", scoreSummary(g.Scores, in.MinWindowDays))
+
 	id, err := save(ctx, o.DB, start, o.Window, g)
 	if err != nil {
 		return err
@@ -413,6 +419,63 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	fmt.Fprintf(out, "scan %d written to %s: %d signals, %d consumers, %d references, %d dashboard loads, log coverage %s\n",
 		id, o.DB, len(g.Signals), len(g.Consumers), len(g.References), loads(g), percent(g.LogCoverage))
 	return nil
+}
+
+// history reads what earlier scans stored, for scoring: each signal's
+// first sighting and the last reads query logs
+// ever showed. A database that doesn't exist yet is a first scan; history
+// never creates one.
+func history(ctx context.Context, path string) (scan.History, error) {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return scan.History{}, nil
+	}
+	st, err := store.Open(ctx, path)
+	if err != nil {
+		return scan.History{}, err
+	}
+	defer st.Close()
+	var h scan.History
+	if h.FirstSeen, err = st.FirstSeen(ctx); err != nil {
+		return scan.History{}, err
+	}
+	reads, err := st.LastReads(ctx)
+	if err != nil {
+		return scan.History{}, err
+	}
+	for _, r := range reads {
+		h.LastReads = append(h.LastReads, scan.PastRead{SignalID: r.SignalID, At: r.At})
+	}
+	return h, nil
+}
+
+// scoreSummary is the scan's one-line account of its scores: how many
+// candidates were ranked, how many confidence held back and why, and the
+// top one.
+func scoreSummary(scores []graph.Score, minWindow int) string {
+	held := map[string]int{}
+	for _, r := range scores {
+		if r.Held != "" {
+			held[r.Held]++
+		}
+	}
+	line := fmt.Sprintf("%d candidates ranked", len(scores))
+	if n := held[score.HeldWindow]; n > 0 {
+		if minWindow <= 0 {
+			minWindow = score.DefaultMinWindowDays
+		}
+		line += fmt.Sprintf(", none recommendable: the window is shorter than window_days (%d)", minWindow)
+	}
+	if n := held[score.HeldCoverage]; n > 0 {
+		line += fmt.Sprintf(", %d held (no query log could show them read)", n)
+	}
+	if n := held[score.HeldNew]; n > 0 {
+		line += fmt.Sprintf(", %d held (new this scan)", n)
+	}
+	if len(scores) > 0 && scores[0].Priority > 0 {
+		top := scores[0]
+		line += fmt.Sprintf("; top %s (priority %.2f, %s)", top.SignalID, top.Priority, top.Strongest)
+	}
+	return line
 }
 
 // scanBeforeWrite runs after the store is open; tests use it to fail a scan
@@ -493,6 +556,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 	}
 	for _, v := range g.StreamVolumes {
 		if err := sc.PutStreamVolume(ctx, v); err != nil {
+			return err
+		}
+	}
+	for _, r := range g.Scores {
+		if err := sc.PutScore(ctx, r); err != nil {
 			return err
 		}
 	}
