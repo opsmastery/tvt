@@ -24,10 +24,18 @@ CREATE TABLE IF NOT EXISTS scans (
     window_days  INTEGER NOT NULL,
     log_coverage REAL NOT NULL DEFAULT 0, -- 0..1, share of sources with usable query logs
     -- The price card monthly_cost uses (name, its currency, 1 for a vendor
-    -- preset: approximate). Empty when no card was configured.
+    -- preset: approximate, its kind). Empty when no card was configured.
     pricecard    TEXT NOT NULL DEFAULT '',
     currency     TEXT NOT NULL DEFAULT '',
-    price_preset INTEGER NOT NULL DEFAULT 0
+    price_preset INTEGER NOT NULL DEFAULT 0,
+    price_kind   TEXT NOT NULL DEFAULT '',
+    -- A self_hosted card's model inputs and where each came from (the card,
+    -- the server's /metrics, or an assumption).
+    bytes_per_sample      REAL NOT NULL DEFAULT 0,
+    bytes_per_sample_from TEXT NOT NULL DEFAULT '',
+    retention_ms          INTEGER NOT NULL DEFAULT 0,
+    retention_from        TEXT NOT NULL DEFAULT '',
+    head_bytes_per_series REAL NOT NULL DEFAULT 0
 );
 
 -- Coverage of each usage-evidence source for a scan, configured or not.
@@ -127,6 +135,8 @@ CREATE TABLE IF NOT EXISTS costs (
     -- and whether exemplar storage is on.
     buckets       INTEGER NOT NULL DEFAULT 0,
     exemplars     INTEGER NOT NULL DEFAULT 0,
+    -- Self-hosted: bytes on disk over retention, replicas included.
+    disk_bytes    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (signal_id, scan_id)
 );
 
