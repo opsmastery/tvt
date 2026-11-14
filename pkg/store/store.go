@@ -28,7 +28,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -215,6 +215,24 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 9 {
+		for _, q := range []string{
+			`ALTER TABLE scans ADD COLUMN price_kind TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE scans ADD COLUMN bytes_per_sample REAL NOT NULL DEFAULT 0`,
+			`ALTER TABLE scans ADD COLUMN bytes_per_sample_from TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE scans ADD COLUMN retention_ms INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE scans ADD COLUMN retention_from TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE scans ADD COLUMN head_bytes_per_series REAL NOT NULL DEFAULT 0`,
+			`ALTER TABLE costs ADD COLUMN disk_bytes INTEGER NOT NULL DEFAULT 0`,
+			// A card before version 9 was always a vendor card.
+			`UPDATE scans SET price_kind = 'vendor' WHERE pricecard <> ''`,
+			`UPDATE meta SET value = '9' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -225,11 +243,24 @@ type ScanInfo struct {
 	FinishedAt  time.Time
 	WindowDays  int
 	LogCoverage float64
-	// PriceCard, Currency and PricePreset describe the card the scan's
-	// costs use; PriceCard is empty when none was configured.
+	// PriceCard, Currency, PricePreset and PriceKind describe the card the
+	// scan's costs use; PriceCard is empty when none was configured.
 	PriceCard   string
 	Currency    string
 	PricePreset bool
+	PriceKind   string
+	// SelfHosted is the self-hosted model's inputs; nil for a vendor card.
+	SelfHosted *SelfHosted
+}
+
+// SelfHosted is what a self_hosted price card's costs were computed from,
+// and where each input came from.
+type SelfHosted struct {
+	BytesPerSample     float64
+	BytesPerSampleFrom string
+	Retention          time.Duration
+	RetentionFrom      string
+	HeadBytesPerSeries float64
 }
 
 // LatestScan returns the most recent completed scan, or ErrNoScan.
@@ -251,7 +282,8 @@ func (s *Store) Scans(ctx context.Context) ([]ScanInfo, error) {
 
 func (s *Store) scans(ctx context.Context, tail string) ([]ScanInfo, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, started_at, finished_at, window_days, log_coverage, pricecard, currency, price_preset FROM scans `+tail)
+		`SELECT id, started_at, finished_at, window_days, log_coverage, pricecard, currency, price_preset, price_kind,
+		        bytes_per_sample, bytes_per_sample_from, retention_ms, retention_from, head_bytes_per_series FROM scans `+tail)
 	if err != nil {
 		return nil, err
 	}
@@ -259,11 +291,17 @@ func (s *Store) scans(ctx context.Context, tail string) ([]ScanInfo, error) {
 	var out []ScanInfo
 	for rows.Next() {
 		var si ScanInfo
-		var started, finished int64
-		if err := rows.Scan(&si.ID, &started, &finished, &si.WindowDays, &si.LogCoverage, &si.PriceCard, &si.Currency, &si.PricePreset); err != nil {
+		var started, finished, retention int64
+		var sh SelfHosted
+		if err := rows.Scan(&si.ID, &started, &finished, &si.WindowDays, &si.LogCoverage, &si.PriceCard, &si.Currency, &si.PricePreset, &si.PriceKind,
+			&sh.BytesPerSample, &sh.BytesPerSampleFrom, &retention, &sh.RetentionFrom, &sh.HeadBytesPerSeries); err != nil {
 			return nil, err
 		}
 		si.StartedAt, si.FinishedAt = fromMillis(started), fromMillis(finished)
+		if si.PriceKind == "self_hosted" {
+			sh.Retention = time.Duration(retention) * time.Millisecond
+			si.SelfHosted = &sh
+		}
 		out = append(out, si)
 	}
 	return out, rows.Err()
@@ -404,7 +442,7 @@ func (s *Store) LastReads(ctx context.Context) ([]SignalRead, error) {
 func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost,
-		        interval_ms, interval_assumed, buckets, exemplars
+		        interval_ms, interval_assumed, buckets, exemplars, disk_bytes
 		 FROM costs WHERE scan_id = ? ORDER BY signal_id`, scanID)
 	if err != nil {
 		return nil, err
@@ -415,7 +453,7 @@ func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 		var c graph.Cost
 		var observed, interval int64
 		if err := rows.Scan(&c.SignalID, &c.ScanID, &observed, &c.ActiveSeries, &c.DistinctValues, &c.BytesPerDay, &c.SpansPerDay, &c.MonthlyCost,
-			&interval, &c.IntervalAssumed, &c.Buckets, &c.Exemplars); err != nil {
+			&interval, &c.IntervalAssumed, &c.Buckets, &c.Exemplars, &c.DiskBytes); err != nil {
 			return nil, err
 		}
 		c.ObservedAt = fromMillis(observed)
@@ -570,15 +608,15 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 					ELSE max(refs.last_seen, excluded.last_seen) END,
 				last_scan = excluded.last_scan`},
 		{&sc.cost, `INSERT INTO costs (signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost,
-				interval_ms, interval_assumed, buckets, exemplars)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				interval_ms, interval_assumed, buckets, exemplars, disk_bytes)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (signal_id, scan_id) DO UPDATE SET
 				observed_at = excluded.observed_at, active_series = excluded.active_series,
 				distinct_values = excluded.distinct_values,
 				bytes_per_day = excluded.bytes_per_day, spans_per_day = excluded.spans_per_day,
 				monthly_cost = excluded.monthly_cost, interval_ms = excluded.interval_ms,
 				interval_assumed = excluded.interval_assumed, buckets = excluded.buckets,
-				exemplars = excluded.exemplars`},
+				exemplars = excluded.exemplars, disk_bytes = excluded.disk_bytes`},
 		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start, gap)
 			VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
@@ -678,7 +716,7 @@ func (sc *Scan) PutCost(ctx context.Context, c graph.Cost) error {
 	}
 	_, err := sc.cost.ExecContext(ctx, c.SignalID, sc.ID, millis(observed),
 		c.ActiveSeries, c.DistinctValues, c.BytesPerDay, c.SpansPerDay, c.MonthlyCost,
-		c.Interval.Milliseconds(), c.IntervalAssumed, c.Buckets, c.Exemplars)
+		c.Interval.Milliseconds(), c.IntervalAssumed, c.Buckets, c.Exemplars, c.DiskBytes)
 	return wrap("cost", c.SignalID, err)
 }
 
@@ -698,18 +736,29 @@ func (sc *Scan) PutSource(ctx context.Context, src graph.SourceCoverage) error {
 	return wrap("source", src.Source, err)
 }
 
-// PutLoad records aggregated dashboard loads. Each (org, dashboard, login,
 // SetPriceCard records the price card this scan's costs use: its name, its
-// currency, and whether it is a vendor preset (approximate).
-func (sc *Scan) SetPriceCard(ctx context.Context, name, currency string, preset bool) error {
+// currency, whether it is a vendor preset (approximate), and its kind.
+func (sc *Scan) SetPriceCard(ctx context.Context, name, currency string, preset bool, kind string) error {
 	if err := sc.check(); err != nil {
 		return err
 	}
-	_, err := sc.tx.ExecContext(ctx, `UPDATE scans SET pricecard = ?, currency = ?, price_preset = ? WHERE id = ?`,
-		name, currency, preset, sc.ID)
+	_, err := sc.tx.ExecContext(ctx, `UPDATE scans SET pricecard = ?, currency = ?, price_preset = ?, price_kind = ? WHERE id = ?`,
+		name, currency, preset, kind, sc.ID)
 	return wrap("price card", name, err)
 }
 
+// SetSelfHosted records a self_hosted card's model inputs.
+func (sc *Scan) SetSelfHosted(ctx context.Context, sh SelfHosted) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	_, err := sc.tx.ExecContext(ctx, `UPDATE scans SET bytes_per_sample = ?, bytes_per_sample_from = ?, retention_ms = ?,
+		retention_from = ?, head_bytes_per_series = ? WHERE id = ?`,
+		sh.BytesPerSample, sh.BytesPerSampleFrom, sh.Retention.Milliseconds(), sh.RetentionFrom, sh.HeadBytesPerSeries, sc.ID)
+	return wrap("self-hosted model", "", err)
+}
+
+// PutLoad records aggregated dashboard loads. Each (org, dashboard, login,
 // browser) is put once per scan; the caller aggregates.
 func (sc *Scan) PutLoad(ctx context.Context, l graph.DashboardLoad) error {
 	if err := sc.check(); err != nil {

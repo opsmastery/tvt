@@ -92,6 +92,9 @@ type Inputs struct {
 	// recorded as assumed with DefaultIntervalReason.
 	DefaultInterval       time.Duration
 	DefaultIntervalReason string
+	// Storage is what a Prometheus server reports about its TSDB, for a
+	// self_hosted price card; nil when the backend doesn't (Mimir).
+	Storage *collect.Storage
 }
 
 // Evidence sources Build adds itself: definitions tvt reads, not usage
@@ -121,6 +124,9 @@ type Output struct {
 	// PriceCard is the card the costs use (Inputs.PriceCard), for the scan
 	// row; nil when none was configured.
 	PriceCard *cost.PriceCard
+	// Storage is the self-hosted model's resolved inputs; nil for a vendor
+	// card.
+	Storage *cost.Storage
 }
 
 // Build maps inputs to graph rows. It rejects inputs a scan should never
@@ -380,8 +386,11 @@ func Build(in Inputs) (Output, error) {
 	if logs > 0 {
 		out.LogCoverage = sum / float64(logs)
 	}
-	priceCosts(in, out.Costs)
-	out.PriceCard = in.PriceCard
+	st, err := priceCosts(in, out.Costs)
+	if err != nil {
+		return Output{}, err
+	}
+	out.PriceCard, out.Storage = in.PriceCard, st
 	return out, nil
 }
 

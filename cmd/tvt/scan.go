@@ -163,6 +163,9 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			if card.Preset {
 				note = ", a vendor preset: approximate, as of " + card.AsOf
 			}
+			if card.Kind == cost.KindSelfHosted {
+				note = ", self-hosted"
+			}
 			fmt.Fprintf(out, "%-12s %s (%s%s)\n", "pricecard", card.Name, card.Currency, note)
 		}
 		rbReader.Fetch = cfg.Runbooks.Fetch
@@ -242,6 +245,21 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		}
 	} else {
 		in.DefaultIntervalReason = "Mimir has no targets API; assumed 1m"
+	}
+	// A self-hosted card prices disk: Prometheus reports its own TSDB on
+	// /metrics (a GET, never a query). Mimir's footprint lives in object
+	// storage tvt doesn't read, so its card must give the retention.
+	if c := in.PriceCard; c != nil && c.Kind == cost.KindSelfHosted {
+		if in.MetricsSource == "prom" {
+			if st, err := pc.Storage(ctx); err != nil {
+				fmt.Fprintf(out, "%-12s storage unavailable (%v): using the card's and default values\n", "prom", err)
+			} else {
+				in.Storage = &st
+			}
+		}
+		if in.Storage == nil && c.SelfHosted.RetentionDays == 0 {
+			return fmt.Errorf("price card %q is self_hosted and %s doesn't report its retention: set self_hosted.retention_days", c.Name, in.MetricsSource)
+		}
 	}
 	fmt.Fprintf(out, "%-12s %d metrics (%d series), %d labels on the top %d, %d rules\n",
 		in.MetricsSource, len(in.Metrics), series, len(in.Labels), top, len(in.Rules))
@@ -350,6 +368,10 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	if err != nil {
 		return err
 	}
+	if st := g.Storage; st != nil {
+		fmt.Fprintf(out, "%-12s %.2f bytes/sample (%s), %s retention (%s)\n", "disk model",
+			st.BytesPerSample, st.BytesPerSampleFrom, st.Retention.Round(time.Hour), st.RetentionFrom)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -434,7 +456,17 @@ func loads(g scan.Output) int64 {
 
 func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 	if p := g.PriceCard; p != nil {
-		if err := sc.SetPriceCard(ctx, p.Name, p.Currency, p.Preset); err != nil {
+		kind := p.Kind
+		if kind == "" {
+			kind = cost.KindVendor
+		}
+		if err := sc.SetPriceCard(ctx, p.Name, p.Currency, p.Preset, kind); err != nil {
+			return err
+		}
+	}
+	if st := g.Storage; st != nil {
+		if err := sc.SetSelfHosted(ctx, store.SelfHosted{BytesPerSample: st.BytesPerSample, BytesPerSampleFrom: st.BytesPerSampleFrom,
+			Retention: st.Retention, RetentionFrom: st.RetentionFrom, HeadBytesPerSeries: st.HeadBytesPerSeries}); err != nil {
 			return err
 		}
 	}
