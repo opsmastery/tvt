@@ -5,6 +5,7 @@ package cost
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -44,7 +45,8 @@ type TracePricing struct {
 	PerGBIngested   float64 `json:"per_gb_ingested" yaml:"per_gb_ingested"`
 }
 
-// Validate rejects negative prices and an empty card.
+// Validate rejects negative or non-finite prices (YAML .nan, .inf) and an
+// empty card.
 func (p PriceCard) Validate() error {
 	if p.Currency == "" {
 		return errors.New("price card: currency is required")
@@ -59,6 +61,9 @@ func (p PriceCard) Validate() error {
 	}
 	set := false
 	for name, v := range prices {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return fmt.Errorf("price card: %s is not a finite number", name)
+		}
 		if v < 0 {
 			return fmt.Errorf("price card: %s is negative", name)
 		}
