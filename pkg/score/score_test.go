@@ -70,24 +70,108 @@ func TestConfidence(t *testing.T) {
 		coverage  float64
 		firstSeen time.Time
 		want      float64
+		held      string
 	}{
-		{"full", 30, 1, old(), 1},
-		{"long window caps at 1", 90, 1, old(), 1},
-		{"short window", 15, 1, old(), 0.5},
-		{"half coverage", 30, 0.5, old(), 0.5},
-		{"new signal", 30, 1, now.AddDate(0, 0, -7), 0.5},
-		{"unknown first seen", 30, 1, time.Time{}, 1},
-		{"compound", 15, 0.5, now.AddDate(0, 0, -7), 0.125},
+		{"full", 30, 1, old(), 1, ""},
+		{"long window caps at 1", 90, 1, old(), 1, ""},
+		{"short window recommends nothing", 29, 1, old(), 0, HeldWindow},
+		{"half coverage", 30, 0.5, old(), 0.5, ""},
+		{"no coverage", 30, 0, old(), 0, HeldCoverage},
+		{"new signal", 30, 1, now.AddDate(0, 0, -7), 0.5, ""},
+		{"first seen now", 30, 1, now, 0, HeldNew},
+		{"unknown first seen", 30, 1, time.Time{}, 1, ""},
+		{"compound", 30, 0.5, now.AddDate(0, 0, -7), 0.25, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := ctx()
 			c.WindowDays, c.LogCoverage = tt.window, tt.coverage
 			r, _ := Score(Input{MonthlyCost: 1, FirstSeen: tt.firstSeen}, c)
-			if !approx(r.Confidence, tt.want) {
-				t.Fatalf("confidence = %v, want %v", r.Confidence, tt.want)
+			if !approx(r.Confidence, tt.want) || r.Held != tt.held {
+				t.Fatalf("confidence = %v held %q, want %v %q", r.Confidence, r.Held, tt.want, tt.held)
 			}
 		})
+	}
+}
+
+func TestMinWindowDays(t *testing.T) {
+	c := ctx()
+	c.WindowDays, c.MinWindowDays = 14, 7
+	if r, _ := Score(Input{MonthlyCost: 1}, c); r.Confidence != 1 {
+		t.Errorf("14d window with window_days 7: %+v", r)
+	}
+	c.MinWindowDays = 60
+	c.WindowDays = 45
+	if r, _ := Score(Input{MonthlyCost: 1}, c); r.Confidence != 0 || r.Held != HeldWindow {
+		t.Errorf("45d window with window_days 60: %+v", r)
+	}
+}
+
+func TestPerSignalCoverage(t *testing.T) {
+	c := ctx()
+	c.LogCoverage = 1
+	half := 0.5
+	r, _ := Score(Input{MonthlyCost: 10, Coverage: &half}, c)
+	if !approx(r.Confidence, 0.5) || !approx(r.Priority, 5) {
+		t.Fatalf("got %+v", r)
+	}
+}
+
+func TestDeclaredNeverDecays(t *testing.T) {
+	c := ctx()
+	longAgo := now.AddDate(-1, 0, 0)
+	for _, class := range []EvidenceClass{EvidenceDeclared, EvidenceIncident} {
+		r, _ := Score(Input{MonthlyCost: 10, Evidence: []Evidence{{Usage: UsageAdhocQuery, Class: class, LastSeen: longAgo}}}, c)
+		if !approx(r.UsageWeight, 2) {
+			t.Errorf("%s ad hoc read a year ago weighs %v, want 2", class, r.UsageWeight)
+		}
+	}
+	r, _ := Score(Input{MonthlyCost: 10, Evidence: []Evidence{{Usage: UsageRecordingRule, LastSeen: longAgo}}}, c)
+	if !approx(r.UsageWeight, DefaultWeights.RecordingRule) || r.Strongest != UsageRecordingRule {
+		t.Errorf("recording rule: %+v", r)
+	}
+}
+
+func TestObservedDashboardViewDecays(t *testing.T) {
+	c := ctx()
+	r, _ := Score(Input{MonthlyCost: 10, Evidence: []Evidence{
+		{Usage: UsageViewedDashboard, Class: EvidenceObserved, LastSeen: now.Add(-c.Weights.AdhocHalfLife)},
+	}}, c)
+	if !approx(r.UsageWeight, 2.5) {
+		t.Fatalf("weight = %v, want 2.5", r.UsageWeight)
+	}
+}
+
+// A last-seen date kept forever still weighs something, but less and less:
+// "read nine months ago" never becomes "never read", and never protects.
+func TestOldReadKeepsAFadingWeight(t *testing.T) {
+	r, _ := Score(Input{MonthlyCost: 10, Evidence: []Evidence{
+		{Usage: UsageAdhocQuery, Class: EvidenceObserved, LastSeen: now.AddDate(0, -9, 0)},
+	}}, ctx())
+	if r.UsageWeight <= 0 || r.UsageWeight > 0.01 || r.Strongest != UsageAdhocQuery {
+		t.Fatalf("got %+v", r)
+	}
+}
+
+func TestSweepIsWeak(t *testing.T) {
+	c := ctx()
+	sweep, _ := Score(Input{MonthlyCost: 10, Evidence: []Evidence{{Usage: UsageSweep, LastSeen: now}}}, c)
+	stale, _ := Score(Input{MonthlyCost: 10, Evidence: []Evidence{{Usage: UsageStaleDashboard}}}, c)
+	if !approx(sweep.UsageWeight, 0.25) || sweep.UsageWeight >= stale.UsageWeight || sweep.Strongest != UsageSweep {
+		t.Fatalf("sweep %+v stale %+v", sweep, stale)
+	}
+	// A sweep next to a real read changes nothing.
+	both, _ := Score(Input{MonthlyCost: 10, Evidence: []Evidence{{Usage: UsageSweep, LastSeen: now}, {Usage: UsageAdhocQuery, LastSeen: now}}}, c)
+	if !approx(both.UsageWeight, 2) || both.Strongest != UsageAdhocQuery {
+		t.Fatalf("sweep and read: %+v", both)
+	}
+}
+
+func TestUsageString(t *testing.T) {
+	for u := UsageNone; u <= UsageRecordingRule; u++ {
+		if u.String() == "unknown" {
+			t.Errorf("usage %d has no name", u)
+		}
 	}
 }
 

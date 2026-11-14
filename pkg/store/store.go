@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 13
+const SchemaVersion = 14
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -282,6 +282,26 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 14 {
+		for _, q := range []string{
+			`CREATE TABLE IF NOT EXISTS scores (
+				scan_id      INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+				signal_id    TEXT NOT NULL REFERENCES signals (id) DEFERRABLE INITIALLY DEFERRED,
+				monthly_cost REAL NOT NULL,
+				usage_weight REAL NOT NULL CHECK (usage_weight >= 0),
+				strongest    TEXT NOT NULL,
+				confidence   REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+				priority     REAL NOT NULL,
+				held         TEXT NOT NULL DEFAULT '' CHECK (held IN ('', 'window', 'coverage', 'new')),
+				PRIMARY KEY (scan_id, signal_id)
+			)`,
+			`UPDATE meta SET value = '14' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -367,6 +387,26 @@ func (s *Store) scans(ctx context.Context, tail string) ([]ScanInfo, error) {
 			si.SelfHosted = &sh
 		}
 		out = append(out, si)
+	}
+	return out, rows.Err()
+}
+
+// FirstSeen returns every stored signal's first sighting, whichever scan
+// last saw it.
+func (s *Store) FirstSeen(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, first_seen FROM signals`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var id string
+		var first int64
+		if err := rows.Scan(&id, &first); err != nil {
+			return nil, err
+		}
+		out[id] = fromMillis(first)
 	}
 	return out, rows.Err()
 }
@@ -466,7 +506,8 @@ type SignalRead struct {
 	At         time.Time
 }
 
-// LastReads returns, for every signal a query log ever showed being read,
+// LastReads returns, for every signal a query log ever showed being read
+// (a sweep over every metric name is not a read),
 // its most recent read across all scans, ordered by signal. References
 // are kept after the scan that saw them, and their last_seen only moves
 // forward, so a read that has left every log since (rotated away, the
@@ -479,8 +520,8 @@ func (s *Store) LastReads(ctx context.Context) ([]SignalRead, error) {
 		// correlated max would grow quadratically with a signal's history.
 		`SELECT r.signal_id, r.consumer_id, r.actor, r.last_seen FROM refs r
 		 JOIN (SELECT signal_id, max(last_seen) AS latest FROM refs
-		       WHERE last_seen IS NOT NULL GROUP BY signal_id) l
-		   ON l.signal_id = r.signal_id AND r.last_seen = l.latest
+		       WHERE last_seen IS NOT NULL AND sweep = 0 GROUP BY signal_id) l
+		   ON l.signal_id = r.signal_id AND r.last_seen = l.latest AND r.sweep = 0
 		 ORDER BY r.signal_id, r.consumer_id, r.via`)
 	if err != nil {
 		return nil, err
@@ -594,6 +635,27 @@ func (s *Store) StreamVolumes(ctx context.Context, scanID int64) ([]graph.Stream
 	return out, rows.Err()
 }
 
+// Scores returns the candidate ranks of scan scanID, highest priority
+// first.
+func (s *Store) Scores(ctx context.Context, scanID int64) ([]graph.Score, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT signal_id, monthly_cost, usage_weight, strongest, confidence, priority, held
+		 FROM scores WHERE scan_id = ? ORDER BY priority DESC, signal_id`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.Score
+	for rows.Next() {
+		var r graph.Score
+		if err := rows.Scan(&r.SignalID, &r.MonthlyCost, &r.UsageWeight, &r.Strongest, &r.Confidence, &r.Priority, &r.Held); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // Scan is an open scan: a transaction that writes one complete graph.
 // Call Finish to commit it or Abort to discard it; deferring Abort right
 // after BeginScan is safe, since Abort after Finish does nothing.
@@ -610,6 +672,7 @@ type Scan struct {
 	source  *sql.Stmt
 	load    *sql.Stmt
 	volume  *sql.Stmt
+	score   *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -708,6 +771,8 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start, gap)
 			VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.volume, `INSERT INTO stream_volumes (scan_id, selector, bytes_per_day) VALUES (?, ?, ?)`},
+		{&sc.score, `INSERT INTO scores (scan_id, signal_id, monthly_cost, usage_weight, strongest, confidence, priority, held)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`},
 	} {
@@ -847,6 +912,18 @@ func (sc *Scan) PutStreamVolume(ctx context.Context, v graph.StreamVolume) error
 	}
 	_, err := sc.volume.ExecContext(ctx, sc.ID, v.Selector, v.BytesPerDay)
 	return wrap("stream volume", v.Selector, err)
+}
+
+// PutScore records a candidate signal's rank in this scan, once per signal.
+func (sc *Scan) PutScore(ctx context.Context, r graph.Score) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if r.SignalID == "" || r.Strongest == "" {
+		return errors.New("store: score: SignalID and Strongest are required")
+	}
+	_, err := sc.score.ExecContext(ctx, sc.ID, r.SignalID, r.MonthlyCost, r.UsageWeight, r.Strongest, r.Confidence, r.Priority, r.Held)
+	return wrap("score", r.SignalID, err)
 }
 
 // SetVolumeTruncated records that Loki's volume API hit its series limit.

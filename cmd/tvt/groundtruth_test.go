@@ -16,6 +16,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
+	"github.com/Opsmastery-Summit/tvt/pkg/score"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
 
@@ -814,4 +815,58 @@ func assertLoggedClients(t *testing.T, db string) {
 		t.Errorf("%d query-log consumers without a client", clients[""])
 	}
 	t.Logf("query-log consumers by client: %v", clients)
+}
+
+// assertScores: every candidate signal has exactly one score and nothing
+// else has one, scores come highest priority first, and priority is cost /
+// (1 + weight) × confidence. It returns the scores by signal.
+func assertScores(t *testing.T, db string) map[string]graph.Score {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	info, err := st.LatestScan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scores, err := st.Scores(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sigs, err := st.Signals(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]graph.Score{}
+	for i, r := range scores {
+		if _, dup := by[r.SignalID]; dup {
+			t.Errorf("%s scored twice", r.SignalID)
+		}
+		by[r.SignalID] = r
+		if i > 0 && r.Priority > scores[i-1].Priority {
+			t.Errorf("scores out of order at %s", r.SignalID)
+		}
+		if want := r.MonthlyCost / (1 + r.UsageWeight) * r.Confidence; math.Abs(want-r.Priority) > 1e-9 {
+			t.Errorf("%s priority %v, want %v", r.SignalID, r.Priority, want)
+		}
+	}
+	var candidates int
+	for _, s := range sigs {
+		_, scored := by[s.ID]
+		if s.Class == string(score.ClassCandidate) {
+			candidates++
+			if !scored {
+				t.Errorf("candidate %s has no score", s.ID)
+			}
+		} else if scored {
+			t.Errorf("%s (%s) was scored", s.ID, s.Class)
+		}
+	}
+	if candidates == 0 {
+		t.Error("no candidates")
+	}
+	return by
 }

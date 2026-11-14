@@ -108,6 +108,12 @@ type Inputs struct {
 	StreamVolumes []collect.StreamVolume
 	// VolumeTruncated: the volume API hit its series limit.
 	VolumeTruncated bool
+	// History is what earlier scans stored, for scoring; zero for the
+	// first scan.
+	History History
+	// MinWindowDays is tvt.yaml window_days: no candidate gets confidence
+	// from a shorter window. Zero means score.DefaultMinWindowDays.
+	MinWindowDays int
 }
 
 // Evidence sources Build adds itself: definitions tvt reads, not usage
@@ -134,6 +140,8 @@ type Output struct {
 	// LogCoverage is the mean coverage of Sources; an unconfigured source
 	// counts as 0.
 	LogCoverage float64
+	// Scores rank the candidate signals, highest priority first.
+	Scores []graph.Score
 	// PriceCard is the card the costs use (Inputs.PriceCard), for the scan
 	// row; nil when none was configured.
 	PriceCard *cost.PriceCard
@@ -422,6 +430,7 @@ func Build(in Inputs) (Output, error) {
 		return Output{}, err
 	}
 	out.PriceCard, out.Storage, out.TSDB = in.PriceCard, st, in.Storage
+	out.Scores = scoreCandidates(in, out.Signals, out.Consumers, out.References, out.Costs, out.Sources, since)
 	return out, nil
 }
 

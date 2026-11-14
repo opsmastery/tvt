@@ -227,6 +227,24 @@ type Cost struct {
 	DiskBytes int64
 }
 
+// Score is a candidate signal's rank in a scan (score.Score): its monthly
+// cost divided by one plus its usage weight, times the confidence that the
+// evidence would have shown every reader.
+type Score struct {
+	SignalID    string
+	MonthlyCost float64
+	UsageWeight float64
+	// Strongest names the evidence the weight came from (score.Usage's
+	// String: none, sweep, adhoc_query…).
+	Strongest  string
+	Confidence float64
+	Priority   float64
+	// Held says why Confidence is 0, when it is: "window" (the scan's
+	// window is shorter than window_days), "coverage" (no usage log could
+	// have shown the signal read) or "new" (it first appeared in this scan).
+	Held string
+}
+
 // StreamVolume is one Loki stream's ingest in a scan: its full label set as
 // a canonical selector, and its bytes per day.
 type StreamVolume struct {

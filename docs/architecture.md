@@ -32,23 +32,29 @@ Every scan stores a class on every signal (`score.Classify`, applied in `scan.Bu
 
 Weights rank candidates. A viewed dashboard never reaches ranking (it makes the signal `keep_high`), but its weight still applies to label candidates and to the report's evidence.
 
-| Evidence | Weight |
-| --- | --- |
-| Alert, SLO, recording rule that feeds an alert, declared external consumer | Hard keep (never scored) |
-| Dashboard viewed in the last 30 days | 5 (protected: `keep_high`) |
-| Ad hoc or agent query | 2, halving every 15 days since last seen |
-| Dashboard not viewed in 90 days | 0.5 |
-| Nothing | 0 |
+| Evidence | Class | Weight |
+| --- | --- | --- |
+| Alert, SLO, runbook, recording rule that feeds an alert, declared external consumer | declared | Hard keep (never scored) |
+| Dashboard viewed in the window | observed | 5, halving every 15 days since the last view (protected: `keep_high`) |
+| Ad hoc or agent query | observed | 2, halving every 15 days since last seen |
+| Recording rule nothing protected reads | declared | 1, never decays |
+| Dashboard not viewed in the window | declared | 0.5, never decays |
+| Sweep (a query over every metric name, such as an agent's inventory) | observed | 0.25: says the signal exists, not that anyone needs it |
+| Nothing | | 0 |
 
-A signal's weight is its strongest single piece of evidence. Weights are not summed, so many weak references can't outvote "nobody looks at this", and every weight can be explained by one reference.
+A signal's weight is its strongest single piece of evidence. Weights are not summed, so many weak references can't outvote "nobody looks at this", and every weight can be explained by one reference (`scores.strongest`).
+
+Declared and incident evidence never decays: an alert evaluates its query whether anyone looks or not. Observed evidence decays from its last-seen date, and last-seen dates are kept indefinitely (`store.LastReads`), so a read that has rotated out of every log still counts, for less and less: "last read nine months ago" never turns into "never read", and never protects a signal either.
 
 ## Confidence
 
-`window × log coverage × age`, where each factor is in 0..1:
+Confidence is how far the evidence can be trusted to have shown every reader, in 0..1:
 
-- **window:** observation days ÷ 30
-- **log coverage:** the share of backends whose query logs are usable for the window
-- **age:** days since the signal first appeared ÷ 14
+- **window:** a scan whose `--window` is shorter than `window_days` (tvt.yaml, default 30) scores every candidate with confidence 0 (`held = window`). Nothing is recommended from less.
+- **coverage:** the mean coverage of the usage logs that could have shown the signal read: its backend's query log (Prometheus, Mimir or Loki) and Grafana's router log, which shows dashboard views. An unconfigured log counts as 0; with neither, confidence is 0 (`held = coverage`).
+- **age:** days since the signal first appeared ÷ 14, capped at 1. A signal tvt saw in its first scan of that backend predates tvt, so its age is unknown and costs nothing; one that first appears in a later scan is new (`held = new` in that scan).
+
+Only `candidate` signals are scored. Each scan stores one row per candidate in `scores`: cost, usage weight, strongest evidence, confidence, priority and, when confidence is 0, why.
 
 ## Design rules
 
