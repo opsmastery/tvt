@@ -101,6 +101,10 @@ The cost of query logging is disk and log volume, not query latency.
 
    Container addresses are reused: in the lab, after a restart the agent got the address Grafana had before, so a 30-day Prometheus log can hold both under one IP. Matching on text comes first for that reason, and an inferred Grafana address only counts within an hour of its matching queries. Configure `clients.grafana` where addresses are stable.
 
+## Sweeps (S3 item 6)
+
+An agent's "what's here" (`count by (__name__) ({__name__=~".+"})`) touches every metric without depending on any. A query from an observed consumer (query log, dashboard) whose selector names no metric outright, restricts no label, and matches every metric name or selects more than `sweep_share` of the series (`tvt.yaml`, default 0.5) is a sweep: its references are stored with `refs.sweep = 1` and keep nothing on their own. A metric the same query names explicitly (`... + node_load1`) is still read. Alerts, recording rules, SLOs, runbooks and declared external consumers never sweep. tvt's own queries stay out through `X-Query-Tags: Source=tvt`.
+
 ## Proving a query log (Sprint 2 item 4)
 
 A log that stopped being written, or a stale copy, looks exactly like a quiet one. So each `tvt scan` sends one marker query to every query log it can probe, before collecting anything, and re-reads the log for up to `--probe-wait` (default 30s) until the marker shows up:

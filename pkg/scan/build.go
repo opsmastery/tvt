@@ -78,6 +78,8 @@ type Inputs struct {
 	Owners   []config.Owner
 	// Clients identifies query-log clients the logs can't name.
 	Clients config.Clients
+	// SweepShare overrides DefaultSweepShare when positive.
+	SweepShare float64
 	// SLOs are the SLO definitions read from tvt.yaml's slos.paths;
 	// SLOsConfigured says paths were given (an empty list then means none
 	// exist, not that tvt didn't look). Every signal an SLI reads is a
@@ -183,6 +185,9 @@ func Build(in Inputs) (Output, error) {
 	ids := newIDSet()
 
 	res := newResolver(in.MetricsSource, in.Metrics, in.Labels)
+	if in.SweepShare > 0 {
+		res.sweepShare = in.SweepShare
+	}
 	var queries []query
 	dsq := &dsQueries{}
 

@@ -15,6 +15,10 @@ window_days: 30
 # Who sent logged queries, where the log can't say (the Prometheus query log
 # records only a client IP). Without grafana, an address that sent a query
 # matching a panel or Grafana-managed rule is taken to be Grafana's.
+# A query naming no metric that selects more than this share of the series is
+# a sweep: weak evidence that keeps nothing on its own (default 0.5).
+sweep_share: 0.5
+
 clients:
   grafana: [10.0.0.6]
   agents:
