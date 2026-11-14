@@ -261,11 +261,11 @@ func decay(lastSeen time.Time, c Context) float64 {
 // from less), otherwise the coverage of the sources that could have shown
 // the signal read, reduced for a signal younger than newSignalDays.
 func confidence(in Input, c Context) (float64, string) {
-	min := c.MinWindowDays
-	if min <= 0 {
-		min = DefaultMinWindowDays
+	minDays := c.MinWindowDays
+	if minDays <= 0 {
+		minDays = DefaultMinWindowDays
 	}
-	if c.WindowDays < min {
+	if c.WindowDays < minDays {
 		return 0, HeldWindow
 	}
 	coverage := c.LogCoverage
