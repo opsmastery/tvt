@@ -291,6 +291,81 @@ func TestRepriceMatchesRescan(t *testing.T) {
 	same("→ back to grafana-cloud", back, vendorCosts)
 }
 
+// S3 items 5 and 6 on real lab traffic: query_agents.log is a window of
+// the lab Prometheus's query log captured Nov 14 (Grafana's panel queries
+// and Grafana-managed rule evaluations, the sweep agent, the finance
+// agent), scanned with the Nov 9 log so both fall in the window. The sweep
+// keeps nothing: every ground-truth drop stays a drop. The finance agent's
+// named read counts, and the rule's evaluations join to it.
+func TestScanLabAgents(t *testing.T) {
+	old := scanNow
+	scanNow = func() time.Time { return time.Date(2026, 11, 14, 23, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { scanNow = old })
+	l := newLab(t, nil)
+	agents, err := os.ReadFile(filepath.Join(lab, "prometheus/query_agents.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(l.promLog, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(agents); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	db := filepath.Join(t.TempDir(), "tvt.db")
+	var out bytes.Buffer
+	if err := runScan(context.Background(), labOptions(l, db), env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	g := readGraph(t, db)
+	gt := loadGroundTruth(t)
+	assertMetrics(t, g, "prom", gt.Metrics)
+	assertReferences(t, g, "prom", gt)
+	assertClasses(t, g, "prom", gt)
+
+	var sweeps, sweepConsumers int
+	swept := map[string]bool{}
+	for _, r := range g.refs {
+		c := g.consumers[r.ConsumerID]
+		if strings.Contains(c.Expr, `{__name__=~".+"}`) {
+			swept[r.ConsumerID] = true
+			if !r.Sweep {
+				t.Errorf("sweep agent's reference to %s isn't a sweep", r.SignalID)
+			}
+			sweeps++
+		}
+	}
+	sweepConsumers = len(swept)
+	if sweepConsumers != 1 || sweeps < 1000 {
+		t.Errorf("sweep: %d consumers, %d references", sweepConsumers, sweeps)
+	}
+	var finance, rule bool
+	for _, r := range g.refsTo("prom:metric:shop_revenue_dollars_total") {
+		if c := g.consumers[r.ConsumerID]; c.Kind == graph.ConsumerAdhocQuery && !r.LastSeen.IsZero() {
+			finance = true
+		}
+	}
+	for _, c := range g.consumers {
+		if c.Client == "rule" && strings.HasPrefix(c.Name, "Shop order export lag") {
+			rule = true
+		}
+	}
+	if !finance {
+		t.Error("the finance agent's read of shop_revenue_dollars_total isn't a read")
+	}
+	if !rule {
+		t.Error("the Grafana-managed rule's evaluations don't join to Shop order export lag")
+	}
+	for _, s := range g.signals {
+		if s.ID == "prom:metric:shop_revenue_dollars_total" && s.Class != "candidate" {
+			t.Errorf("shop_revenue_dollars_total: class %s, want candidate (read by an agent only)", s.Class)
+		}
+	}
+	t.Logf("sweep: %d references, all weak", sweeps)
+}
+
 func TestScanLab(t *testing.T) {
 	setNow(t)
 	l := newLab(t, nil)
@@ -366,7 +441,7 @@ func TestScanLab(t *testing.T) {
 	assertGrafanaRule(t, g)
 	var rules int
 	for _, c := range g.consumers {
-		if c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule {
+		if (c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule) && !strings.HasPrefix(c.ID, "qlog:") {
 			rules++
 			// Sprint 2 item 16: every ruler's interval, for cost per rule.
 			if want := map[string]time.Duration{"prometheus": 30 * time.Second, "loki": time.Minute, "grafana": time.Minute}[strings.SplitN(c.ID, ":", 3)[1]]; c.Interval != want {
@@ -572,7 +647,7 @@ func TestScanLabMimir(t *testing.T) {
 	want := assertRules(t, g, gt.Mimir.Rules, "mimir") + assertRules(t, g, gt.Rules, "loki", "grafana")
 	var rules int
 	for _, c := range g.consumers {
-		if c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule {
+		if (c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule) && !strings.HasPrefix(c.ID, "qlog:") {
 			rules++
 		}
 	}

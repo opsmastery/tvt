@@ -57,6 +57,7 @@ func TestStrict(t *testing.T) {
 		"ownership:\n  owners:\n    - {name: a, tier: -1}\n":                                "tier -1",
 		"ownership:\n  owners:\n    - {tier: 1}\n":                                          "name is required",
 		"ownership:\n  owners:\n    - {name: a, streams: ['{a=~\"(\"}']}\n":                 "streams",
+		"sweep_share: 1.5\n":                                                                "sweep_share",
 		"clients:\n  grafana: [nope]\n":                                                     "not an IP or CIDR",
 		"clients:\n  agents:\n    - {user_agent: x}\n":                                      "name is required",
 		"clients:\n  agents:\n    - {name: a}\n":                                            "needs user_agent, addresses or actors",

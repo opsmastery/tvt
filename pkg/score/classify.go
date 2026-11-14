@@ -46,6 +46,9 @@ type Facts struct {
 	Name string
 	// Tier is the owning service's tier, or -1 when unknown.
 	Tier int
+	// Swept: a sweep (a query over every metric name) touched it. Weak
+	// evidence: it changes no class, and scoring weighs it low.
+	Swept bool
 }
 
 // Classify returns a signal's class and, for a dormant signal, why it
