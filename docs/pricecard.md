@@ -93,6 +93,28 @@ tvt reads `/metrics` with a GET. It never runs a query, so nothing lands in the 
 
 **Nodes.** Disk is bought in nodes, so a cut that frees disk saves money only when it frees a whole node. `NodeStep` reports the node count before and after: `ceil(total bytes ÷ disk_gb)`, at least one. Worked example: 2,400 GB on 500 GB nodes is 5 nodes. A cut that frees 120 GiB leaves 2,271 GB, still 5 nodes, so it saves $0 of node cost (to be reported as "frees 120 GiB; node count unchanged"). A cut that frees 600 GB leaves 1,800 GB, 4 nodes: $400/month.
 
+### Checked against the lab (S3 item 8)
+
+`scripts/validate-disk-model.sh tvt.db` compares the model's daily growth (one replica: `Σ series × 86400 ÷ interval × bytes_per_sample × overhead`) with the daily increase of `prometheus_tsdb_storage_blocks_bytes`. It needs a scan with a `self_hosted` card. Unlike tvt, it sends range queries, so point it only at the lab or a consenting partner.
+
+Lab, Nov 14, 2026 (scan of 1,548 metrics, 61,368 series; 0.607 bytes/sample measured):
+
+| | MB/day | Model |
+| --- | --- | --- |
+| Model: 6,123 samples/s × 0.607 × 1.2 | 385 | |
+| Nov 11 (5,377 samples/s appended; 0.85 B/sample stored) | 394 | −2.2% |
+| Nov 12 (5,986 samples/s; 0.81 B/sample) | 417 | −7.7% |
+| Nov 10 (5,948 samples/s; 1.70 B/sample) | 875 | outlier |
+| **Median of the three** | **417** | **−7.7%: within 15%, no model change** |
+
+What the numbers say:
+
+- **The overhead factor earns its place.** Chunks alone (0.607 B/sample) would predict 321 MB/day, 20–23% low. A block also holds its index, and that costs most in small blocks: by `promtool tsdb list`, the lab's 2h blocks store 0.81–0.84 B/sample, its 6h blocks 0.72–0.74. The default 1.2 (0.73 B/sample) matches compacted blocks and runs a little under fresh 2h ones.
+- **Bytes per sample follows the data, and the data changes.** Nov 10 appended as many samples as any other day but stored 1.70 B/sample: the lab's first day of data (the Nov 9–10 block holds 1.62 B/sample all-in) compressed far worse than later days. The model measures bytes per sample from compactions since the server last started, so it tracks recent data rather than a server's whole history. The script shows each day's bytes per sample so a day like this stands out, and the median keeps it from deciding.
+- **The sample rate is close.** The model's rate (series ÷ scrape interval) was 6,123/s against 5,377–5,986/s appended (2–14% high): series in the head that stopped being scraped still count until head compaction drops them.
+
+Limits: three usable days, not yet a week. Prometheus was down most of Nov 13 and Nov 9 is partial. Re-run the script once the lab has seven complete days. Not checked here: replicas (one server) and the size-cap retention path (the lab's 20 GB cap is far off).
+
 ## How costs are computed
 
 A month is 30 days.
@@ -120,4 +142,4 @@ Limits: Mimir scans and scans from before schema v11 have no TSDB measurements, 
 
 ## Status
 
-Loader, presets and metric and label costs: S3 item 1. The self-hosted kind for metrics: item 2. Log streams from Loki's volume API: item 3. What-if pricing (`cost.Reprice`): item 4. A self-hosted card has no log rates yet, so streams on it record bytes with zero money. Item 8 checks the disk model against the lab's real TSDB size. `per_million_events_indexed` is read and validated, but no backend reports indexed events yet. Not yet: Grafana Cloud Adaptive Metrics ("already handled" series, never counted as savings), which comes with the Cloud adapters (Sprint 2 item 11).
+Loader, presets and metric and label costs: S3 item 1. The self-hosted kind for metrics: item 2. Log streams from Loki's volume API: item 3. What-if pricing (`cost.Reprice`): item 4. A self-hosted card has no log rates yet, so streams on it record bytes with zero money. Item 8 checked the disk model against the lab's real block growth (−7.7%, above). `per_million_events_indexed` is read and validated, but no backend reports indexed events yet. Not yet: Grafana Cloud Adaptive Metrics ("already handled" series, never counted as savings), which comes with the Cloud adapters (Sprint 2 item 11).
