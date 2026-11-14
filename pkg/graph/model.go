@@ -206,6 +206,14 @@ type Cost struct {
 	SpansPerDay    int64   // span attributes
 	MonthlyCost    float64 // in the price card's currency
 	ObservedAt     time.Time
+	// Interval is the scrape (or rule evaluation) interval a metric's
+	// samples are counted at; IntervalAssumed says why when no API gave it.
+	Interval        time.Duration
+	IntervalAssumed string
+	// Buckets is a histogram _bucket metric's bucket count (its le values);
+	// Exemplars is true when exemplar storage is on for it.
+	Buckets   int64
+	Exemplars bool
 }
 
 // DashboardLoad aggregates loads of one dashboard by one login in a scan's

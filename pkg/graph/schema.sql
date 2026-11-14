@@ -22,7 +22,12 @@ CREATE TABLE IF NOT EXISTS scans (
     started_at   INTEGER NOT NULL,
     finished_at  INTEGER NOT NULL,
     window_days  INTEGER NOT NULL,
-    log_coverage REAL NOT NULL DEFAULT 0  -- 0..1, share of sources with usable query logs
+    log_coverage REAL NOT NULL DEFAULT 0, -- 0..1, share of sources with usable query logs
+    -- The price card monthly_cost uses (name, its currency, 1 for a vendor
+    -- preset: approximate). Empty when no card was configured.
+    pricecard    TEXT NOT NULL DEFAULT '',
+    currency     TEXT NOT NULL DEFAULT '',
+    price_preset INTEGER NOT NULL DEFAULT 0
 );
 
 -- Coverage of each usage-evidence source for a scan, configured or not.
@@ -114,6 +119,14 @@ CREATE TABLE IF NOT EXISTS costs (
     bytes_per_day INTEGER NOT NULL DEFAULT 0,
     spans_per_day INTEGER NOT NULL DEFAULT 0,
     monthly_cost  REAL NOT NULL DEFAULT 0,
+    -- Metrics: the scrape interval samples are counted at, and why it was
+    -- assumed when no API gave it (empty when measured).
+    interval_ms   INTEGER NOT NULL DEFAULT 0,
+    interval_assumed TEXT NOT NULL DEFAULT '',
+    -- Histogram _bucket series: the bucket count multiplying the series,
+    -- and whether exemplar storage is on.
+    buckets       INTEGER NOT NULL DEFAULT 0,
+    exemplars     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (signal_id, scan_id)
 );
 

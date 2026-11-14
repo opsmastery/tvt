@@ -34,6 +34,9 @@ get "$PROM/api/v1/status/tsdb?limit=100000" "$OUT/prometheus/tsdb.json"
 get "$PROM/api/v1/rules"                  "$OUT/prometheus/rules.json"
 get "$PROM/api/v1/label/__name__/values"  "$OUT/prometheus/metric_names.json"
 get "$PROM/api/v1/status/buildinfo"       "$OUT/prometheus/buildinfo.json"
+get "$PROM/api/v1/targets?state=active"  "$OUT/prometheus/targets.json"           # scrape interval per job (S3 costs)
+get "$PROM/api/v1/targets/metadata"       "$OUT/prometheus/targets_metadata.json"  # metric family -> job, type
+get "$PROM/api/v1/status/flags"           "$OUT/prometheus/flags.json"             # exemplar-storage
 get "$PROM/api/v1/series?match[]=shop_cart_operations_total&limit=200" "$OUT/prometheus/series_cart_ops.json"
 if (cd "$LAB_DIR" && podman compose exec -T prometheus tail -n 500 /prometheus/query.log) \
      > "$OUT/prometheus/query.log" 2>/dev/null; then

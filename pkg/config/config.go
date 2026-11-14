@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 
@@ -31,12 +32,14 @@ type Config struct {
 	SLOs SLOs `yaml:"slos"`
 	// Runbooks says how to read the runbooks alerts link to.
 	Runbooks Runbooks `yaml:"runbooks"`
+	// PriceCard is a price card file (docs/pricecard.md), relative to
+	// tvt.yaml, or the name of a shipped preset such as grafana-cloud.
+	PriceCard string `yaml:"pricecard"`
 
 	// Read by later sprints; accepted so one tvt.yaml serves every command.
 	Grafana    yaml.Node `yaml:"grafana"`
 	Metrics    yaml.Node `yaml:"metrics"`
 	Logs       yaml.Node `yaml:"logs"`
-	Pricecard  yaml.Node `yaml:"pricecard"`
 	WindowDays yaml.Node `yaml:"window_days"`
 	Pipelines  yaml.Node `yaml:"pipelines"`
 }
@@ -110,6 +113,9 @@ func Load(path string) (*Config, error) {
 	for i, m := range c.Runbooks.Mirrors {
 		c.Runbooks.Mirrors[i].Path = relTo(dir, m.Path)
 	}
+	if isPath(c.PriceCard) {
+		c.PriceCard = relTo(dir, c.PriceCard)
+	}
 	return c, nil
 }
 
@@ -173,6 +179,12 @@ func (c *Config) validate() error {
 		}
 	}
 	return nil
+}
+
+// isPath reports whether a pricecard value names a file rather than a
+// preset: it has a directory separator or a YAML extension.
+func isPath(v string) bool {
+	return strings.ContainsAny(v, `/\`) || strings.HasSuffix(v, ".yaml") || strings.HasSuffix(v, ".yml")
 }
 
 func relTo(dir, p string) string {
