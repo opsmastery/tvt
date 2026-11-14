@@ -224,14 +224,19 @@ func TestLoggedClients(t *testing.T) {
 	in.Clients.Grafana = []string{"10.0.0.6"}
 	in.Queries = []collect.LoggedQuery{
 		{Source: "prometheus", Language: "promql", Expr: "sum(node_cpu_seconds_total)", At: at, Client: "10.0.0.7"},
+		// Loki logs no sender: still matched.
+		{Source: "loki", Language: "logql", Expr: "max(node_load1)", At: at},
 	}
 	out, err = Build(in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range out.Consumers {
-		if strings.HasPrefix(c.ID, "qlog:") && c.Client != ClientAPI {
+		switch {
+		case strings.HasPrefix(c.ID, "qlog:prometheus:") && c.Client != ClientAPI:
 			t.Errorf("unconfigured address: %+v", c)
+		case strings.HasPrefix(c.ID, "qlog:loki:") && c.Client != ClientRule:
+			t.Errorf("loki query without a sender: %+v", c)
 		}
 	}
 }
