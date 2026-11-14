@@ -108,8 +108,10 @@ A month is 30 days.
 
 **Histograms:** a `_bucket` metric's series are its dimensions × its buckets, so the bucket count (`le` values, when its labels were collected) is stored with its cost, and exemplars are flagged when Prometheus runs with `exemplar-storage`.
 
+**Log streams.** tvt reads every stream's bytes over the last 24 hours from Loki's index volume API (`/loki/api/v1/index/volume`, answered from the index without reading chunks), one request per label name (`{name=~".+"}`, grouped by every label name; Loki's own `__stream_shard__` is left out so a sharded stream counts once). Each stream signal (a selector a query reads) costs the streams its selector matches. Selectors overlap, so their costs aren't additive. Each stream's own bytes are stored too (`stream_volumes`, by full label set), so any selector or label drop can be priced later without rescanning. A response that hits the 10,000-series limit is flagged on the scan (`volume_truncated`): stream bytes are then low.
+
 **Included allotments** come off the total (`MetricsBillable`, `LogsBillable`), at the marginal rate, never below zero; each signal keeps its marginal cost.
 
 ## Status
 
-Loader, presets and metric and label costs: S3 item 1. The self-hosted kind for metrics: item 2 (Loki streams on a self-hosted card follow with item 3). Log streams are priced from Loki's volume API in item 3. Item 8 checks the disk model against the lab's real TSDB size. `per_million_events_indexed` is read and validated, but no backend reports indexed events yet. Not yet: Grafana Cloud Adaptive Metrics ("already handled" series, never counted as savings), which comes with the Cloud adapters (Sprint 2 item 11).
+Loader, presets and metric and label costs: S3 item 1. The self-hosted kind for metrics: item 2. Log streams from Loki's volume API: item 3. A self-hosted card has no log rates yet, so streams on it record bytes with zero money. Item 8 checks the disk model against the lab's real TSDB size. `per_million_events_indexed` is read and validated, but no backend reports indexed events yet. Not yet: Grafana Cloud Adaptive Metrics ("already handled" series, never counted as savings), which comes with the Cloud adapters (Sprint 2 item 11).

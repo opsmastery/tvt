@@ -3,12 +3,14 @@ package scan
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 )
 
 // priceCosts fills each metric and label cost row in place: the interval a
@@ -115,6 +117,10 @@ func priceCosts(in Inputs, costs []graph.Cost) (*cost.Storage, error) {
 	}
 	for i := range costs {
 		c := &costs[i]
+		if strings.HasPrefix(c.SignalID, streamPrefix) {
+			c.MonthlyCost = in.PriceCard.LogMonthly(c.BytesPerDay)
+			continue
+		}
 		rest, ok := strings.CutPrefix(c.SignalID, labelPrefix)
 		if !ok {
 			continue
@@ -195,6 +201,62 @@ func resolveStorage(card cost.PriceCard, m *collect.Storage, bytesPerDay func(bp
 		return st, fmt.Errorf("price card %q is self_hosted: the server's size-only retention can't be modeled yet (no samples priced); set self_hosted.retention_days", card.Name)
 	}
 	return st, nil
+}
+
+const streamPrefix = "loki:stream:"
+
+// streamCosts gives every stream signal the bytes per day of the Loki
+// streams its selector matches (every stream for AllStreams), and returns
+// each stream's own volume. Selectors overlap, so stream signal bytes
+// aren't additive: the per-stream volumes are.
+func streamCosts(vols []collect.StreamVolume, signals []graph.Signal, at time.Time) ([]graph.Cost, []graph.StreamVolume, error) {
+	perDay := make([]int64, len(vols))
+	out := make([]graph.StreamVolume, len(vols))
+	for i, v := range vols {
+		if v.Window <= 0 {
+			return nil, nil, fmt.Errorf("scan: stream volume %v: no window", v.Labels)
+		}
+		perDay[i] = int64(float64(v.Bytes) * float64(24*time.Hour) / float64(v.Window))
+		ms := make([]parse.Matcher, 0, len(v.Labels))
+		for k, val := range v.Labels {
+			ms = append(ms, parse.Matcher{Label: k, Op: parse.MatchEqual, Value: val})
+		}
+		out[i] = graph.StreamVolume{Selector: parse.CanonicalSelector(ms), BytesPerDay: perDay[i]}
+	}
+	var costs []graph.Cost
+	for _, s := range signals {
+		if s.Kind != graph.KindStream {
+			continue
+		}
+		// Volume is a cost input, not protection: a selector tvt can't
+		// evaluate (a regex Go won't compile) gets no cost row rather than
+		// failing the scan.
+		var matchers []parse.Matcher
+		if s.Name != AllStreams {
+			refs, err := parse.LogQL(s.Name)
+			if err != nil || len(refs) != 1 {
+				continue
+			}
+			matchers = refs[0].Matchers
+		}
+		var total int64
+		ok := true
+		for i, v := range vols {
+			match, err := parse.MatchesLabels(matchers, v.Labels)
+			if err != nil {
+				ok = false
+				break
+			}
+			if match {
+				total += perDay[i]
+			}
+		}
+		if ok {
+			costs = append(costs, graph.Cost{SignalID: s.ID, BytesPerDay: total, ObservedAt: at})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Selector < out[j].Selector })
+	return costs, out, nil
 }
 
 func familyOf(s *collect.Scrape, series string) (string, bool) {
