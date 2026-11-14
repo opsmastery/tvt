@@ -195,6 +195,11 @@ type Reference struct {
 	// assumed reference still protects the signal.
 	Assumed bool
 	Reasons []string
+	// Sweep: the consumer read the signal only as part of a query over
+	// every metric name or most of the series ({__name__=~".+"}, an
+	// agent's "what's here"). Weak evidence: it never keeps a signal on
+	// its own. The same consumer naming the signal makes it a read.
+	Sweep bool
 }
 
 // Cost is the observed volume of a signal and what it costs per month.
