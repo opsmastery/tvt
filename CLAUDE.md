@@ -83,6 +83,9 @@ Sprint 2 (`docs/tasks/2026-11-sprint2.md`):
 
 Testing (Nov 13): live-lab end-to-end suite, `cmd/tvt/e2e_test.go` behind build tag `e2e` (CI and the pre-push hook skip it). `make e2e` runs tvt-lab's `export-logs`, then the scan against the running lab (Prometheus+Loki and Mimir modes, the probe sent for real), asserted against the lab's own `ground-truth.yaml` with the golden helpers (`parseGroundTruth`, `assertDeclared` now takes the lab dir). Needs `TVT_GRAFANA_TOKEN`; backends via `TVT_E2E_GRAFANA`/`_PROM`/`_MIMIR`/`_LOKI`, lab checkout via `TVT_LAB_DIR`. Every request passes a read-only transport (GET only, no query but the probe). The suite keeps only Grafana log lines from the lab's container network (`TVT_E2E_LAB_NET`, default `10.89.`): a human opening a dashboard from the host is real use, but outside the ground truth's model. New unit tests (envelope decoding, `matcherMatches`, `QueryLanguage`, `relTo`, `datasourceRef`, `stringArg`) and fuzzers (Mimir and Loki query logs, `slo.Parse`, `config.Parse`, `runbook.Links`, `normalizeQuery`).
 
+Bug fixes (Nov 13, from the test-suite bug hunt):
+- `httpx.DefaultClient` refuses a redirect from https to plain http (`httpx.CheckRedirect`): Go strips Authorization only when a redirect changes host, so a same-host downgrade re-sent the bearer token unencrypted.
+
 Sprint 2's must-haves are done except item 11 (Grafana Cloud), which waits on the Cloud test stack and now also carries Grafana SLO. Carry-overs per `docs/tasks/2026-11-sprint2.md`. Next: S3 (`docs/tasks/s03-cost-and-scoring.md`).
 
 Run `scripts/capture-fixtures.sh` against the lab first and build against those fixtures.
