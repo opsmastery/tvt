@@ -246,17 +246,19 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	} else {
 		in.DefaultIntervalReason = "Mimir has no targets API; assumed 1m"
 	}
-	// A self-hosted card prices disk: Prometheus reports its own TSDB on
-	// /metrics (a GET, never a query). Mimir's footprint lives in object
-	// storage tvt doesn't read, so its card must give the retention.
-	if c := in.PriceCard; c != nil && c.Kind == cost.KindSelfHosted {
-		if in.MetricsSource == "prom" {
-			if st, err := pc.Storage(ctx); err != nil {
-				fmt.Fprintf(out, "%-12s storage unavailable (%v): using the card's and default values\n", "prom", err)
-			} else {
-				in.Storage = &st
-			}
+	// Prometheus reports its own TSDB on /metrics (a GET, never a query).
+	// A self-hosted card prices disk from it; with any card it's stored so
+	// the scan can be repriced at a self-hosted card later. Mimir's
+	// footprint lives in object storage tvt doesn't read, so a self-hosted
+	// card for it must give the retention.
+	if in.MetricsSource == "prom" {
+		if st, err := pc.Storage(ctx); err != nil {
+			fmt.Fprintf(out, "%-12s TSDB storage unavailable (%v): a self-hosted card uses its own and default values\n", "prom", err)
+		} else {
+			in.Storage = &st
 		}
+	}
+	if c := in.PriceCard; c != nil && c.Kind == cost.KindSelfHosted {
 		if in.Storage == nil && c.SelfHosted.RetentionDays == 0 {
 			return fmt.Errorf("price card %q is self_hosted and %s doesn't report its retention: set self_hosted.retention_days", c.Name, in.MetricsSource)
 		}
@@ -481,6 +483,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 			kind = cost.KindVendor
 		}
 		if err := sc.SetPriceCard(ctx, p.Name, p.Currency, p.Preset, kind); err != nil {
+			return err
+		}
+	}
+	if g.TSDB != nil {
+		if err := sc.SetTSDB(ctx, *g.TSDB); err != nil {
 			return err
 		}
 	}
