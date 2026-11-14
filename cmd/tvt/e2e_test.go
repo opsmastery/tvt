@@ -274,7 +274,7 @@ func TestE2EScanPrometheus(t *testing.T) {
 	want := assertRules(t, g, gt.Rules, "prometheus", "loki", "grafana")
 	var rules int
 	for _, c := range g.consumers {
-		if c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule {
+		if (c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule) && !strings.HasPrefix(c.ID, "qlog:") {
 			rules++
 		}
 	}
@@ -352,7 +352,7 @@ func TestE2EScanMimir(t *testing.T) {
 	want := assertRules(t, g, gt.Mimir.Rules, "mimir") + assertRules(t, g, gt.Rules, "loki", "grafana")
 	var rules int
 	for _, c := range g.consumers {
-		if c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule {
+		if (c.Kind == graph.ConsumerAlertRule || c.Kind == graph.ConsumerRecordingRule) && !strings.HasPrefix(c.ID, "qlog:") {
 			rules++
 		}
 	}

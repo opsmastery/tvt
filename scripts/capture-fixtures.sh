@@ -44,6 +44,11 @@ if (cd "$LAB_DIR" && podman compose exec -T prometheus tail -n 500 /prometheus/q
 else
   echo "  FAIL query.log (is LAB_DIR=$LAB_DIR right?)" >&2
 fi
+# query_agents.log (S3 items 5-6) is a hand-picked window of the mounted
+# log ($LAB_DIR/lab-logs/prometheus/query.log, rule evaluations dropped)
+# holding the agents' queries and the Grafana-managed rule's evaluations:
+# the agents run every 15 minutes, so the last 500 lines rarely have them.
+# Recapture it by hand when those seeds change.
 fi
 
 if want loki; then

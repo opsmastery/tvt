@@ -39,6 +39,10 @@ type Config struct {
 	// Clients says who sent logged queries where the log can't (the
 	// Prometheus query log records only an IP).
 	Clients Clients `yaml:"clients"`
+	// SweepShare: an observed query that selects more than this share of
+	// the series, naming no metric and restricting no label, is a sweep
+	// (weak evidence). 0 means the default, 0.5.
+	SweepShare float64 `yaml:"sweep_share"`
 
 	// Read by later sprints; accepted so one tvt.yaml serves every command.
 	Grafana    yaml.Node `yaml:"grafana"`
@@ -205,6 +209,9 @@ func (c *Config) validate() error {
 		if m.URLPrefix == "" || m.Path == "" {
 			return fmt.Errorf("runbooks.mirrors[%d]: url_prefix and path are required", i)
 		}
+	}
+	if c.SweepShare < 0 || c.SweepShare > 1 || c.SweepShare != c.SweepShare {
+		return fmt.Errorf("sweep_share %v: want a share between 0 and 1", c.SweepShare)
 	}
 	for _, a := range c.Clients.Grafana {
 		if _, err := ParseAddress(a); err != nil {

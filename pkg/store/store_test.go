@@ -796,10 +796,16 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 	sc.Abort()
 }
 
-// v12Drops turns a current database's tables back into version 11's.
-var v12Drops = []string{
-	`ALTER TABLE consumers DROP COLUMN client`,
+// v13Drops turns a current database's tables back into version 12's.
+var v13Drops = []string{
+	`ALTER TABLE refs DROP COLUMN sweep`,
 }
+
+// v12Drops turns a current database's tables back into version 11's
+// (v13Drops first).
+var v12Drops = append(append([]string{}, v13Drops...),
+	`ALTER TABLE consumers DROP COLUMN client`,
+)
 
 // v11Drops turns a current database's tables back into version 10's
 // (v12Drops first).
@@ -1070,5 +1076,55 @@ func TestUpgradeFromVersion11AndClient(t *testing.T) {
 	must(t, err)
 	if len(got) != 1 || got[0].Client != "agent" {
 		t.Errorf("consumers = %+v", got)
+	}
+}
+
+// Version 12 databases gain refs.sweep; within one scan, a named read of a
+// signal wins over the same consumer's sweep of it.
+func TestUpgradeFromVersion12AndSweep(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v12.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	sig := graph.Signal{ID: "prom:metric:up", Kind: graph.KindMetric, Name: "up", Source: "prom"}
+	con := graph.Consumer{ID: "qlog:prometheus:abc", Kind: graph.ConsumerAdhocQuery, Name: "q", Expr: "up"}
+	ref := graph.Reference{SignalID: sig.ID, ConsumerID: con.ID, Evidence: graph.EvidenceObserved}
+	scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutConsumer(ctx, con))
+		must(t, sc.PutReference(ctx, ref))
+	})
+	for _, q := range append(append([]string{}, v13Drops...), `UPDATE meta SET value = '12' WHERE key = 'schema_version'`) {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	got, err := s.References(ctx, 1)
+	must(t, err)
+	if len(got) != 1 || got[0].Sweep {
+		t.Fatalf("upgraded refs = %+v", got)
+	}
+	swept := ref
+	swept.Sweep = true
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutConsumer(ctx, con))
+		must(t, sc.PutReference(ctx, swept))
+	})
+	if got, _ = s.References(ctx, id); len(got) != 1 || !got[0].Sweep {
+		t.Errorf("swept refs = %+v", got)
+	}
+	id = scan(t, s, t0.Add(2*time.Hour), func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutConsumer(ctx, con))
+		must(t, sc.PutReference(ctx, swept))
+		must(t, sc.PutReference(ctx, ref))
+	})
+	if got, _ = s.References(ctx, id); len(got) != 1 || got[0].Sweep {
+		t.Errorf("named read after sweep = %+v", got)
 	}
 }
