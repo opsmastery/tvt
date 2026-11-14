@@ -119,26 +119,59 @@ func TestMetricCardinalityTruncated(t *testing.T) {
 
 func TestMetricCardinalityNamesOutsideAlphabet(t *testing.T) {
 	// Once a response is cut off, names the prefix partitions can't reach
-	// (UTF-8 names, a dot after a prefix) must fail the scan, not vanish.
+	// (UTF-8 names, OpenTelemetry's dotted names, a leading digit) are read
+	// from one more partition, {__name__=~"<prefix>[^<alphabet>].*"}.
 	for name, odd := range map[string]string{
 		"utf8 first char":  "ümlaut_total",
 		"dot after prefix": "http.server.duration",
+		"digit first":      "9lives",
 	} {
 		t.Run(name, func(t *testing.T) {
 			names := map[string]int64{odd: 3}
 			for i := range 20 {
 				names[fmt.Sprintf("http%02d", i)] = 1
 			}
-			c := New(server(t, &testutil.MimirNames{T: t, Names: names}, nil).URL+"/prometheus", "")
+			f := &testutil.MimirNames{T: t, Names: names}
+			c := New(server(t, f, nil).URL+"/prometheus", "")
 			c.Limit = 5
 			got, err := c.MetricCardinality(context.Background())
-			if !errors.Is(err, ErrTruncated) {
-				t.Fatalf("got %d metrics, err %v; want ErrTruncated", len(got), err)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !strings.Contains(err.Error(), "outside the partition alphabet") {
-				t.Errorf("err = %v", err)
+			gotNames := map[string]int64{}
+			for _, m := range got {
+				gotNames[m.Metric] = m.ActiveSeries
+			}
+			if !reflect.DeepEqual(gotNames, names) {
+				t.Errorf("got %v\nwant %v", gotNames, names)
+			}
+			rest := false
+			for _, s := range f.Selectors() {
+				rest = rest || strings.Contains(s, "[^")
+			}
+			if !rest {
+				t.Errorf("no partition for names past the alphabet; selectors %q", f.Selectors())
 			}
 		})
+	}
+}
+
+func TestMetricCardinalityNamesOutsideAlphabetTruncated(t *testing.T) {
+	// More dotted names than the limit under one prefix: that partition is
+	// cut off too, so the scan fails rather than undercount.
+	names := map[string]int64{}
+	for i := range 20 {
+		names[fmt.Sprintf("http%02d", i)] = 1
+		names[fmt.Sprintf("http.server.m%02d", i)] = 1
+	}
+	c := New(server(t, &testutil.MimirNames{T: t, Names: names}, nil).URL+"/prometheus", "")
+	c.Limit = 5
+	got, err := c.MetricCardinality(context.Background())
+	if !errors.Is(err, ErrTruncated) {
+		t.Fatalf("got %d metrics, err %v; want ErrTruncated", len(got), err)
+	}
+	if !strings.Contains(err.Error(), "outside the partition alphabet") {
+		t.Errorf("err = %v", err)
 	}
 }
 

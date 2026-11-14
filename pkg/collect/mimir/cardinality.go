@@ -37,7 +37,8 @@ type labelNamesResponse struct {
 }
 
 // Characters a metric name can start with, and continue with. Partitions
-// use them as regex prefixes, so none may be a regex metacharacter.
+// use them as regex prefixes and inside a negated class ([^...]) for the
+// names past them, so none may be a regex metacharacter.
 const (
 	firstChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_:"
 	nextChars  = firstChars + "0123456789"
@@ -53,8 +54,11 @@ var maxPrefix = 32
 // Mimir returns at most MaxLimit names per call. When a call is cut off
 // (fewer rows than label_values_count), the names are partitioned by prefix
 // with selector {__name__=~"<prefix>.*"} and each partition is read until
-// it is complete. A partition that can't be completed, or names that no
-// partition covers, return ErrTruncated rather than undercounting.
+// it is complete; names whose next character is outside the alphabet
+// (dotted OpenTelemetry names, UTF-8) are one more partition,
+// {__name__=~"<prefix>[^<alphabet>].*"}. A partition that can't be
+// completed, or names that no partition covers, return ErrTruncated rather
+// than undercounting.
 func (c *Client) MetricCardinality(ctx context.Context) ([]collect.MetricCardinality, error) {
 	counts := map[string]int64{}
 	if err := c.metricNames(ctx, "", counts); err != nil {
@@ -106,11 +110,23 @@ func (c *Client) metricNames(ctx context.Context, prefix string, out map[string]
 	}
 	// Names whose next character is outside the partition alphabet (UTF-8
 	// names such as OpenTelemetry's dotted ones, or a name starting with a
-	// digit) are in total but in no partition. Missing them would make
-	// those metrics look like they don't exist, so fail instead.
+	// digit) are in total but in no partition: read them as one more
+	// partition. If that one is cut off too, missing them would make those
+	// metrics look like they don't exist, so fail instead.
 	if found := int64(len(out) - before); found < total {
-		return fmt.Errorf("%w: %d of %d metric names starting with %q are outside the partition alphabet [%s]",
-			ErrTruncated, total-found, total, prefix, nextChars)
+		rest := fmt.Sprintf("{__name__=~%q}", prefix+"[^"+chars+"].*")
+		more, err := c.nameValues(ctx, rest, out)
+		if err != nil {
+			return err
+		}
+		if more >= 0 {
+			return fmt.Errorf("%w: more than %d metric names starting with %q continue outside the partition alphabet [%s]",
+				ErrTruncated, c.limit(), prefix, chars)
+		}
+	}
+	if found := int64(len(out) - before); found < total {
+		return fmt.Errorf("%w: %d of %d metric names starting with %q were not found in any partition",
+			ErrTruncated, total-found, total, prefix)
 	}
 	return nil
 }
