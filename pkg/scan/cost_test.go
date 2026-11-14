@@ -156,3 +156,50 @@ func TestResolveStorage(t *testing.T) {
 		t.Errorf("loose cap: %s", st.RetentionFrom)
 	}
 }
+
+func TestStreamCosts(t *testing.T) {
+	day := 24 * time.Hour
+	vols := []collect.StreamVolume{
+		{Labels: map[string]string{"app": "shop", "level": "debug"}, Bytes: 800, Window: day},
+		{Labels: map[string]string{"app": "shop", "level": "info"}, Bytes: 100, Window: day},
+		{Labels: map[string]string{"app": "db", "level": "info"}, Bytes: 10, Window: time.Hour}, // 240 a day
+	}
+	signals := []graph.Signal{
+		{ID: "loki:stream:{app=\"shop\"}", Kind: graph.KindStream, Name: `{app="shop"}`},
+		{ID: "loki:stream:{app=\"shop\", level=~\"info|warn\"}", Kind: graph.KindStream, Name: `{app="shop", level=~"info|warn"}`},
+		{ID: "loki:stream:{app=\"none\"}", Kind: graph.KindStream, Name: `{app="none"}`},
+		{ID: "loki:stream:*", Kind: graph.KindStream, Name: AllStreams},
+		{ID: "prom:metric:up", Kind: graph.KindMetric, Name: "up"},
+		{ID: "loki:stream:{app=~\"(\"}", Kind: graph.KindStream, Name: `{app=~"("}`}, // skipped
+	}
+	costs, out, err := streamCosts(vols, signals, time.Unix(1794189597, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int64{900, 100, 0, 1140}
+	if len(costs) != len(want) {
+		t.Fatalf("%d costs", len(costs))
+	}
+	for i, c := range costs {
+		if c.BytesPerDay != want[i] || c.SignalID != signals[i].ID || !c.ObservedAt.Equal(time.Unix(1794189597, 0)) {
+			t.Errorf("%s: %d bytes/day, want %d", c.SignalID, c.BytesPerDay, want[i])
+		}
+	}
+	if len(out) != 3 || out[0].Selector != `{app="db", level="info"}` || out[0].BytesPerDay != 240 {
+		t.Errorf("volumes %+v", out)
+	}
+
+	// Priced at the card's log rates; metrics untouched by it.
+	card := &cost.PriceCard{Version: 1, Currency: "USD", Logs: cost.LogPricing{PerGBIngested: 0.5}}
+	priced := []graph.Cost{{SignalID: costs[0].SignalID, BytesPerDay: 1e9}}
+	if _, err := priceCosts(Inputs{MetricsSource: "prom", PriceCard: card}, priced); err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(priced[0].MonthlyCost-15) > 1e-9 {
+		t.Errorf("stream monthly %v, want 15 (1 GB/day × 30 × 0.5)", priced[0].MonthlyCost)
+	}
+
+	if _, _, err := streamCosts([]collect.StreamVolume{{Labels: map[string]string{"a": "b"}, Bytes: 1}}, nil, time.Unix(1794189597, 0)); err == nil {
+		t.Error("no window: no error")
+	}
+}

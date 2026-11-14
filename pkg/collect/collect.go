@@ -9,6 +9,7 @@ package collect
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -56,9 +57,15 @@ type QueryLogSource interface {
 }
 
 // StreamVolumeSource reports ingested bytes per log stream (Loki volume API).
+// When a response hits the source's series limit it returns what it has and
+// an error wrapping ErrTruncated: totals are then low.
 type StreamVolumeSource interface {
 	StreamVolumes(ctx context.Context, window time.Duration) ([]StreamVolume, error)
 }
+
+// ErrTruncated means a collector hit a server-side limit and its result is
+// incomplete.
+var ErrTruncated = errors.New("result truncated at the server's limit")
 
 // ScrapeSource reports how metrics are scraped: per-metric intervals
 // (samples per month are a cost input), metric types (a histogram's buckets
@@ -299,7 +306,8 @@ type LoggedQuery struct {
 	OrgID        int64 // Grafana organization of DashboardUID, when logged
 }
 
-// StreamVolume is ingested bytes for one log stream over a window.
+// StreamVolume is ingested bytes for one log stream (its full label set)
+// over a window.
 type StreamVolume struct {
 	Labels map[string]string
 	Bytes  int64

@@ -1,5 +1,4 @@
-// Package loki collects rules (and, from Sprint 3, stream volume) from the
-// Loki HTTP API.
+// Package loki collects rules and stream volume from the Loki HTTP API.
 //
 // Every call is a read-only GET, and every request carries
 // X-Query-Tags: Source=tvt, so Loki's own query log can tell tvt's requests
