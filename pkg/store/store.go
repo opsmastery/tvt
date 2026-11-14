@@ -22,13 +22,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 10
+const SchemaVersion = 11
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -245,6 +246,22 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 11 {
+		for _, q := range []string{
+			`ALTER TABLE scans ADD COLUMN tsdb_measured INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE scans ADD COLUMN tsdb_bytes_per_sample REAL NOT NULL DEFAULT 0`,
+			`ALTER TABLE scans ADD COLUMN tsdb_head_series INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE scans ADD COLUMN tsdb_head_bytes INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE scans ADD COLUMN tsdb_blocks_bytes INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE scans ADD COLUMN tsdb_retention_ms INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE scans ADD COLUMN tsdb_retention_bytes INTEGER NOT NULL DEFAULT 0`,
+			`UPDATE meta SET value = '11' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -266,6 +283,9 @@ type ScanInfo struct {
 	// VolumeTruncated: Loki's volume API hit its series limit, so stream
 	// bytes are low.
 	VolumeTruncated bool
+	// TSDB is what the Prometheus server reported about its storage; nil
+	// when it wasn't read (Mimir, or an older scan). cost.Reprice takes it.
+	TSDB *collect.Storage
 }
 
 // SelfHosted is what a self_hosted price card's costs were computed from,
@@ -298,7 +318,9 @@ func (s *Store) Scans(ctx context.Context) ([]ScanInfo, error) {
 func (s *Store) scans(ctx context.Context, tail string) ([]ScanInfo, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, started_at, finished_at, window_days, log_coverage, pricecard, currency, price_preset, price_kind,
-		        bytes_per_sample, bytes_per_sample_from, retention_ms, retention_from, head_bytes_per_series, volume_truncated FROM scans `+tail)
+		        bytes_per_sample, bytes_per_sample_from, retention_ms, retention_from, head_bytes_per_series, volume_truncated,
+		        tsdb_measured, tsdb_bytes_per_sample, tsdb_head_series, tsdb_head_bytes, tsdb_blocks_bytes, tsdb_retention_ms, tsdb_retention_bytes
+		 FROM scans `+tail)
 	if err != nil {
 		return nil, err
 	}
@@ -306,13 +328,20 @@ func (s *Store) scans(ctx context.Context, tail string) ([]ScanInfo, error) {
 	var out []ScanInfo
 	for rows.Next() {
 		var si ScanInfo
-		var started, finished, retention int64
+		var started, finished, retention, tsdbRetention int64
 		var sh SelfHosted
+		var tsdb collect.Storage
+		var measured bool
 		if err := rows.Scan(&si.ID, &started, &finished, &si.WindowDays, &si.LogCoverage, &si.PriceCard, &si.Currency, &si.PricePreset, &si.PriceKind,
-			&sh.BytesPerSample, &sh.BytesPerSampleFrom, &retention, &sh.RetentionFrom, &sh.HeadBytesPerSeries, &si.VolumeTruncated); err != nil {
+			&sh.BytesPerSample, &sh.BytesPerSampleFrom, &retention, &sh.RetentionFrom, &sh.HeadBytesPerSeries, &si.VolumeTruncated,
+			&measured, &tsdb.BytesPerSample, &tsdb.HeadSeries, &tsdb.HeadBytes, &tsdb.BlocksBytes, &tsdbRetention, &tsdb.RetentionBytes); err != nil {
 			return nil, err
 		}
 		si.StartedAt, si.FinishedAt = fromMillis(started), fromMillis(finished)
+		if measured {
+			tsdb.RetentionTime = time.Duration(tsdbRetention) * time.Millisecond
+			si.TSDB = &tsdb
+		}
 		if si.PriceKind == "self_hosted" {
 			sh.Retention = time.Duration(retention) * time.Millisecond
 			si.SelfHosted = &sh
@@ -804,6 +833,17 @@ func (sc *Scan) SetVolumeTruncated(ctx context.Context) error {
 	}
 	_, err := sc.tx.ExecContext(ctx, `UPDATE scans SET volume_truncated = 1 WHERE id = ?`, sc.ID)
 	return wrap("volume truncated", "", err)
+}
+
+// SetTSDB records what the Prometheus server reported about its storage.
+func (sc *Scan) SetTSDB(ctx context.Context, st collect.Storage) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	_, err := sc.tx.ExecContext(ctx, `UPDATE scans SET tsdb_measured = 1, tsdb_bytes_per_sample = ?, tsdb_head_series = ?,
+		tsdb_head_bytes = ?, tsdb_blocks_bytes = ?, tsdb_retention_ms = ?, tsdb_retention_bytes = ? WHERE id = ?`,
+		st.BytesPerSample, st.HeadSeries, st.HeadBytes, st.BlocksBytes, st.RetentionTime.Milliseconds(), st.RetentionBytes, sc.ID)
+	return wrap("tsdb storage", "", err)
 }
 
 // SetSelfHosted records a self_hosted card's model inputs.
