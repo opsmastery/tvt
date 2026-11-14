@@ -32,7 +32,23 @@ var ErrTooLarge = errors.New("response body too large")
 
 // DefaultClient returns the client collectors use when none is set.
 func DefaultClient() *http.Client {
-	return &http.Client{Timeout: DefaultTimeout}
+	return &http.Client{Timeout: DefaultTimeout, CheckRedirect: CheckRedirect}
+}
+
+// CheckRedirect refuses a redirect from https to plain http. Go strips
+// Authorization only when a redirect changes host, so an https backend
+// redirecting to http on the same host would get the bearer token re-sent
+// unencrypted. Otherwise it keeps Go's default limit of 10 redirects.
+func CheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	for _, prev := range via {
+		if prev.URL.Scheme == "https" && req.URL.Scheme != "https" {
+			return fmt.Errorf("refusing redirect from https to %s://%s: credentials would be sent unencrypted", req.URL.Scheme, req.URL.Host)
+		}
+	}
+	return nil
 }
 
 // NewRequest builds a GET for path under baseURL with tvt's User-Agent, a
