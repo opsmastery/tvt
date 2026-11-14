@@ -24,6 +24,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/runbook"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/slo"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
+	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 	"github.com/Opsmastery-Summit/tvt/pkg/score"
@@ -152,6 +153,18 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			return err
 		}
 		in.External, in.Owners = cfg.ExternalConsumers, cfg.Ownership.Owners
+		if cfg.PriceCard != "" {
+			card, err := cost.Load(cfg.PriceCard)
+			if err != nil {
+				return err
+			}
+			in.PriceCard = &card
+			note := ""
+			if card.Preset {
+				note = ", a vendor preset: approximate, as of " + card.AsOf
+			}
+			fmt.Fprintf(out, "%-12s %s (%s%s)\n", "pricecard", card.Name, card.Currency, note)
+		}
 		rbReader.Fetch = cfg.Runbooks.Fetch
 		for _, m := range cfg.Runbooks.Mirrors {
 			rbReader.Mirrors = append(rbReader.Mirrors, runbook.Mirror{URLPrefix: m.URLPrefix, Dir: m.Path})
@@ -215,6 +228,20 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	}
 	if in.Rules, err = pc.Rules(ctx); err != nil {
 		return err
+	}
+	// Scrape intervals turn series into samples per month. They're a cost
+	// input, not protection: without them a metric's interval is assumed
+	// (Prometheus's default 1m) and recorded as such.
+	in.DefaultInterval = time.Minute
+	if in.MetricsSource == "prom" {
+		in.DefaultIntervalReason = "the targets API gave no interval; Prometheus's default 1m"
+		if s, err := pc.Scrape(ctx); err != nil {
+			fmt.Fprintf(out, "%-12s scrape intervals unavailable (%v): assuming 1m\n", "prom", err)
+		} else {
+			in.Scrape = &s
+		}
+	} else {
+		in.DefaultIntervalReason = "Mimir has no targets API; assumed 1m"
 	}
 	fmt.Fprintf(out, "%-12s %d metrics (%d series), %d labels on the top %d, %d rules\n",
 		in.MetricsSource, len(in.Metrics), series, len(in.Labels), top, len(in.Rules))
@@ -406,6 +433,11 @@ func loads(g scan.Output) int64 {
 }
 
 func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
+	if p := g.PriceCard; p != nil {
+		if err := sc.SetPriceCard(ctx, p.Name, p.Currency, p.Preset); err != nil {
+			return err
+		}
+	}
 	for _, s := range g.Signals {
 		if err := sc.PutSignal(ctx, s); err != nil {
 			return err
