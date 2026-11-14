@@ -37,7 +37,17 @@ CREATE TABLE IF NOT EXISTS scans (
     retention_from        TEXT NOT NULL DEFAULT '',
     head_bytes_per_series REAL NOT NULL DEFAULT 0,
     -- 1 when Loki's volume API hit its series limit: stream bytes are low.
-    volume_truncated      INTEGER NOT NULL DEFAULT 0
+    volume_truncated      INTEGER NOT NULL DEFAULT 0,
+    -- What the Prometheus server reported about its TSDB on /metrics, with
+    -- any card (tsdb_measured = 1), so a stored scan can be repriced at a
+    -- self_hosted card. Zero values are unknown.
+    tsdb_measured         INTEGER NOT NULL DEFAULT 0,
+    tsdb_bytes_per_sample REAL NOT NULL DEFAULT 0,
+    tsdb_head_series      INTEGER NOT NULL DEFAULT 0,
+    tsdb_head_bytes       INTEGER NOT NULL DEFAULT 0,
+    tsdb_blocks_bytes     INTEGER NOT NULL DEFAULT 0,
+    tsdb_retention_ms     INTEGER NOT NULL DEFAULT 0,
+    tsdb_retention_bytes  INTEGER NOT NULL DEFAULT 0
 );
 
 -- Coverage of each usage-evidence source for a scan, configured or not.

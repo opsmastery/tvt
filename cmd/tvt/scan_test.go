@@ -222,6 +222,75 @@ func TestScanLabSelfHosted(t *testing.T) {
 	t.Logf("%d metrics hold %.1f GB (2 replicas), %.2f USD/month", metrics, disk/1e9, total)
 }
 
+// What-if pricing (S3 item 4): the stored grafana-cloud scan repriced at
+// the self-hosted card gives what scanning with that card gives, signal by
+// signal, and repricing back gives the original. No rescan, no backend.
+func TestRepriceMatchesRescan(t *testing.T) {
+	setNow(t)
+	scanAt := func(config string) (store.ScanInfo, []graph.Cost) {
+		l := newLab(t, nil)
+		db := filepath.Join(t.TempDir(), "tvt.db")
+		o := labOptions(l, db)
+		o.Config = filepath.Join(lab, config)
+		var out bytes.Buffer
+		if err := runScan(context.Background(), o, env, &out); err != nil {
+			t.Fatalf("scan %s: %v\n%s", config, err, out.String())
+		}
+		st, err := store.Open(context.Background(), db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer st.Close()
+		info, err := st.LatestScan(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		costs, err := st.Costs(context.Background(), info.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info, costs
+	}
+	vendorInfo, vendorCosts := scanAt("tvt-lab.yaml")
+	_, selfCosts := scanAt("tvt-lab-selfhosted.yaml")
+	if vendorInfo.TSDB == nil || vendorInfo.TSDB.BytesPerSample == 0 {
+		t.Fatalf("vendor scan stored no TSDB measurements: %+v", vendorInfo)
+	}
+	selfCard, err := cost.Load(filepath.Join(lab, "pricecard-selfhosted.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vendorCard, err := cost.Load("grafana-cloud")
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := func(name string, got, want []graph.Cost) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("%s: %d costs, want %d", name, len(got), len(want))
+		}
+		var total float64
+		for i := range got {
+			g, w := got[i], want[i]
+			total += g.MonthlyCost
+			if g.SignalID != w.SignalID || g.DiskBytes != w.DiskBytes || math.Abs(g.MonthlyCost-w.MonthlyCost) > 1e-9 {
+				t.Errorf("%s %s: disk %d monthly %v, want %d %v", name, g.SignalID, g.DiskBytes, g.MonthlyCost, w.DiskBytes, w.MonthlyCost)
+			}
+		}
+		t.Logf("%s: %d costs, %.2f/month", name, len(got), total)
+	}
+	repriced, _, err := cost.Reprice(selfCard, vendorCosts, vendorInfo.TSDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same("grafana-cloud → self-hosted", repriced, selfCosts)
+	back, _, err := cost.Reprice(vendorCard, repriced, vendorInfo.TSDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same("→ back to grafana-cloud", back, vendorCosts)
+}
+
 func TestScanLab(t *testing.T) {
 	setNow(t)
 	l := newLab(t, nil)
