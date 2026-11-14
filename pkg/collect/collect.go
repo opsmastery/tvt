@@ -9,6 +9,7 @@ package collect
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
@@ -57,6 +58,47 @@ type QueryLogSource interface {
 // StreamVolumeSource reports ingested bytes per log stream (Loki volume API).
 type StreamVolumeSource interface {
 	StreamVolumes(ctx context.Context, window time.Duration) ([]StreamVolume, error)
+}
+
+// ScrapeSource reports how metrics are scraped: per-metric intervals
+// (samples per month are a cost input), metric types (a histogram's buckets
+// multiply its series) and whether exemplars are stored (Prometheus targets,
+// targets/metadata and flags APIs).
+type ScrapeSource interface {
+	Scrape(ctx context.Context) (Scrape, error)
+}
+
+// Scrape is how a backend's metrics are scraped.
+type Scrape struct {
+	// Intervals maps a metric family name, as target metadata reports it
+	// (shop_http_requests, node_cpu_seconds_total), to the shortest scrape
+	// interval of the jobs exposing it. Look up series names with Family.
+	Intervals map[string]time.Duration
+	// Types maps a family name to counter, gauge, histogram, summary,
+	// unknown.
+	Types map[string]string
+	// JobIntervals is each job's scrape interval.
+	JobIntervals map[string]time.Duration
+	// Exemplars is true when exemplar storage is on: histogram series then
+	// carry exemplars, which cost extra on most backends.
+	Exemplars bool
+}
+
+// Family returns the metadata family a series name belongs to and whether
+// one was found: the name itself, else the name without a suffix that
+// exposition adds (_total, _bucket, _sum, _count, _created, _info).
+func (s Scrape) Family(series string) (string, bool) {
+	if _, ok := s.Types[series]; ok {
+		return series, true
+	}
+	for _, suf := range []string{"_total", "_bucket", "_sum", "_count", "_created", "_info"} {
+		if f, ok := strings.CutSuffix(series, suf); ok {
+			if _, ok := s.Types[f]; ok {
+				return f, true
+			}
+		}
+	}
+	return "", false
 }
 
 // MetricCardinality is the number of active series for a metric name.

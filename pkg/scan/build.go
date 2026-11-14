@@ -39,6 +39,7 @@ import (
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
+	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 )
 
@@ -80,6 +81,17 @@ type Inputs struct {
 	// Runbooks are what the links in alert annotations declare. A step
 	// that runs a query makes its signals hard keeps.
 	Runbooks []collect.Runbook
+
+	// PriceCard prices every metric and label signal; nil leaves
+	// MonthlyCost at zero.
+	PriceCard *cost.PriceCard
+	// Scrape gives per-metric scrape intervals and types (Prometheus); nil
+	// when the backend has no targets API (Mimir).
+	Scrape *collect.Scrape
+	// DefaultInterval is used for a metric no API gives an interval for,
+	// recorded as assumed with DefaultIntervalReason.
+	DefaultInterval       time.Duration
+	DefaultIntervalReason string
 }
 
 // Evidence sources Build adds itself: definitions tvt reads, not usage
@@ -106,6 +118,9 @@ type Output struct {
 	// LogCoverage is the mean coverage of Sources; an unconfigured source
 	// counts as 0.
 	LogCoverage float64
+	// PriceCard is the card the costs use (Inputs.PriceCard), for the scan
+	// row; nil when none was configured.
+	PriceCard *cost.PriceCard
 }
 
 // Build maps inputs to graph rows. It rejects inputs a scan should never
@@ -365,6 +380,8 @@ func Build(in Inputs) (Output, error) {
 	if logs > 0 {
 		out.LogCoverage = sum / float64(logs)
 	}
+	priceCosts(in, out.Costs)
+	out.PriceCard = in.PriceCard
 	return out, nil
 }
 

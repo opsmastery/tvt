@@ -676,3 +676,57 @@ func assertDeclared(t *testing.T, g scanGraph, src, labDir string, gt groundTrut
 		}
 	}
 }
+
+// assertCosts: the scan used the wanted price card, and every metric with
+// series has a monthly cost and the interval its samples are counted at,
+// measured (Prometheus targets API) unless assumed is true (Mimir). A
+// recording rule's output (a name with a colon) always has its rule's
+// evaluation interval.
+func assertCosts(t *testing.T, db, src, card string, assumed bool) {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	info, err := st.LatestScan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.PriceCard != card || info.Currency != "USD" || !info.PricePreset {
+		t.Errorf("scan price card %q %q preset %v, want %s (USD, preset)", info.PriceCard, info.Currency, info.PricePreset, card)
+	}
+	costs, err := st.Costs(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metrics, measured int
+	var total float64
+	for _, c := range costs {
+		if !strings.HasPrefix(c.SignalID, src+":metric:") || c.ActiveSeries == 0 {
+			continue
+		}
+		metrics++
+		total += c.MonthlyCost
+		if c.MonthlyCost <= 0 || c.Interval <= 0 {
+			t.Errorf("%s: monthly %v interval %v", c.SignalID, c.MonthlyCost, c.Interval)
+		}
+		name := strings.TrimPrefix(c.SignalID, src+":metric:")
+		if c.IntervalAssumed == "" && !strings.Contains(name, ":") { // recording rules: their evaluation interval
+			measured++
+		} else if c.IntervalAssumed != "" && !assumed && !strings.Contains(c.IntervalAssumed, "target metadata") {
+			t.Errorf("%s: interval assumed (%s) on a scan with the targets API", c.SignalID, c.IntervalAssumed)
+		}
+	}
+	if metrics == 0 {
+		t.Fatal("no metric costs")
+	}
+	if assumed && measured > 0 {
+		t.Errorf("%d metric intervals measured on a scan without a targets API", measured)
+	}
+	if !assumed && measured < metrics/2 {
+		t.Errorf("only %d of %d metric intervals measured", measured, metrics)
+	}
+	t.Logf("%d metrics cost %.2f %s/month on %s", metrics, total, info.Currency, card)
+}

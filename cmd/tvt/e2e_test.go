@@ -99,7 +99,8 @@ func newLiveLab(t *testing.T) liveLab {
 func (l liveLab) config(t *testing.T) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "tvt.yaml")
-	body := fmt.Sprintf(`slos:
+	body := fmt.Sprintf(`pricecard: grafana-cloud
+slos:
   paths: [%q]
 runbooks:
   fetch: false
@@ -267,6 +268,7 @@ func TestE2EScanPrometheus(t *testing.T) {
 		}
 	}
 
+	assertCosts(t, db, "prom", "grafana-cloud-pro", false)
 	gt := liveGroundTruth(t, l)
 	assertMetrics(t, g, "prom", gt.Metrics)
 	want := assertRules(t, g, gt.Rules, "prometheus", "loki", "grafana")
@@ -340,6 +342,7 @@ func TestE2EScanMimir(t *testing.T) {
 		}
 	}
 
+	assertCosts(t, db, "mimir", "grafana-cloud-pro", true)
 	gt := liveGroundTruth(t, l)
 	assertMetrics(t, g, "mimir", gt.Metrics)
 	assertMetrics(t, g, "mimir", gt.Mimir.Metrics)
