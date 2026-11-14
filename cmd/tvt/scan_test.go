@@ -249,7 +249,7 @@ func TestScanLab(t *testing.T) {
 	// scan didn't collect (all the lab's names exist).
 	assertReferences(t, g, "prom", gt)
 	assertClasses(t, g, "prom", gt)
-	assertDeclared(t, g, "prom", gt)
+	assertDeclared(t, g, "prom", lab, gt)
 	// Sprint 2 item 18: the lab's one absence alert is the only consumer S6
 	// must skip when it looks for rules that return nothing.
 	var absence []string

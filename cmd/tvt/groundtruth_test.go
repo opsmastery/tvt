@@ -62,8 +62,15 @@ type gtRule struct {
 
 func loadGroundTruth(t *testing.T) groundTruth {
 	t.Helper()
+	return parseGroundTruth(t, testutil.ReadFile(t, "lab/ground-truth.yaml"))
+}
+
+// parseGroundTruth reads a ground-truth.yaml: the vendored copy for the
+// golden tests, the live lab's own for the e2e suite.
+func parseGroundTruth(t *testing.T, b []byte) groundTruth {
+	t.Helper()
 	var gt groundTruth
-	if err := yaml.Unmarshal(testutil.ReadFile(t, "lab/ground-truth.yaml"), &gt); err != nil {
+	if err := yaml.Unmarshal(b, &gt); err != nil {
 		t.Fatalf("ground-truth.yaml: %v", err)
 	}
 	for name, r := range gt.Mimir.Rules {
@@ -635,9 +642,10 @@ func assertClasses(t *testing.T, g scanGraph, src string, gt groundTruth) {
 }
 
 // assertDeclared: each ground-truth SLO and runbook is a consumer of its
-// kind, and every metric it reads has a declared reference from it (and
-// is a hard keep, checked by assertClasses).
-func assertDeclared(t *testing.T, g scanGraph, src string, gt groundTruth) {
+// kind (SLO IDs carry the file path under labDir), and every metric it
+// reads has a declared reference from it (and is a hard keep, checked by
+// assertClasses).
+func assertDeclared(t *testing.T, g scanGraph, src, labDir string, gt groundTruth) {
 	t.Helper()
 	check := func(id string, kind graph.ConsumerKind, reads []string) {
 		t.Helper()
@@ -659,7 +667,7 @@ func assertDeclared(t *testing.T, g scanGraph, src string, gt groundTruth) {
 		}
 	}
 	for name, s := range gt.SLOs {
-		check("slo:"+s.Format+":"+filepath.Join(lab, s.File)+":"+name, graph.ConsumerSLO, s.Reads)
+		check("slo:"+s.Format+":"+filepath.Join(labDir, s.File)+":"+name, graph.ConsumerSLO, s.Reads)
 	}
 	for link, rb := range gt.Runbooks {
 		check("runbook:"+link, graph.ConsumerRunbook, rb.Reads)
