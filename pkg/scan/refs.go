@@ -372,7 +372,9 @@ func (r *resolver) sweep(q query, pr parse.Ref, names []string) string {
 		return ""
 	}
 	for _, m := range pr.Matchers {
-		if m.Label != "__name__" && !matchesAnything(m) {
+		// A variable (a name picked on the dashboard) reads what it's set
+		// to, which tvt may not know: unknown means used, never a sweep.
+		if m.Variable || m.Label != "__name__" && !matchesAnything(m) {
 			return ""
 		}
 	}

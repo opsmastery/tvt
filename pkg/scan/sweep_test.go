@@ -103,6 +103,30 @@ func TestDeclaredNeverSweeps(t *testing.T) {
 	}
 }
 
+// A panel picking its metric with a variable tvt can't resolve reads every
+// metric, assumed: unknown means used, not a sweep.
+func TestVariableNameIsNotASweep(t *testing.T) {
+	in := baseInputs()
+	in.Dashboards = []collect.Dashboard{{UID: "d", Title: "D", Panels: []collect.Panel{{ID: 1, Title: "Any metric",
+		Queries: []collect.PanelQuery{{DatasourceType: "prometheus", Expr: `sum({__name__=~"$metric"})`}}}}}}
+	out, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs int
+	for _, r := range out.References {
+		if strings.HasPrefix(r.ConsumerID, "panel:") {
+			refs++
+			if r.Sweep || !r.Assumed {
+				t.Errorf("%+v", r)
+			}
+		}
+	}
+	if refs == 0 {
+		t.Fatal("no panel references")
+	}
+}
+
 func TestSweepShareConfigurable(t *testing.T) {
 	in := baseInputs()
 	in.SweepShare = 0.999 // shop_.+ is 5731 of 5756 series (99.6%): no longer a sweep
