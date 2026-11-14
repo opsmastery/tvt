@@ -132,8 +132,10 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 		"/api/org": func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"id":1,"name":"Main Org."}`) },
 	})
 	loki := fixtureServer(t, map[string]string{
-		"/loki/api/v1/rules":       "loki/rules.yaml",
-		"/prometheus/api/v1/rules": "loki/prom_rules.json",
+		"/loki/api/v1/rules":        "loki/rules.yaml",
+		"/prometheus/api/v1/rules":  "loki/prom_rules.json",
+		"/loki/api/v1/labels":       "loki/labels.json",
+		"/loki/api/v1/index/volume": "loki/volume_by_stream.json",
 	}, nil)
 	return labServers{prom, graf, loki, promLog, probes}
 }
@@ -229,12 +231,13 @@ func TestScanLab(t *testing.T) {
 		t.Fatalf("scan: %v\n%s", err, out.String())
 	}
 	t.Log("\n" + out.String())
-	for _, want := range []string{"prom ", "6 rules", "loki         1 rule (", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "19 dashboard loads (19 in a browser)", ", 19 dashboard loads,", " references, ", "pricecard    grafana-cloud-pro (USD, a vendor preset: approximate"} {
+	for _, want := range []string{"prom ", "6 rules", "loki         1 rule (5 streams, 98.7 MB/day)", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "19 dashboard loads (19 in a browser)", ", 19 dashboard loads,", " references, ", "pricecard    grafana-cloud-pro (USD, a vendor preset: approximate"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q", want)
 		}
 	}
 	assertCosts(t, db, "prom", "grafana-cloud-pro", false)
+	assertStreamCosts(t, db)
 
 	ctx := context.Background()
 	st, err := store.Open(ctx, db)

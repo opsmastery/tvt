@@ -795,8 +795,15 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 	sc.Abort()
 }
 
-// v9Drops turns a current database's tables back into version 8's.
-var v9Drops = []string{
+// v10Drops turns a current database's tables back into version 9's.
+var v10Drops = []string{
+	`DROP TABLE stream_volumes`,
+	`ALTER TABLE scans DROP COLUMN volume_truncated`,
+}
+
+// v9Drops turns a current database's tables back into version 8's
+// (v10Drops first).
+var v9Drops = append(append([]string{}, v10Drops...),
 	`ALTER TABLE scans DROP COLUMN price_kind`,
 	`ALTER TABLE scans DROP COLUMN bytes_per_sample`,
 	`ALTER TABLE scans DROP COLUMN bytes_per_sample_from`,
@@ -804,7 +811,7 @@ var v9Drops = []string{
 	`ALTER TABLE scans DROP COLUMN retention_from`,
 	`ALTER TABLE scans DROP COLUMN head_bytes_per_series`,
 	`ALTER TABLE costs DROP COLUMN disk_bytes`,
-}
+)
 
 // v8Drops turns a current database's tables back into version 7's, for the
 // upgrade tests that start from an older version (v9Drops first).
@@ -945,5 +952,44 @@ func TestUpgradeFromVersion8AndSelfHosted(t *testing.T) {
 	must(t, err)
 	if info.PriceKind != "self_hosted" || info.SelfHosted == nil || *info.SelfHosted != sh {
 		t.Errorf("scan = %+v %+v", info, info.SelfHosted)
+	}
+}
+
+// Version 9 databases gain stream_volumes and scans.volume_truncated.
+func TestUpgradeFromVersion9AndStreamVolumes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v9.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	scan(t, s, t0, func(sc *Scan) {})
+	for _, q := range append(append([]string{}, v10Drops...), `UPDATE meta SET value = '9' WHERE key = 'schema_version'`) {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	if info, err := s.LatestScan(ctx); err != nil || info.VolumeTruncated {
+		t.Fatalf("upgraded scan = %+v, %v", info, err)
+	}
+	vols := []graph.StreamVolume{{Selector: `{app="a"}`, BytesPerDay: 5}, {Selector: `{app="b"}`, BytesPerDay: 0}}
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) {
+		for _, v := range vols {
+			must(t, sc.PutStreamVolume(ctx, v))
+		}
+		must(t, sc.SetVolumeTruncated(ctx))
+		if err := sc.PutStreamVolume(ctx, graph.StreamVolume{Selector: `{app="c"}`, BytesPerDay: -1}); err == nil {
+			t.Error("negative bytes: no error")
+		}
+	})
+	got, err := s.StreamVolumes(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(got, vols) {
+		t.Errorf("volumes = %+v", got)
+	}
+	if info, _ := s.LatestScan(ctx); !info.VolumeTruncated {
+		t.Error("truncation not recorded")
 	}
 }

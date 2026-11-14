@@ -91,7 +91,7 @@ func cmdScan(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.Grafana, "grafana", "", "Grafana base URL (required)")
 	fs.StringVar(&o.Prom, "prom", "", "Prometheus base URL")
 	fs.StringVar(&o.Mimir, "mimir", "", "Mimir base URL (alternative to --prom); /prometheus is appended if missing")
-	fs.StringVar(&o.Loki, "loki", "", "Loki base URL: rules are collected; stream volume from Sprint 3")
+	fs.StringVar(&o.Loki, "loki", "", "Loki base URL: rules and stream volume are collected")
 	fs.StringVar(&o.DB, "db", "tvt.db", "path to the usage graph database")
 	fs.IntVar(&o.Window, "window", 30, "observation window in days")
 	fs.Var(&o.PromQueryLogs, "prom-query-log", "Prometheus query log file or glob (repeatable; .gz is read)")
@@ -264,8 +264,9 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	fmt.Fprintf(out, "%-12s %d metrics (%d series), %d labels on the top %d, %d rules\n",
 		in.MetricsSource, len(in.Metrics), series, len(in.Labels), top, len(in.Rules))
 
-	// Loki: rules. Each is a consumer with an assumed reference to the
-	// streams its selectors name, until the LogQL extractor exists.
+	// Loki: rules (consumers), and every stream's bytes per day from the
+	// index volume API: a cost input, not protection, so a failure is
+	// reported and the scan goes on without stream costs.
 	if o.Loki != "" {
 		lc := loki.New(o.Loki, getenv("TVT_LOKI_TOKEN"))
 		lc.HTTP, lc.Now = scanHTTP, scanNow
@@ -274,7 +275,26 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			return err
 		}
 		in.Rules = append(in.Rules, rules...)
-		fmt.Fprintf(out, "%-12s %s (stream volume is collected from Sprint 3)\n", "loki", plural(len(rules), "rule", "rules"))
+		volume := ""
+		vols, err := lc.StreamVolumes(ctx, 24*time.Hour)
+		switch {
+		case err != nil && !errors.Is(err, collect.ErrTruncated):
+			volume = fmt.Sprintf("stream volume unavailable: %v", err)
+		default:
+			in.StreamVolumes, in.VolumeTruncated = vols, err != nil
+			if in.StreamVolumes == nil {
+				in.StreamVolumes = []collect.StreamVolume{}
+			}
+			var total int64
+			for _, v := range vols {
+				total += v.Bytes
+			}
+			volume = fmt.Sprintf("%s, %s/day", plural(len(vols), "stream", "streams"), humanBytes(total))
+			if in.VolumeTruncated {
+				volume += fmt.Sprintf("; truncated at %d series per request, so stream bytes are low", loki.VolumeLimit)
+			}
+		}
+		fmt.Fprintf(out, "%-12s %s (%s)\n", "loki", plural(len(rules), "rule", "rules"), volume)
 	}
 
 	// Grafana: who tvt is (to exclude its own loads), the org, dashboards.
@@ -461,6 +481,16 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 			kind = cost.KindVendor
 		}
 		if err := sc.SetPriceCard(ctx, p.Name, p.Currency, p.Preset, kind); err != nil {
+			return err
+		}
+	}
+	for _, v := range g.StreamVolumes {
+		if err := sc.PutStreamVolume(ctx, v); err != nil {
+			return err
+		}
+	}
+	if g.VolumeTruncated {
+		if err := sc.SetVolumeTruncated(ctx); err != nil {
 			return err
 		}
 	}
@@ -734,4 +764,20 @@ func waitForProbe(ctx context.Context, p collect.ProbeSource, nonce string, wait
 		case <-time.After(min(probePoll, time.Until(deadline))):
 		}
 	}
+}
+
+// humanBytes formats n in decimal units (1 MB = 1e6 bytes), as volume and
+// price cards count them.
+func humanBytes(n int64) string {
+	f := float64(n)
+	for _, u := range []string{"B", "kB", "MB", "GB", "TB"} {
+		if f < 1000 || u == "TB" {
+			if u == "B" {
+				return fmt.Sprintf("%d B", n)
+			}
+			return fmt.Sprintf("%.1f %s", f, u)
+		}
+		f /= 1000
+	}
+	return ""
 }

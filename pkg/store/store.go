@@ -28,7 +28,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 9
+const SchemaVersion = 10
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -233,6 +233,18 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 10 {
+		// stream_volumes is a new table: migrate's CREATE TABLE IF NOT
+		// EXISTS adds it.
+		for _, q := range []string{
+			`ALTER TABLE scans ADD COLUMN volume_truncated INTEGER NOT NULL DEFAULT 0`,
+			`UPDATE meta SET value = '10' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -251,6 +263,9 @@ type ScanInfo struct {
 	PriceKind   string
 	// SelfHosted is the self-hosted model's inputs; nil for a vendor card.
 	SelfHosted *SelfHosted
+	// VolumeTruncated: Loki's volume API hit its series limit, so stream
+	// bytes are low.
+	VolumeTruncated bool
 }
 
 // SelfHosted is what a self_hosted price card's costs were computed from,
@@ -283,7 +298,7 @@ func (s *Store) Scans(ctx context.Context) ([]ScanInfo, error) {
 func (s *Store) scans(ctx context.Context, tail string) ([]ScanInfo, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, started_at, finished_at, window_days, log_coverage, pricecard, currency, price_preset, price_kind,
-		        bytes_per_sample, bytes_per_sample_from, retention_ms, retention_from, head_bytes_per_series FROM scans `+tail)
+		        bytes_per_sample, bytes_per_sample_from, retention_ms, retention_from, head_bytes_per_series, volume_truncated FROM scans `+tail)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +309,7 @@ func (s *Store) scans(ctx context.Context, tail string) ([]ScanInfo, error) {
 		var started, finished, retention int64
 		var sh SelfHosted
 		if err := rows.Scan(&si.ID, &started, &finished, &si.WindowDays, &si.LogCoverage, &si.PriceCard, &si.Currency, &si.PricePreset, &si.PriceKind,
-			&sh.BytesPerSample, &sh.BytesPerSampleFrom, &retention, &sh.RetentionFrom, &sh.HeadBytesPerSeries); err != nil {
+			&sh.BytesPerSample, &sh.BytesPerSampleFrom, &retention, &sh.RetentionFrom, &sh.HeadBytesPerSeries, &si.VolumeTruncated); err != nil {
 			return nil, err
 		}
 		si.StartedAt, si.FinishedAt = fromMillis(started), fromMillis(finished)
@@ -510,6 +525,26 @@ func (s *Store) Loads(ctx context.Context, scanID int64) ([]graph.DashboardLoad,
 	return out, rows.Err()
 }
 
+// StreamVolumes returns every Loki stream's ingest in scan scanID, ordered
+// by selector.
+func (s *Store) StreamVolumes(ctx context.Context, scanID int64) ([]graph.StreamVolume, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT selector, bytes_per_day FROM stream_volumes WHERE scan_id = ? ORDER BY selector`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.StreamVolume
+	for rows.Next() {
+		var v graph.StreamVolume
+		if err := rows.Scan(&v.Selector, &v.BytesPerDay); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 // Scan is an open scan: a transaction that writes one complete graph.
 // Call Finish to commit it or Abort to discard it; deferring Abort right
 // after BeginScan is safe, since Abort after Finish does nothing.
@@ -525,6 +560,7 @@ type Scan struct {
 	cost    *sql.Stmt
 	source  *sql.Stmt
 	load    *sql.Stmt
+	volume  *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -619,6 +655,7 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 				exemplars = excluded.exemplars, disk_bytes = excluded.disk_bytes`},
 		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start, gap)
 			VALUES (?, ?, ?, ?, ?, ?)`},
+		{&sc.volume, `INSERT INTO stream_volumes (scan_id, selector, bytes_per_day) VALUES (?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`},
 	} {
@@ -745,6 +782,28 @@ func (sc *Scan) SetPriceCard(ctx context.Context, name, currency string, preset 
 	_, err := sc.tx.ExecContext(ctx, `UPDATE scans SET pricecard = ?, currency = ?, price_preset = ?, price_kind = ? WHERE id = ?`,
 		name, currency, preset, kind, sc.ID)
 	return wrap("price card", name, err)
+}
+
+// PutStreamVolume records one Loki stream's ingest; each selector is put
+// once per scan.
+func (sc *Scan) PutStreamVolume(ctx context.Context, v graph.StreamVolume) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if v.Selector == "" || v.BytesPerDay < 0 {
+		return fmt.Errorf("store: stream volume %q: Selector is required and bytes can't be negative", v.Selector)
+	}
+	_, err := sc.volume.ExecContext(ctx, sc.ID, v.Selector, v.BytesPerDay)
+	return wrap("stream volume", v.Selector, err)
+}
+
+// SetVolumeTruncated records that Loki's volume API hit its series limit.
+func (sc *Scan) SetVolumeTruncated(ctx context.Context) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	_, err := sc.tx.ExecContext(ctx, `UPDATE scans SET volume_truncated = 1 WHERE id = ?`, sc.ID)
+	return wrap("volume truncated", "", err)
 }
 
 // SetSelfHosted records a self_hosted card's model inputs.
