@@ -86,7 +86,7 @@ self_hosted:
 | Input | From, in order |
 | --- | --- |
 | Bytes per sample | the card; Prometheus `/metrics` (`prometheus_tsdb_compaction_chunk_size_bytes_sum ÷ …_chunk_samples_sum`, since the server started); 1.5, marked assumed (before the first compaction, or Mimir) |
-| Retention | the card; Prometheus `prometheus_tsdb_retention_limit_seconds`, shortened when `…_retention_limit_bytes` fills first at the modeled bytes a day. Mimir's retention lives in its limits and object storage tvt doesn't read, so its card must set `retention_days`. |
+| Retention | the card; Prometheus `prometheus_tsdb_retention_limit_seconds`, shortened when `…_retention_limit_bytes` fills first at the modeled bytes a day (with size-only retention, the size limit alone decides). Mimir's retention lives in its limits and object storage tvt doesn't read, so its card must set `retention_days`. |
 | Head share | Prometheus (`prometheus_tsdb_wal_storage_size_bytes` + `prometheus_tsdb_head_chunks_storage_size_bytes`) ÷ `prometheus_tsdb_head_series`; 0 for Mimir |
 
 tvt reads `/metrics` with a GET. It never runs a query, so nothing lands in the query log as usage.
