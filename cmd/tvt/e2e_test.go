@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -31,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
@@ -160,9 +162,11 @@ func (l liveLab) grafanaLogs(t *testing.T) stringList {
 	return stringList{filepath.Join(dir, "grafana.log*")}
 }
 
-// readOnly fails the test on any request a read-only tool must not send.
+// readOnly fails the test on any request a read-only tool must not send,
+// then hands the rest to next (http.DefaultTransport when nil).
 type readOnly struct {
 	t    *testing.T
+	next http.RoundTripper
 	mu   sync.Mutex
 	sent int
 }
@@ -183,14 +187,25 @@ func (r *readOnly) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, fmt.Errorf("e2e: refused query")
 		}
 	}
+	if r.next != nil {
+		return r.next.RoundTrip(req)
+	}
 	return http.DefaultTransport.RoundTrip(req)
+}
+
+// scanClient is the client tvt uses in production (httpx.DefaultClient:
+// its timeout and redirect policy) with the read-only guard in front.
+func scanClient(ro *readOnly) *http.Client {
+	c := httpx.DefaultClient()
+	c.Transport = ro
+	return c
 }
 
 func useReadOnly(t *testing.T) *readOnly {
 	t.Helper()
 	ro := &readOnly{t: t}
 	old := scanHTTP
-	scanHTTP = &http.Client{Timeout: 2 * time.Minute, Transport: ro}
+	scanHTTP = scanClient(ro)
 	t.Cleanup(func() { scanHTTP = old })
 	return ro
 }
@@ -364,6 +379,33 @@ func TestE2EReadOnlyTransport(t *testing.T) {
 		if _, err := ro.RoundTrip(req); err == nil {
 			t.Errorf("%s %s was let through", req.Method, req.URL)
 		}
+	}
+}
+
+// TestE2EScanClientRefusesDowngrade: the scan's client is the production
+// one, so an https backend redirecting to plain http is refused and the
+// token never reaches the http server.
+func TestE2EScanClientRefusesDowngrade(t *testing.T) {
+	var leaked string
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = r.Header.Get("Authorization")
+	}))
+	defer plain.Close()
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer tls.Close()
+	c := scanClient(&readOnly{t: t, next: tls.Client().Transport})
+	req, err := httpx.NewRequest(context.Background(), tls.URL, "/api/search", nil, "secret-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := c.Do(req); err == nil {
+		resp.Body.Close()
+		t.Fatal("https->http redirect was followed")
+	}
+	if leaked != "" {
+		t.Fatalf("plain-http server received Authorization %q", leaked)
 	}
 }
 
