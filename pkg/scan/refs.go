@@ -95,15 +95,27 @@ type resolver struct {
 	recordedBy  map[string][]string // metric signal ID -> recording rule consumer IDs writing it
 	consumerEvd map[string]graph.EvidenceClass
 	regexps     map[string]*regexp.Regexp // compiled anchored matcher regexes; nil = invalid
+	series      map[string]int64          // collected metric name -> active series
+	totalSeries int64
+	// sweepShare: an observed query whose selector, naming no metric
+	// outright and restricting no label, selects more than this share of
+	// the collected series is a sweep.
+	sweepShare float64
 }
+
+// DefaultSweepShare is the share of series above which a query is a sweep.
+const DefaultSweepShare = 0.5
 
 func newResolver(src string, metrics []collect.MetricCardinality, labels []collect.LabelCardinality) *resolver {
 	r := &resolver{
 		src: src, collected: map[string]bool{}, known: map[string]bool{}, labels: map[string][]string{}, streams: map[string]bool{},
 		refs: map[refKey]*graph.Reference{}, direct: map[string][]refKey{}, recordedBy: map[string][]string{},
 		consumerEvd: map[string]graph.EvidenceClass{}, regexps: map[string]*regexp.Regexp{},
+		series: map[string]int64{}, sweepShare: DefaultSweepShare,
 	}
 	for _, m := range metrics {
+		r.series[m.Metric] += m.ActiveSeries
+		r.totalSeries += m.ActiveSeries
 		id := r.metricID(m.Metric)
 		if !r.known[id] {
 			r.known[id] = true
@@ -177,12 +189,14 @@ func (r *resolver) merge(ref graph.Reference) (refKey, bool) {
 	cur.AllLabels = cur.AllLabels || ref.AllLabels
 	cur.Assumed = cur.Assumed || ref.Assumed
 	cur.ResultLabels = cur.ResultLabels || ref.ResultLabels
+	// A consumer that names the signal as well as sweeping it reads it.
+	cur.Sweep = cur.Sweep && ref.Sweep
 	if ref.LastSeen.After(cur.LastSeen) {
 		cur.LastSeen, cur.Actor = ref.LastSeen, ref.Actor
 	}
 	// Unions only grow, so equal lengths mean nothing new.
 	changed := len(cur.Labels) != len(before.Labels) || len(cur.Reasons) != len(before.Reasons) ||
-		cur.AllLabels != before.AllLabels || cur.Assumed != before.Assumed || cur.ResultLabels != before.ResultLabels ||
+		cur.AllLabels != before.AllLabels || cur.Assumed != before.Assumed || cur.ResultLabels != before.ResultLabels || cur.Sweep != before.Sweep ||
 		!cur.LastSeen.Equal(before.LastSeen)
 	return k, changed
 }
@@ -257,6 +271,10 @@ func (r *resolver) resolveMetric(q query, pr parse.Ref, failed bool) {
 			base.Assumed = true
 			base.Reasons = append(base.Reasons, why...)
 		}
+	}
+	if why := r.sweep(q, pr, names); why != "" {
+		base.Sweep = true
+		base.Reasons = append(base.Reasons, why)
 	}
 	for _, name := range names {
 		id, ok := r.metricSignal(name, failed)
@@ -342,6 +360,48 @@ func (r *resolver) namesMatch(name string, ms []parse.Matcher, vars map[string]v
 		}
 	}
 	return true, reasons
+}
+
+// sweep says why an observed query's selector is a sweep, or "": it names
+// no metric outright, restricts no label, and either matches every metric
+// name or selects more than sweepShare of the collected series. Declared
+// consumers (rules, SLOs, runbooks, external) never sweep: what they
+// evaluate, they depend on.
+func (r *resolver) sweep(q query, pr parse.Ref, names []string) string {
+	if q.consumer.Kind.Evidence() != graph.EvidenceObserved || pr.Metric != "" || q.unparsed != "" {
+		return ""
+	}
+	for _, m := range pr.Matchers {
+		if m.Label != "__name__" && !matchesAnything(m) {
+			return ""
+		}
+	}
+	if !namesMetric(pr) {
+		return "a sweep: the query matches every metric name"
+	}
+	if r.totalSeries == 0 {
+		return ""
+	}
+	var n int64
+	for _, name := range names {
+		n += r.series[name]
+	}
+	if share := float64(n) / float64(r.totalSeries); share > r.sweepShare {
+		return fmt.Sprintf("a sweep: the query selects %.0f%% of series", share*100)
+	}
+	return ""
+}
+
+// matchesAnything: the matcher restricts nothing a series can have
+// (=~".*", =~".+", !="", !~"").
+func matchesAnything(m parse.Matcher) bool {
+	switch m.Op {
+	case parse.MatchRegexp:
+		return m.Value == ".*" || m.Value == ".+"
+	case parse.MatchNotEqual, parse.MatchNotRegex:
+		return m.Value == ""
+	}
+	return false
 }
 
 func hasNameMatcher(ms []parse.Matcher) bool {
@@ -641,6 +701,8 @@ func (r *resolver) follow(consumer string, out graph.Reference) {
 				// survive both the rule and the reader.
 				ResultLabels: in.ResultLabels && out.ResultLabels,
 				Reasons:      append(append([]string(nil), in.Reasons...), out.Reasons...),
+				// A sweep of a rule's output sweeps its inputs.
+				Sweep: out.Sweep,
 			}
 			if k, changed := r.merge(ref); changed {
 				r.follow(consumer, *r.refs[k])

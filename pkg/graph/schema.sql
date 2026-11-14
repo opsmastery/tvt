@@ -127,6 +127,9 @@ CREATE TABLE IF NOT EXISTS refs (
     reason      TEXT NOT NULL DEFAULT '',
     result_labels INTEGER NOT NULL DEFAULT 0 CHECK (result_labels IN (0, 1)),
     last_scan   INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    -- Schema version 13: the consumer only swept the signal (a query over
+    -- every metric name): weak evidence that keeps nothing on its own.
+    sweep       INTEGER NOT NULL DEFAULT 0 CHECK (sweep IN (0, 1)),
     PRIMARY KEY (signal_id, consumer_id, via)
 );
 CREATE INDEX IF NOT EXISTS refs_consumer ON refs (consumer_id);

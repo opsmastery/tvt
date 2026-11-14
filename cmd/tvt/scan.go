@@ -152,7 +152,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		if err != nil {
 			return err
 		}
-		in.External, in.Owners, in.Clients = cfg.ExternalConsumers, cfg.Ownership.Owners, cfg.Clients
+		in.External, in.Owners, in.Clients, in.SweepShare = cfg.ExternalConsumers, cfg.Ownership.Owners, cfg.Clients, cfg.SweepShare
 		if cfg.PriceCard != "" {
 			card, err := cost.Load(cfg.PriceCard)
 			if err != nil {
