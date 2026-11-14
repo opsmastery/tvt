@@ -406,7 +406,7 @@ func versionOneDB(t *testing.T, path string) *Store {
 		must(t, sc.PutConsumer(ctx, graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}))
 		must(t, sc.PutReference(ctx, graph.Reference{Evidence: graph.EvidenceObserved, SignalID: "m", ConsumerID: "c"}))
 	})
-	for _, q := range []string{
+	for _, q := range append(append([]string{}, v8Drops...), []string{
 		`ALTER TABLE refs DROP COLUMN assumed`,
 		`ALTER TABLE refs DROP COLUMN evidence`,
 		`ALTER TABLE refs DROP COLUMN labels`,
@@ -423,7 +423,7 @@ func versionOneDB(t *testing.T, path string) *Store {
 		`ALTER TABLE signals DROP COLUMN tier`,
 		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '1' WHERE key = 'schema_version'`,
-	} {
+	}...) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
@@ -551,7 +551,7 @@ func TestUpgradeFromVersion2(t *testing.T) {
 		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: graph.EvidenceDeclared, Assumed: true}))
 		must(t, sc.PutReference(ctx, graph.Reference{SignalID: "m", ConsumerID: "d", Evidence: graph.EvidenceDeclared}))
 	})
-	for _, q := range []string{
+	for _, q := range append(append([]string{}, v8Drops...), []string{
 		`ALTER TABLE refs DROP COLUMN evidence`,
 		`ALTER TABLE refs DROP COLUMN labels`,
 		`ALTER TABLE refs DROP COLUMN all_labels`,
@@ -567,7 +567,7 @@ func TestUpgradeFromVersion2(t *testing.T) {
 		`ALTER TABLE signals DROP COLUMN tier`,
 		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '2' WHERE key = 'schema_version'`,
-	} {
+	}...) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
@@ -631,7 +631,7 @@ func TestUpgradeFromVersion3AndGaps(t *testing.T) {
 	must(t, err)
 	src := graph.SourceCoverage{Source: "prometheus query log", Configured: true, Coverage: 0.5, WindowStart: t0.Add(-time.Hour)}
 	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutSource(ctx, src)) })
-	for _, q := range []string{
+	for _, q := range append(append([]string{}, v8Drops...), []string{
 		`ALTER TABLE scan_sources DROP COLUMN gap`,
 		`ALTER TABLE consumers DROP COLUMN evaluated_by`,
 		`ALTER TABLE consumers DROP COLUMN interval_ms`,
@@ -642,7 +642,7 @@ func TestUpgradeFromVersion3AndGaps(t *testing.T) {
 		`ALTER TABLE signals DROP COLUMN tier`,
 		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '3' WHERE key = 'schema_version'`,
-	} {
+	}...) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
@@ -710,7 +710,7 @@ func TestUpgradeFromVersion4AndRuleColumns(t *testing.T) {
 	must(t, err)
 	old := graph.Consumer{ID: "rule:prometheus:f/g/A", Kind: graph.ConsumerAlertRule, Name: "A", Expr: "up == 0"}
 	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutConsumer(ctx, old)) })
-	for _, q := range []string{
+	for _, q := range append(append([]string{}, v8Drops...), []string{
 		`ALTER TABLE consumers DROP COLUMN evaluated_by`,
 		`ALTER TABLE consumers DROP COLUMN interval_ms`,
 		`ALTER TABLE consumers DROP COLUMN datasources`,
@@ -720,7 +720,7 @@ func TestUpgradeFromVersion4AndRuleColumns(t *testing.T) {
 		`ALTER TABLE signals DROP COLUMN tier`,
 		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '4' WHERE key = 'schema_version'`,
-	} {
+	}...) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
@@ -753,14 +753,14 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 	must(t, err)
 	old := graph.Signal{ID: "prom:metric:m", Kind: graph.KindMetric, Name: "m", Source: "prom", FirstSeen: t0}
 	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutSignal(ctx, old)) })
-	for _, q := range []string{
+	for _, q := range append(append([]string{}, v8Drops...), []string{
 		`ALTER TABLE signals DROP COLUMN class`,
 		`ALTER TABLE signals DROP COLUMN dormant`,
 		`ALTER TABLE signals DROP COLUMN owner`,
 		`ALTER TABLE signals DROP COLUMN tier`,
 		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '5' WHERE key = 'schema_version'`,
-	} {
+	}...) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
@@ -797,16 +797,73 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 
 // Version 6 databases gain consumers.unparsed (Sprint 2 item 19): old rows
 // read back with none, and a scan stores why a panel couldn't be read.
+// v8Drops turns a current database's tables back into version 7's, for the
+// upgrade tests that start from an older version.
+var v8Drops = []string{
+	`ALTER TABLE scans DROP COLUMN pricecard`,
+	`ALTER TABLE scans DROP COLUMN currency`,
+	`ALTER TABLE scans DROP COLUMN price_preset`,
+	`ALTER TABLE costs DROP COLUMN interval_ms`,
+	`ALTER TABLE costs DROP COLUMN interval_assumed`,
+	`ALTER TABLE costs DROP COLUMN buckets`,
+	`ALTER TABLE costs DROP COLUMN exemplars`,
+}
+
+// Version 7 databases gain the scan's price card and the cost columns for
+// scrape intervals and histograms; old cost rows keep their numbers.
+func TestUpgradeFromVersion7AndCostColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v7.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	sig := graph.Signal{ID: "prom:metric:up", Kind: graph.KindMetric, Name: "up", Source: "prom"}
+	old := graph.Cost{SignalID: sig.ID, ActiveSeries: 6, MonthlyCost: 0.5, ObservedAt: t0}
+	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutSignal(ctx, sig)); must(t, sc.PutCost(ctx, old)) })
+	for _, q := range append(append([]string{}, v8Drops...), `UPDATE meta SET value = '7' WHERE key = 'schema_version'`) {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	got, err := s.Costs(ctx, 1)
+	must(t, err)
+	if len(got) != 1 || got[0].MonthlyCost != 0.5 || got[0].Interval != 0 || got[0].Buckets != 0 {
+		t.Errorf("upgraded costs = %+v", got)
+	}
+	bucket := graph.Signal{ID: "prom:metric:h_bucket", Kind: graph.KindMetric, Name: "h_bucket", Source: "prom"}
+	c := graph.Cost{SignalID: bucket.ID, ActiveSeries: 120, MonthlyCost: 0.78, ObservedAt: t0.Add(time.Hour),
+		Interval: 15 * time.Second, IntervalAssumed: "no targets API", Buckets: 12, Exemplars: true}
+	id := scan(t, s, t0.Add(time.Hour), func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, bucket))
+		must(t, sc.PutCost(ctx, c))
+		must(t, sc.SetPriceCard(ctx, "grafana-cloud-pro", "USD", true))
+	})
+	got, err = s.Costs(ctx, id)
+	must(t, err)
+	c.ScanID = id
+	if len(got) != 1 || !reflect.DeepEqual(got[0], c) {
+		t.Errorf("costs = %+v, want %+v", got, c)
+	}
+	info, err := s.LatestScan(ctx)
+	must(t, err)
+	if info.PriceCard != "grafana-cloud-pro" || info.Currency != "USD" || !info.PricePreset {
+		t.Errorf("scan price card = %+v", info)
+	}
+}
+
 func TestUpgradeFromVersion6AndUnparsed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v6.db")
 	s, err := Open(ctx, path)
 	must(t, err)
 	old := graph.Consumer{ID: "panel:1:d:1:0", Kind: graph.ConsumerDashboardPanel, Name: "D / p", Expr: "up"}
 	scan(t, s, t0, func(sc *Scan) { must(t, sc.PutConsumer(ctx, old)) })
-	for _, q := range []string{
+	for _, q := range append(append([]string{}, v8Drops...), []string{
 		`ALTER TABLE consumers DROP COLUMN unparsed`,
 		`UPDATE meta SET value = '6' WHERE key = 'schema_version'`,
-	} {
+	}...) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}

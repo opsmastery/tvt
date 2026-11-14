@@ -43,16 +43,39 @@ as_of: 2026-11-08                     # when the numbers were copied
 
 Out of scope for v1: per-team or per-environment price overrides (Phase 2), and currency conversion.
 
+## Using a card
+
+In `tvt.yaml`, `pricecard:` is a file (relative to `tvt.yaml`) or the name of a shipped preset:
+
+```yaml
+pricecard: ./pricecard.yaml   # or: grafana-cloud
+```
+
+Shipped presets (`pkg/cost/presets`):
+
+| Preset | Source | As of | Notes |
+| --- | --- | --- | --- |
+| `grafana-cloud` | grafana.com/pricing | 2026-11-14 | Pro list prices: $6.50 per 1k series (10k included), logs $0.45/GB ingested ($0.05 processing + $0.40 writing; 50 GB included). The page's $0.10/GB "Retaining" has no stated unit, so retention past the included 30 days isn't priced. Volume discounts aren't modeled. |
+
+Each scan records the card it used (name, currency, preset) next to its costs. Without a card, costs are recorded with zero money and their volume.
+
 ## How costs are computed
 
 A month is 30 days.
 
 | Signal | Monthly cost |
 | --- | --- |
-| Metric or label | `series × per_active_series_month` + `series × (seconds per month ÷ scrape interval) ÷ 1e6 × per_million_samples` |
+| Metric | `series × per_active_series_month` + `series × (seconds per month ÷ interval) ÷ 1e6 × per_million_samples` |
+| Label | the metric's cost per series × the series carrying the label × (1 − 1 ÷ distinct values): what dropping it would collapse, assuming its values are independent of the other labels. A label with one value multiplies nothing. |
 | Log stream | `GB/day × 30 × per_gb_ingested` + `GB/day × retention_days × per_gb_month_retained` (steady-state stored volume) + `events/day × 30 ÷ 1e6 × per_million_events_indexed` |
 | Traces | `spans/day × 30 ÷ 1e6 × per_million_spans` + `GB/day × 30 × per_gb_ingested` |
 
+**The interval** a metric's samples are counted at is, in order: its recording rule's evaluation interval; the shortest scrape interval of the jobs exposing it (Prometheus `/api/v1/targets` per job, `/api/v1/targets/metadata` for which jobs expose which metric family); for a scraped series no metadata names (`up`, `scrape_*`), the shortest job interval, marked assumed; without a targets API (Mimir), 1m, marked assumed. The interval and any assumption are stored with the cost.
+
+**Histograms:** a `_bucket` metric's series are its dimensions × its buckets, so the bucket count (`le` values, when its labels were collected) is stored with its cost, and exemplars are flagged when Prometheus runs with `exemplar-storage`.
+
+**Included allotments** come off the total (`MetricsBillable`, `LogsBillable`), at the marginal rate, never below zero; each signal keeps its marginal cost.
+
 ## Status
 
-The Go types are in `pkg/cost/pricecard.go`. They cover the flat prices but not yet `version`, `included_*`, `per_million_events_indexed`, `source` or `as_of`. Those land with the YAML loader in Sprint 3.
+Loader, presets and metric and label costs: S3 item 1. Log streams are priced from Loki's volume API in item 3; the self-hosted kind is item 2. `per_million_events_indexed` is read and validated, but no backend reports indexed events yet. Not yet: Grafana Cloud Adaptive Metrics ("already handled" series, never counted as savings), which comes with the Cloud adapters (Sprint 2 item 11).
