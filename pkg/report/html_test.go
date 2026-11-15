@@ -29,7 +29,7 @@ func TestRenderHTML(t *testing.T) {
 			t.Errorf("page has no %q", want)
 		}
 	}
-	if got := strings.Count(page, "<tr id="); got != len(r.Recommendations) {
+	if got := strings.Count(page, `<tr class="rec"`); got != len(r.Recommendations) {
 		t.Errorf("%d rows, want %d", got, len(r.Recommendations))
 	}
 }

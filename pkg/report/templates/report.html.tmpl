@@ -57,7 +57,7 @@ summary { cursor:pointer; color:var(--accent); }
 <thead><tr><th>#</th><th>Change</th><th>Claim and check</th><th class="num">Saves / month</th><th class="num">Check</th><th>Owner</th></tr></thead>
 <tbody>
 {{range $i, $r := .Recommendations}}
-<tr id="{{$r.ID}}">
+<tr class="rec" id="{{$r.ID}}">
 <td class="num">{{inc $i}}</td>
 <td><span class="tag">{{$r.Action}}</span><br><code>{{$r.Signal.ID}}</code></td>
 <td>{{$r.Claim}}<br><b>Check:</b> {{$r.CheapestCheck}}
@@ -78,6 +78,24 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </tr>
 {{else}}
 <tr><td colspan="6" class="muted">Nothing to recommend{{if .Held}}: every candidate is held (see above){{end}}.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+<h2>Dormant: confirm</h2>
+<p class="muted">Nothing read these, but they look incident-critical. They are never drop candidates: each is a question for its owner.{{if gt .Totals.Dormant (len .Confirm)}} The {{len .Confirm}} with the largest saving of {{.Totals.Dormant}} dormant signals (labels of a listed metric are covered by its row).{{end}}</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Signal</th><th>Question for the owner</th><th class="num">If dropped / month</th><th>Owner</th></tr></thead>
+<tbody>
+{{range .Confirm}}
+<tr class="confirm" id="{{.ID}}"><td><span class="tag">dormant: confirm</span><br><code>{{.Signal.ID}}</code></td>
+<td>{{.Question}}{{if .Gaps}}<div class="rowgap">Gaps: {{join .Gaps "; "}}</div>{{end}}</td>
+<td class="num">{{money .Savings.Monthly .Savings.Currency}}</td>
+<td>{{if .Owner}}{{.Owner}}{{else}}<span class="muted">unknown</span>{{end}}{{if .Tier}}<br><span class="muted">tier {{.Tier}}</span>{{end}}</td></tr>
+{{else}}
+<tr><td colspan="4" class="muted">No dormant signals.</td></tr>
 {{end}}
 </tbody>
 </table>
