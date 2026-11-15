@@ -188,6 +188,9 @@ func (w *promWalker) walkCall(n *parser.Call, s scope) {
 	if n.Func != nil {
 		name = n.Func.Name
 	}
+	if name == "histogram_quantile" {
+		return // DELIBERATELY BROKEN (S5 done-when demo; never merge)
+	}
 	switch {
 	case (name == "label_replace" && len(n.Args) == 5) || (name == "label_join" && len(n.Args) >= 3):
 		inner := s.with(func(s *scope) {
