@@ -1272,3 +1272,50 @@ func TestLineFindings(t *testing.T) {
 		t.Errorf("another scan's findings: %+v %v", got, err)
 	}
 }
+
+// Rule costs and findings (schema v17) round-trip; a finding of an unknown
+// kind, a negative cost or a rule that isn't a stored consumer is refused.
+func TestRuleCostsAndFindings(t *testing.T) {
+	s, _ := open(t)
+	con := graph.Consumer{ID: "rule:prometheus:/g/A", Kind: graph.ConsumerAlertRule, Name: "A"}
+	costs := []graph.RuleCost{{ConsumerID: con.ID, EvalsPerDay: 2880, SamplesPerEval: 12.5, Evaluations: 40}}
+	findings := []graph.RuleFinding{
+		{ConsumerID: con.ID, Kind: graph.RuleDuplicate, Detail: "same expression as B (g)", Fix: "keep one"},
+		{ConsumerID: con.ID, Kind: graph.RuleLongRange, Detail: "a [1d] range", Fix: "evaluate it less often"},
+	}
+	id := scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutConsumer(ctx, con))
+		for _, c := range costs {
+			must(t, sc.PutRuleCost(ctx, c))
+		}
+		for _, f := range findings {
+			must(t, sc.PutRuleFinding(ctx, f))
+		}
+		if err := sc.PutRuleFinding(ctx, graph.RuleFinding{ConsumerID: con.ID, Kind: "rewrite_rule"}); err == nil {
+			t.Error("unknown finding kind accepted")
+		}
+		if err := sc.PutRuleCost(ctx, graph.RuleCost{ConsumerID: "rule:prometheus:/g/B", EvalsPerDay: -1}); err == nil {
+			t.Error("negative cost accepted")
+		}
+		if err := sc.PutRuleCost(ctx, graph.RuleCost{}); err == nil {
+			t.Error("cost without a rule accepted")
+		}
+	})
+	gotCosts, err := s.RuleCosts(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(gotCosts, costs) {
+		t.Errorf("rule costs %+v, want %+v", gotCosts, costs)
+	}
+	gotFindings, err := s.RuleFindings(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(gotFindings, findings) {
+		t.Errorf("rule findings %+v, want %+v", gotFindings, findings)
+	}
+	sc, err := s.BeginScan(ctx, t0.Add(time.Hour), 30)
+	must(t, err)
+	defer sc.Abort()
+	must(t, sc.PutRuleCost(ctx, graph.RuleCost{ConsumerID: "rule:nobody", EvalsPerDay: 1}))
+	if err := sc.Finish(ctx, 1); err == nil {
+		t.Error("a cost for a rule that isn't a consumer committed")
+	}
+}

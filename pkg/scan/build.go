@@ -73,6 +73,9 @@ type Inputs struct {
 	// Queries are query-log entries in the window, tvt's own and rule
 	// evaluations already excluded.
 	Queries []collect.LoggedQuery
+	// RuleEvaluations are the datasource rulers' own evaluations from the
+	// query logs, with their measured cost, for cost per rule (S6 item 1).
+	RuleEvaluations []collect.RuleEvaluation
 	// External are the consumers tvt.yaml declares; every signal they
 	// select is a hard keep. Owners map signals to owners and tiers.
 	External []config.ExternalConsumer
@@ -180,6 +183,10 @@ type Output struct {
 	// TSDB is what the Prometheus server reported (Inputs.Storage), stored
 	// so the scan can be repriced; nil when it wasn't read.
 	TSDB *collect.Storage
+	// RuleCosts price every rule's evaluations; RuleFindings are what's
+	// wrong with each (S6 item 1). Report only.
+	RuleCosts    []graph.RuleCost
+	RuleFindings []graph.RuleFinding
 }
 
 // Build maps inputs to graph rows. It rejects inputs a scan should never
@@ -225,6 +232,7 @@ func Build(in Inputs) (Output, error) {
 	dsq := &dsQueries{}
 
 	// Rules. A recording rule's output is a metric signal.
+	ruleIDs := make([]string, 0, len(in.Rules))
 	for _, r := range in.Rules {
 		kind := graph.ConsumerRecordingRule
 		if r.Kind == collect.RuleAlert {
@@ -261,6 +269,7 @@ func Build(in Inputs) (Output, error) {
 			}
 		}
 		out.Consumers = append(out.Consumers, c)
+		ruleIDs = append(ruleIDs, c.ID)
 		if kind == graph.ConsumerRecordingRule && r.Name != "" {
 			res.recordingRule(c.ID, r.Name)
 		}
@@ -479,6 +488,7 @@ func Build(in Inputs) (Output, error) {
 		return Output{}, err
 	}
 	out.PriceCard, out.Storage, out.TSDB = in.PriceCard, st, in.Storage
+	out.RuleCosts, out.RuleFindings = ruleAnalysis(in, ruleIDs, out.References)
 	readers := newStreamReaders(out.Signals, out.Consumers, out.References)
 	if out.LineFindings, err = lineFindings(in.Patterns, out.StreamVolumes, in.Owners, in.PriceCard, readers); err != nil {
 		return Output{}, err
