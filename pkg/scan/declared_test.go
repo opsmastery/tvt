@@ -98,7 +98,7 @@ func TestSLOsAndRunbooks(t *testing.T) {
 		src[s.Source] = s
 	}
 	slo := src[SourceSLOs]
-	if !slo.Configured || slo.Coverage < 0.66 || slo.Coverage > 0.67 || !strings.Contains(slo.Gap, "shop/plugin") {
+	if !slo.Configured || slo.Coverage < 0.66 || slo.Coverage > 0.67 || !strings.Contains(slo.Gap, "shop/plugin") || !strings.Contains(slo.Gap, "no ownership.owners") {
 		t.Errorf("slo source %+v", slo)
 	}
 	rb := src[SourceRunbooks]

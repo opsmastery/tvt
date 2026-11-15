@@ -132,7 +132,8 @@ func ruleAnalysis(in Inputs, ids []string, refs []graph.Reference) ([]graph.Rule
 				break
 			}
 		}
-		if r.Interval > 0 {
+		// An SLO's burn-rate alerts and recorded windows need long ranges.
+		if r.Interval > 0 && !sloRule(r, in.SLOs) {
 			var longest time.Duration
 			for _, q := range qs {
 				longest = max(longest, maxRange(q.expr))

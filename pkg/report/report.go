@@ -14,7 +14,7 @@ import (
 
 // Version is the JSON report's schema version. Readers (the HTML report,
 // propose, check) refuse a version they don't know.
-const Version = 7
+const Version = 8
 
 // Actions a recommendation can propose.
 const (
@@ -76,6 +76,9 @@ type Report struct {
 	// QueryLoad is the measured query load by client and consumer (S6
 	// item 2, version 7).
 	QueryLoad QueryLoad `json:"query_load"`
+	// SLOCoverage is the SLO coverage report (S6 item 3, version 8).
+	// Report only.
+	SLOCoverage SLOCoverage `json:"slo_coverage"`
 	// Held are candidates tvt can't recommend yet, by reason
 	// (score.Held*): a short window, no coverage, a new signal.
 	Held map[string]int `json:"held,omitempty"`
@@ -117,6 +120,8 @@ type Totals struct {
 	StreamSavings float64 `json:"stream_savings"`
 	// RuleFindings counts every rule finding (S6 item 1).
 	RuleFindings int `json:"rule_findings"`
+	// SLOFindings counts every SLO coverage finding (S6 item 3).
+	SLOFindings int `json:"slo_findings"`
 }
 
 // Recommendation is one proposed change and everything needed to check it.
@@ -273,6 +278,8 @@ type Input struct {
 	RuleFindings []graph.RuleFinding
 	// QueryCosts are the scan's measured query costs (store.QueryCosts).
 	QueryCosts []graph.QueryCost
+	// SLOFindings are the scan's SLO coverage findings (store.SLOFindings).
+	SLOFindings []graph.SLOFinding
 	// StreamVolumes are the scan's streams (store.StreamVolumes): tvt why
 	// uses them to find readers of a stream signal's streams through an
 	// overlapping selector.
@@ -379,6 +386,8 @@ func Build(in Input, limit int) Report {
 	r.LineFindings = lineFindings(in.LineFindings, in.Scan.Currency)
 	r.Rules, r.Totals.RuleFindings = rules(consumers, in.RuleCosts, in.RuleFindings)
 	r.QueryLoad = queryLoad(consumers, in.QueryCosts)
+	r.SLOCoverage = sloCoverage(in.SLOFindings)
+	r.Totals.SLOFindings = len(in.SLOFindings)
 	r.Gaps = gs.all(in.Sources, gs.assumedGaps(in.References, consumers))
 	r.UnmatchedAcknowledgements = gs.unmatched()
 	for _, s := range in.Signals {
