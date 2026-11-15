@@ -1376,3 +1376,28 @@ func TestSLOFindings(t *testing.T) {
 		t.Errorf("SLO findings %+v, want %+v", got, findings)
 	}
 }
+
+func TestPipelineTargets(t *testing.T) {
+	s, _ := open(t)
+	targets := []graph.PipelineTarget{
+		{Subject: "prom:metric:a", Pipeline: "alloy-apps"},
+		{Subject: "prom:metric:b", Note: "claimed by several pipelines: x, y"},
+		{Subject: `stream:{app="r"}`, Note: "no pipeline's handles match"},
+	}
+	id := scan(t, s, t0, func(sc *Scan) {
+		for _, pt := range targets {
+			must(t, sc.PutPipelineTarget(ctx, pt))
+		}
+		if err := sc.PutPipelineTarget(ctx, graph.PipelineTarget{Subject: "prom:metric:c"}); err == nil {
+			t.Error("unmapped target without a note accepted")
+		}
+		if err := sc.PutPipelineTarget(ctx, graph.PipelineTarget{Subject: "prom:metric:a", Pipeline: "other"}); err == nil {
+			t.Error("a second target for one subject accepted")
+		}
+	})
+	got, err := s.PipelineTargets(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(got, targets) {
+		t.Errorf("pipeline targets %+v, want %+v", got, targets)
+	}
+}

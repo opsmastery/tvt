@@ -57,3 +57,13 @@ states:
       tvt-lab.yaml naming the lab's services as owners; every other fixture is the rule-efficiency
       one. Ground truth's slo_coverage is scored by TestSLOCoverage.
     proven: [prometheus query log, loki query log, grafana router log]
+  - name: pipelines
+    dir: pipelines
+    scan_time: 2026-11-15T22:52:00Z
+    about: >
+      After Alloy joined the data path (tvt-lab #20; tvt S6 item 4): Alloy scrapes the shop and
+      node-exporter and ships the shop's logs, Prometheus scrapes itself and the backends, and the
+      reconciler's stream goes straight to Loki. Full snapshot captured Nov 15, 2026 22:51 UTC with
+      prometheus/label_metrics.json; tvt-lab.yaml declares both pipelines. Ground truth's pipelines
+      is scored by TestPipelineTargets.
+    proven: [prometheus query log, loki query log, grafana router log]

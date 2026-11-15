@@ -79,7 +79,7 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </td>
 <td class="num">{{money $r.Savings.Monthly $r.Savings.Currency}}{{if $r.Savings.Approximate}}<br><span class="muted">approx.</span>{{end}}</td>
 <td class="num">{{$r.CheckMinutes}} min</td>
-<td>{{if $r.Owner}}{{$r.Owner}}{{else}}<span class="muted">unknown</span>{{end}}</td>
+<td>{{if $r.Owner}}{{$r.Owner}}{{else}}<span class="muted">unknown</span>{{end}}{{if $r.Pipeline}}<br><span class="muted">pipeline:</span> {{if $r.Proposable}}{{$r.Pipeline}}{{else}}<b>unmapped</b><br><span class="muted">{{$r.PipelineNote}}</span>{{end}}{{end}}</td>
 </tr>
 {{else}}
 <tr><td colspan="6" class="muted">Nothing to recommend{{if .Held}}: every candidate is held (see above){{end}}.</td></tr>
@@ -156,6 +156,30 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </tbody>
 </table>
 </div>
+
+{{if or .Pipelines.Pipelines .Pipelines.Unmapped.Recommendations .Pipelines.UnmappedStreams}}
+<h2>Pipelines</h2>
+<p class="muted">Where each change goes (tvt.yaml pipelines: handles). Unmapped rows are reported with their savings but never proposed until a pipeline claims them.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Pipeline</th><th class="num">Recommendations</th><th class="num">Saves / month</th></tr></thead>
+<tbody>
+{{range .Pipelines.Pipelines}}<tr><td>{{.Name}}</td><td class="num">{{.Recommendations}}</td><td class="num">{{money .Savings $.Scan.Currency}}</td></tr>{{end}}
+<tr><td><b>unmapped</b></td><td class="num">{{.Pipelines.Unmapped.Recommendations}}</td><td class="num">{{money .Pipelines.Unmapped.Savings $.Scan.Currency}}</td></tr>
+</tbody>
+</table>
+</div>
+{{if .Pipelines.UnmappedStreams}}
+<div class="table-wrap">
+<table>
+<thead><tr><th>Stream no pipeline claims</th><th>Why</th><th class="num">Bytes / day</th></tr></thead>
+<tbody>
+{{range .Pipelines.UnmappedStreams}}<tr><td><code>{{.Selector}}</code></td><td>{{.Note}}</td><td class="num">{{bytes .BytesPerDay}}</td></tr>{{end}}
+</tbody>
+</table>
+</div>
+{{end}}
+{{end}}
 
 <h2>SLO coverage</h2>
 <p class="muted">Report only. Services are the owners tvt.yaml names; paging alerts are severity critical or page.</p>

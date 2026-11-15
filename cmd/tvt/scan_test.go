@@ -14,7 +14,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -172,6 +174,11 @@ func newLabAt(t *testing.T, dir string, override map[string]http.HandlerFunc) la
 	if _, ok := promOverride["/api/v1/query"]; !ok {
 		promOverride["/api/v1/query"] = probeSink(t, promLog, probes)
 	}
+	for path, h := range labelMetricsRoutes(t, dir) {
+		if _, ok := promOverride[path]; !ok {
+			promOverride[path] = h
+		}
+	}
 	prom := fixtureServerAt(t, dir, map[string]string{
 		"/api/v1/status/tsdb":      "prometheus/tsdb.json",
 		"/api/v1/rules":            "prometheus/rules.json",
@@ -215,6 +222,51 @@ func newLabAt(t *testing.T, dir string, override map[string]http.HandlerFunc) la
 		"/loki/api/v1/index/volume": "loki/volume_by_stream.json",
 	}, lokiOverride)
 	return labServers{prom, graf, loki, promLog, probes, lokiLog, lokiProbes}
+}
+
+// labelMetricsRoutes answer /api/v1/label/<l>/values and
+// /api/v1/label/__name__/values?match[]={<l>="<v>"} from the snapshot's
+// prometheus/label_metrics.json (S6 item 4), as Prometheus would. A
+// snapshot without it has no routes: the label lookup gets 404s.
+func labelMetricsRoutes(t *testing.T, dir string) map[string]http.HandlerFunc {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "prometheus/label_metrics.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded map[string]map[string][]string
+	if err := json.Unmarshal(b, &recorded); err != nil {
+		t.Fatal(err)
+	}
+	reply := func(w http.ResponseWriter, data []string) {
+		if data == nil {
+			data = []string{}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": data})
+	}
+	routes := map[string]http.HandlerFunc{}
+	for l, byValue := range recorded {
+		values := slices.Sorted(maps.Keys(byValue))
+		routes["/api/v1/label/"+l+"/values"] = func(w http.ResponseWriter, r *http.Request) { reply(w, values) }
+	}
+	matchRe := regexp.MustCompile(`^\{([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"\}$`)
+	routes["/api/v1/label/__name__/values"] = func(w http.ResponseWriter, r *http.Request) {
+		m := matchRe.FindStringSubmatch(r.URL.Query().Get("match[]"))
+		if m == nil {
+			t.Errorf("label values match[] %q: not one equality matcher", r.URL.Query().Get("match[]"))
+			http.NotFound(w, r)
+			return
+		}
+		v, err := strconv.Unquote(`"` + m[2] + `"`)
+		if err != nil {
+			t.Error(err)
+		}
+		reply(w, recorded[m[1]][v])
+	}
+	return routes
 }
 
 // patternsRoute serves the snapshot's recorded pattern API answers

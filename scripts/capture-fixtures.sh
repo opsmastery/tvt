@@ -53,6 +53,25 @@ get "$PROM/api/v1/targets/metadata"       "$OUT/prometheus/targets_metadata.json
 get "$PROM/api/v1/status/flags"           "$OUT/prometheus/flags.json"             # exemplar-storage
 get "$PROM/metrics"                       "$OUT/prometheus/metrics.txt"            # its own TSDB stats (self-hosted card)
 get "$PROM/api/v1/series?match[]=shop_cart_operations_total&limit=200" "$OUT/prometheus/series_cart_ops.json"
+# Pipeline labels (S6 item 4): label -> value -> metric names, for the
+# labels tvt.yaml's pipelines handles match on. The test server answers
+# /api/v1/label/<l>/values and /api/v1/label/__name__/values?match[]= from it.
+PIPELINE_LABELS=${PIPELINE_LABELS:-job instance app}
+label_metrics() {
+  printf '{'
+  sep=''
+  for l in $PIPELINE_LABELS; do
+    printf '%s"%s":{' "$sep" "$l"; sep=','
+    vsep=''
+    for v in $(curl -fsS "$PROM/api/v1/label/$l/values" | jq -r '.data[]'); do
+      names=$(curl -fsS -G "$PROM/api/v1/label/__name__/values" --data-urlencode "match[]={$l=\"$v\"}" | jq -c '.data')
+      printf '%s%s:%s' "$vsep" "$(printf '%s' "$v" | jq -R .)" "$names"; vsep=','
+    done
+    printf '}'
+  done
+  printf '}\n'
+}
+if label_metrics > "$TMP" && jq -e . "$TMP" >/dev/null; then keep "$OUT/prometheus/label_metrics.json"; else rm -f "$TMP"; echo "  FAIL label_metrics" >&2; fi
 # The query log is on the host (tvt-lab mounts it at lab-logs/prometheus);
 # the copy inside the container stopped when the lab moved it.
 tail -n 500 "$LAB_LOGS/prometheus/query.log" > "$TMP" 2>/dev/null || :

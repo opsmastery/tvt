@@ -344,6 +344,17 @@ type RuleFinding struct {
 	Fix        string
 }
 
+// PipelineTarget is the pipeline a signal (or a stream the volume API
+// listed, Subject "stream:<labels>") maps to (S6 item 4, ADR 0007).
+// Pipeline is empty when unmapped, and Note says why: no pipeline's handles
+// match, several do, a label wasn't read, or it's a recording rule's output
+// (changed in the rule, never unmapped).
+type PipelineTarget struct {
+	Subject  string
+	Pipeline string
+	Note     string
+}
+
 // SLO coverage finding kinds (S6 item 3).
 const (
 	SLOServiceWithout    = "service_without_slo"
