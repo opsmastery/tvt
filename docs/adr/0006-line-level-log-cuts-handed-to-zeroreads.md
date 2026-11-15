@@ -20,5 +20,5 @@ tvt does not generate line-level log filters. It:
 
 - tvt stays focused on metrics, cardinality, dashboard views and cost ranking, where zeroreads doesn't go.
 - The report still captures the savings, so the business case includes line-level waste.
-- Open question: integrate (emit zeroreads rules for each candidate) or just link. Revisit after the first partner sees a line-level finding.
+- Open question: integrate (emit zeroreads rules for each candidate) or just link. Revisit after the first partner sees a line-level finding. S5 links: each `line_handoff` row in the report carries the pattern, its share and saving, and the zeroreads URL.
 - If zeroreads stalls or its license changes, revisit: the lab ground truth already defines the expected blast radius for a line-level cut.
