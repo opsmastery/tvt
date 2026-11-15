@@ -507,6 +507,9 @@ func history(ctx context.Context, path string) (scan.History, error) {
 	for _, r := range reads {
 		h.LastReads = append(h.LastReads, scan.PastRead{SignalID: r.SignalID, At: r.At})
 	}
+	if h.LastViewed, err = st.LastViewed(ctx); err != nil {
+		return scan.History{}, err
+	}
 	return h, nil
 }
 
