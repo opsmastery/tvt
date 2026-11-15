@@ -22,9 +22,10 @@ func TestQueriesFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The recorded 500 lines are 430 rule evaluations and 70 API queries.
-	if len(got) != 70 {
-		t.Fatalf("got %d queries, want 70", len(got))
+	// The recorded 500 lines (Nov 15) are 403 rule evaluations and 97 API
+	// queries.
+	if len(got) != 97 {
+		t.Fatalf("got %d queries, want 97", len(got))
 	}
 	clients := map[string]int{}
 	for i, q := range got {
@@ -36,21 +37,22 @@ func TestQueriesFixture(t *testing.T) {
 			t.Fatalf("not sorted at %d", i)
 		}
 	}
-	// 10.89.0.6 is Grafana (dashboard panels); 10.89.0.9 is the viewer's
-	// direct "Explore" queries.
-	if clients["10.89.0.6"] != 67 || clients["10.89.0.9"] != 3 {
+	// 10.89.0.17 is Grafana (dashboard panels and the Grafana-managed
+	// rule); 10.89.0.19 is the viewer's direct "Explore" queries; 10.89.0.23
+	// is the agent container (sweep and finance agents).
+	if clients["10.89.0.17"] != 89 || clients["10.89.0.19"] != 2 || clients["10.89.0.23"] != 6 {
 		t.Errorf("clients = %v", clients)
 	}
 }
 
 func TestQueriesSince(t *testing.T) {
 	ql := &QueryLog{Paths: []string{filepath.Join(fixtures, "query.log")}}
-	since := time.Date(2026, 11, 9, 1, 40, 0, 0, time.UTC)
+	since := time.Date(2026, 11, 15, 1, 48, 0, 0, time.UTC)
 	got, err := ql.Queries(context.Background(), since)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) == 0 || len(got) >= 70 {
+	if len(got) == 0 || len(got) >= 97 {
 		t.Fatalf("got %d queries after %s", len(got), since)
 	}
 	for _, q := range got {

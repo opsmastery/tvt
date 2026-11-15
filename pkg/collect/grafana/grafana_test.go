@@ -25,12 +25,14 @@ var fixtures = filepath.Join(testutil.Lab, "grafana")
 func labServer(t *testing.T, extra map[string]string) *httptest.Server {
 	t.Helper()
 	routes := testutil.Routes{}
-	for path, name := range map[string]string{
-		"/api/search":                       "search.json",
-		"/api/datasources":                  "datasources.json",
-		"/api/dashboards/uid/shop-overview": "dashboard_shop-overview.json",
-		"/api/dashboards/uid/legacy-queue":  "dashboard_legacy-queue.json",
-	} {
+	files := map[string]string{
+		"/api/search":      "search.json",
+		"/api/datasources": "datasources.json",
+	}
+	for uid, file := range testutil.Dashboards(t) {
+		files["/api/dashboards/uid/"+uid] = file
+	}
+	for path, name := range files {
 		routes[path] = testutil.File(t, "lab/grafana/"+name)
 	}
 	for path, body := range extra {
@@ -60,8 +62,8 @@ func TestDashboardsFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := byUID(got)
-	if len(m) != 2 {
-		t.Fatalf("got %d dashboards, want 2", len(got))
+	if len(m) != 3 {
+		t.Fatalf("got %d dashboards, want 3", len(got))
 	}
 
 	shop := m["shop-overview"]
@@ -88,6 +90,11 @@ func TestDashboardsFixture(t *testing.T) {
 	legacy := m["legacy-queue"]
 	if len(legacy.Panels) != 2 || legacy.Panels[0].Queries[0].Expr != "shop_legacy_queue_depth" {
 		t.Errorf("legacy-queue = %+v", legacy)
+	}
+	// tvt-lab's S3 seed: the 15s alertmanager job read at a 1m step.
+	am := m["alertmanager-health"]
+	if len(am.Panels) != 2 || am.Panels[1].Queries[0].Expr != "sum by (integration) (rate(alertmanager_notifications_total[1m]))" {
+		t.Errorf("alertmanager-health = %+v", am)
 	}
 }
 
@@ -346,27 +353,29 @@ func TestDashboardViewsFixture(t *testing.T) {
 	count := map[key]int{}
 	for i, v := range got {
 		count[key{v.DashboardUID, v.Browser}]++
-		if v.User != "admin" || v.At.IsZero() {
+		if (v.User != "admin" && v.User != "sa-1-tvt") || v.At.IsZero() {
 			t.Errorf("bad view %+v", v)
 		}
 		if i > 0 && v.At.Before(got[i-1].At) {
 			t.Fatal("not sorted")
 		}
 	}
-	// The recorded log has the viewer's browser-style loads of Shop Overview,
-	// one manual browser view of each dashboard (spike 1), and scripted API
-	// fetches with no Referer (capture-fixtures.sh), like tvt's own scan.
+	// The recorded log (Nov 15) has the viewer's browser-style loads (admin,
+	// Referer /d/<uid>) of Shop Overview and Alertmanager Health, and API
+	// fetches with no Referer: tvt's own scans (sa-1-tvt) and
+	// capture-fixtures.sh (admin) reading every dashboard.
 	want := map[key]int{
-		{"shop-overview", true}:  11,
-		{"shop-overview", false}: 4,
-		{"legacy-queue", true}:   1,
-		{"legacy-queue", false}:  4,
+		{"alertmanager-health", true}:  32,
+		{"alertmanager-health", false}: 14,
+		{"shop-overview", true}:        31,
+		{"shop-overview", false}:       15,
+		{"legacy-queue", false}:        15,
 	}
 	if fmt.Sprint(count) != fmt.Sprint(want) {
 		t.Errorf("views = %v, want %v", count, want)
 	}
 
-	rl.ExcludeUsers = []string{"admin"}
+	rl.ExcludeUsers = []string{"admin", "sa-1-tvt"}
 	if got, _ := rl.DashboardViews(context.Background(), time.Time{}); len(got) != 0 {
 		t.Errorf("excluded user still has %d views", len(got))
 	}

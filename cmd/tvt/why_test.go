@@ -38,9 +38,23 @@ func TestWhyLab(t *testing.T) {
 	if w.Class != "hard_keep" || len(w.Readers) == 0 {
 		t.Fatalf("lag: %+v", w)
 	}
-	r := w.Readers[0]
-	if r.Evidence != "declared" || !r.Exact || r.Source != report.SourceRulesAPI || r.FirstSeen.IsZero() || !strings.HasPrefix(r.Consumer, "rule:grafana:") {
-		t.Errorf("lag's first reader = %+v", r)
+	// Declared readers come first; the rule itself (rules API) and, since
+	// the Nov 15 capture, its evaluations in the query log.
+	var rule, observed bool
+	for _, r := range w.Readers {
+		if r.Evidence != "declared" {
+			observed = true
+			continue
+		}
+		if observed {
+			t.Errorf("declared reader %s after an observed one", r.Consumer)
+		}
+		if r.Exact && r.Source == report.SourceRulesAPI && !r.FirstSeen.IsZero() && strings.HasPrefix(r.Consumer, "rule:grafana:") {
+			rule = true
+		}
+	}
+	if !rule {
+		t.Errorf("lag has no declared exact rules-API reader: %+v", w.Readers)
 	}
 
 	// An ad hoc read from the query log: observed, with a last read that

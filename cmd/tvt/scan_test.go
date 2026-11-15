@@ -29,7 +29,7 @@ import (
 var lab = testutil.Lab
 
 // scanTime is just after the last line of testdata/lab/grafana/grafana.log.
-var scanTime = time.Date(2026, 11, 9, 16, 0, 0, 0, time.UTC)
+var scanTime = time.Date(2026, 11, 15, 2, 10, 0, 0, time.UTC) // just after the Nov 15 capture
 
 // fixtureServer serves files from testdata/lab by URL path through the
 // shared read-only server. A handler in override takes precedence.
@@ -115,13 +115,15 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 		"/api/v1/status/flags":     "prometheus/flags.json",
 		"/metrics":                 "prometheus/metrics.txt",
 	}, promOverride)
-	graf := fixtureServer(t, map[string]string{
-		"/api/search":                       "grafana/search.json",
-		"/api/datasources":                  "grafana/datasources.json",
-		"/api/dashboards/uid/shop-overview": "grafana/dashboard_shop-overview.json",
-		"/api/dashboards/uid/legacy-queue":  "grafana/dashboard_legacy-queue.json",
-		"/api/ruler/grafana/api/v1/rules":   "grafana/ruler_config.json",
-	}, map[string]http.HandlerFunc{
+	grafFiles := map[string]string{
+		"/api/search":                     "grafana/search.json",
+		"/api/datasources":                "grafana/datasources.json",
+		"/api/ruler/grafana/api/v1/rules": "grafana/ruler_config.json",
+	}
+	for uid, file := range testutil.Dashboards(t) {
+		grafFiles["/api/dashboards/uid/"+uid] = "grafana/" + file
+	}
+	graf := fixtureServer(t, grafFiles, map[string]http.HandlerFunc{
 		"/api/user": func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer test-grafana-token" {
 				w.WriteHeader(http.StatusUnauthorized)
@@ -295,13 +297,12 @@ func TestRepriceMatchesRescan(t *testing.T) {
 // S3 items 5 and 6 on real lab traffic: query_agents.log is a window of
 // the lab Prometheus's query log captured Nov 14 (Grafana's panel queries
 // and Grafana-managed rule evaluations, the sweep agent, the finance
-// agent), scanned with the Nov 9 log so both fall in the window. The sweep
+// agent), appended to the Nov 15 capture (which has a few agent queries of
+// its own) so both fall in the window. The sweep
 // keeps nothing: every ground-truth drop stays a drop. The finance agent's
 // named read counts, and the rule's evaluations join to it.
 func TestScanLabAgents(t *testing.T) {
-	old := scanNow
-	scanNow = func() time.Time { return time.Date(2026, 11, 14, 23, 0, 0, 0, time.UTC) }
-	t.Cleanup(func() { scanNow = old })
+	setNow(t)
 	l := newLab(t, nil)
 	agents, err := os.ReadFile(filepath.Join(lab, "prometheus/query_agents.log"))
 	if err != nil {
@@ -405,7 +406,7 @@ func TestScanLab(t *testing.T) {
 		t.Fatalf("scan: %v\n%s", err, out.String())
 	}
 	t.Log("\n" + out.String())
-	for _, want := range []string{"prom ", "6 rules", "loki         1 rule (5 streams, 98.7 MB/day)", "2 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "19 dashboard loads (19 in a browser)", ", 19 dashboard loads,", " references, ", "pricecard    grafana-cloud-pro (USD, a vendor preset: approximate"} {
+	for _, want := range []string{"prom ", "6 rules", "loki         1 rule (5 streams, 2.0 GB/day)", "3 dashboards", "as sa-1-tvt", "grafana log", "scan 1 written", "56 dashboard loads (48 in a browser)", ", 56 dashboard loads,", " references, ", "pricecard    grafana-cloud-pro (USD, a vendor preset: approximate"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -618,7 +619,7 @@ func TestScanLabMimir(t *testing.T) {
 		t.Fatalf("scan: %v\n%s", err, out.String())
 	}
 	t.Log("\n" + out.String())
-	for _, want := range []string{"mimir        1550 metrics", "3 rules", "loki         1 rule (", "scan 1 written"} {
+	for _, want := range []string{"mimir        1548 metrics", "3 rules", "loki         1 rule (", "scan 1 written"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -847,10 +848,12 @@ func readJSON(t *testing.T, name string, v any) {
 // query. The Mimir capture holds a real probe marker (nonce pinned here);
 // the Prometheus log in a --mimir scan can't be probed, so it is a gap.
 func TestScanQueryLogsMimirLoki(t *testing.T) {
-	old, oldNonce := scanNow, newProbeNonce
-	scanNow = func() time.Time { return time.Date(2026, 11, 12, 1, 0, 0, 0, time.UTC) }
+	// The Mimir log (Nov 11-12, kept: its Grafana panel queries were sent by
+	// hand) and the Loki log (Nov 15) both fall in the window to scanTime.
+	setNow(t)
+	oldNonce := newProbeNonce
 	newProbeNonce = func() string { return "0f1e2d3c4b5a6978" }
-	t.Cleanup(func() { scanNow, newProbeNonce = old, oldNonce })
+	t.Cleanup(func() { newProbeNonce = oldNonce })
 
 	l := newLab(t, nil)
 	top, err := os.ReadFile(filepath.Join(lab, "mimir/label_values_name.json"))
@@ -912,7 +915,7 @@ func TestScanQueryLogsMimirLoki(t *testing.T) {
 			strings.HasPrefix(c.ID, "qlog:mimir:panel:1:shop-overview:4:") && r.Actor == "admin" && !r.LastSeen.IsZero() {
 			panel = true
 		}
-		if r.SignalID == `loki:stream:{app="shop", component="api"}` && c.Kind == graph.ConsumerAdhocQuery &&
+		if strings.HasPrefix(r.SignalID, `loki:stream:{app="shop", component="api"`) && c.Kind == graph.ConsumerAdhocQuery &&
 			strings.Contains(c.Expr, `"route=/healthz"`) && !r.LastSeen.IsZero() {
 			stream = true
 		}
@@ -951,7 +954,7 @@ func TestScanQueryLogUnproven(t *testing.T) {
 	if err := runScan(context.Background(), o, env, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "prom log     70 queries, coverage 0% (gap: tvt's probe query never appeared") || probes.Load() != 1 {
+	if !strings.Contains(out.String(), "prom log     97 queries, coverage 0% (gap: tvt's probe query never appeared") || probes.Load() != 1 {
 		t.Errorf("output:\n%s", out.String())
 	}
 	g := readGraph(t, db)
