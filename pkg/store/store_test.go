@@ -1319,3 +1319,35 @@ func TestRuleCostsAndFindings(t *testing.T) {
 		t.Error("a cost for a rule that isn't a consumer committed")
 	}
 }
+
+func TestQueryCosts(t *testing.T) {
+	s, _ := open(t)
+	a := graph.Consumer{ID: "qlog:prometheus:agent:finance:abc", Kind: graph.ConsumerAgentQuery, Name: "agent finance", Client: "agent"}
+	b := graph.Consumer{ID: "qlog:loki:def", Kind: graph.ConsumerAdhocQuery, Name: "ad hoc", Client: "api"}
+	costs := []graph.QueryCost{{ConsumerID: b.ID, Queries: 0.5, Bytes: 4096}, {ConsumerID: a.ID, Queries: 2, Samples: 120}} // by consumer ID
+	id := scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutConsumer(ctx, a))
+		must(t, sc.PutConsumer(ctx, b))
+		for _, c := range costs {
+			must(t, sc.PutQueryCost(ctx, c))
+		}
+		if err := sc.PutQueryCost(ctx, graph.QueryCost{ConsumerID: a.ID, Samples: -1}); err == nil {
+			t.Error("negative cost accepted")
+		}
+		if err := sc.PutQueryCost(ctx, graph.QueryCost{}); err == nil {
+			t.Error("cost without a consumer accepted")
+		}
+	})
+	got, err := s.QueryCosts(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(got, costs) {
+		t.Errorf("query costs %+v, want %+v", got, costs)
+	}
+	sc, err := s.BeginScan(ctx, t0.Add(time.Hour), 30)
+	must(t, err)
+	defer sc.Abort()
+	must(t, sc.PutQueryCost(ctx, graph.QueryCost{ConsumerID: "qlog:nobody", Queries: 1}))
+	if err := sc.Finish(ctx, 1); err == nil {
+		t.Error("a cost for a consumer that isn't stored committed")
+	}
+}

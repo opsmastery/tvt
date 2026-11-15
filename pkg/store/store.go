@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 17
+const SchemaVersion = 18
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -357,6 +357,23 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			    PRIMARY KEY (scan_id, consumer_id, kind)
 			)`,
 			`UPDATE meta SET value = '17' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
+	if from < 18 {
+		for _, q := range []string{
+			`CREATE TABLE IF NOT EXISTS query_costs (
+			    scan_id     INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+			    consumer_id TEXT NOT NULL REFERENCES consumers (id) DEFERRABLE INITIALLY DEFERRED,
+			    queries     REAL NOT NULL CHECK (queries >= 0),
+			    samples     REAL NOT NULL CHECK (samples >= 0),
+			    bytes       REAL NOT NULL CHECK (bytes >= 0),
+			    PRIMARY KEY (scan_id, consumer_id)
+			)`,
+			`UPDATE meta SET value = '18' WHERE key = 'schema_version'`,
 		} {
 			if _, err := tx.ExecContext(ctx, q); err != nil {
 				return err
@@ -741,6 +758,25 @@ func (s *Store) LineFindings(ctx context.Context, scanID int64) ([]graph.LineFin
 	return out, rows.Err()
 }
 
+// QueryCosts returns the query costs of scan scanID, by consumer.
+func (s *Store) QueryCosts(ctx context.Context, scanID int64) ([]graph.QueryCost, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT consumer_id, queries, samples, bytes FROM query_costs WHERE scan_id = ? ORDER BY consumer_id`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.QueryCost
+	for rows.Next() {
+		var c graph.QueryCost
+		if err := rows.Scan(&c.ConsumerID, &c.Queries, &c.Samples, &c.Bytes); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // RuleCosts returns the rule costs of scan scanID, by consumer.
 func (s *Store) RuleCosts(ctx context.Context, scanID int64) ([]graph.RuleCost, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -822,6 +858,7 @@ type Scan struct {
 	line        *sql.Stmt
 	ruleCost    *sql.Stmt
 	ruleFinding *sql.Stmt
+	queryCost   *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -925,6 +962,7 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		{&sc.ruleCost, `INSERT INTO rule_costs (scan_id, consumer_id, evals_per_day, samples_per_eval, bytes_per_eval, evaluations, unknown)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.ruleFinding, `INSERT INTO rule_findings (scan_id, consumer_id, kind, detail, fix) VALUES (?, ?, ?, ?, ?)`},
+		{&sc.queryCost, `INSERT INTO query_costs (scan_id, consumer_id, queries, samples, bytes) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.score, `INSERT INTO scores (scan_id, signal_id, monthly_cost, usage_weight, strongest, confidence, priority, held)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
@@ -1103,6 +1141,19 @@ func (sc *Scan) PutRuleFinding(ctx context.Context, f graph.RuleFinding) error {
 	}
 	_, err := sc.ruleFinding.ExecContext(ctx, sc.ID, f.ConsumerID, f.Kind, f.Detail, f.Fix)
 	return wrap("rule finding", f.ConsumerID+" "+f.Kind, err)
+}
+
+// PutQueryCost records a query-log consumer's measured query cost, once
+// per consumer.
+func (sc *Scan) PutQueryCost(ctx context.Context, c graph.QueryCost) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if c.ConsumerID == "" {
+		return errors.New("store: query cost: ConsumerID is required")
+	}
+	_, err := sc.queryCost.ExecContext(ctx, sc.ID, c.ConsumerID, c.Queries, c.Samples, c.Bytes)
+	return wrap("query cost", c.ConsumerID, err)
 }
 
 // PutScore records a candidate signal's rank in this scan, once per signal.

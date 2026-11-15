@@ -311,6 +311,18 @@ type RuleCost struct {
 func (c RuleCost) SamplesPerDay() float64 { return c.EvalsPerDay * c.SamplesPerEval }
 func (c RuleCost) BytesPerDay() float64   { return c.EvalsPerDay * c.BytesPerEval }
 
+// QueryCost is the measured cost of one query-log consumer's queries over
+// a scan's window (S6 item 2): how many were logged, and the samples
+// (PromQL) and bytes (LogQL) they read, as the backends report them. A
+// query matching several collected panels or rules is split evenly among
+// them, so costs add up to the log's total.
+type QueryCost struct {
+	ConsumerID string
+	Queries    float64
+	Samples    float64
+	Bytes      float64
+}
+
 // Rule finding kinds (S6 item 1). Report only: tvt never edits rules.
 const (
 	RuleGrafanaManaged     = "grafana_managed_alert"        // Grafana evaluates an alert on Loki or Prometheus

@@ -11,3 +11,10 @@ runbooks:
   mirrors:
     - url_prefix: https://github.com/Opsmastery-Summit/tvt-lab/blob/main/
       path: .
+# The lab's agents container (the sweep and finance agents) at its address
+# in this snapshot (the Prometheus query log records only an IP), so the
+# report's query load shows what agents drive (S6 item 2).
+clients:
+  agents:
+    - name: lab-agents
+      addresses: [10.89.0.23]
