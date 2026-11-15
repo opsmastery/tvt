@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 type reportOptions struct {
 	DB   string
 	JSON string
+	HTML string
 	Top  int
 }
 
@@ -28,6 +30,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	fs.StringVar(&o.DB, "db", "tvt.db", "path to the usage graph database (from tvt scan)")
 	fs.StringVar(&o.JSON, "json", "report.json", "where to write the JSON report (- for stdout)")
+	fs.StringVar(&o.HTML, "html", "report.html", "where to write the HTML report, rendered from the JSON (empty: skip)")
 	fs.IntVar(&o.Top, "top", 50, "recommendations to keep, highest savings per minute of checking first (0: all)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -50,8 +53,10 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-// runReport builds the JSON report from the latest scan in o.DB. It never
-// creates a database: a missing one is an error.
+// runReport builds the JSON report from the latest scan in o.DB and, unless
+// o.HTML is empty, renders the HTML report from that JSON. With --json -,
+// only the JSON is written (to out). It never creates a database: a
+// missing one is an error.
 func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 	if _, err := os.Stat(o.DB); errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("%s: no such database (run tvt scan first)", o.DB)
@@ -73,6 +78,15 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 	if err := writeFileAtomic(o.JSON, b); err != nil {
 		return err
 	}
+	if o.HTML != "" {
+		var page bytes.Buffer
+		if err := report.RenderHTMLFromJSON(&page, b); err != nil {
+			return err
+		}
+		if err := writeFileAtomic(o.HTML, page.Bytes()); err != nil {
+			return err
+		}
+	}
 	fmt.Fprintf(out, "report of scan %d: %d recommendations (of %d candidates)", r.Scan.ID, r.Totals.Recommendations, r.Totals.Candidates)
 	if r.Scan.Currency != "" {
 		fmt.Fprintf(out, ", %.2f %s/month in metrics", r.Totals.MetricSavings, r.Scan.Currency)
@@ -88,7 +102,11 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 	for _, reason := range reasons {
 		fmt.Fprintf(out, "; %d held (%s)", r.Held[reason], reason)
 	}
-	fmt.Fprintf(out, "; %d evidence gaps; written to %s\n", len(r.Gaps), o.JSON)
+	written := o.JSON
+	if o.HTML != "" {
+		written += " and " + o.HTML
+	}
+	fmt.Fprintf(out, "; %d evidence gaps; written to %s\n", len(r.Gaps), written)
 	return nil
 }
 

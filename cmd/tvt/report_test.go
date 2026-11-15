@@ -32,7 +32,7 @@ func TestReportLab(t *testing.T) {
 		t.Helper()
 		path := filepath.Join(dir, "report.json")
 		out.Reset()
-		if err := runReport(context.Background(), reportOptions{DB: db, JSON: path, Top: top}, &out); err != nil {
+		if err := runReport(context.Background(), reportOptions{DB: db, JSON: path, HTML: filepath.Join(dir, "report.html"), Top: top}, &out); err != nil {
 			t.Fatal(err)
 		}
 		b, err := os.ReadFile(path)
@@ -50,6 +50,13 @@ func TestReportLab(t *testing.T) {
 	t.Log(out.String())
 	if r.Version != report.Version || len(r.Recommendations) != 50 || !strings.Contains(out.String(), "50 recommendations") {
 		t.Fatalf("top 50: version %d, %d recommendations\n%s", r.Version, len(r.Recommendations), out.String())
+	}
+	page, err := os.ReadFile(filepath.Join(dir, "report.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(page), "<tr id="); n != 50 {
+		t.Errorf("HTML has %d rows, want 50", n)
 	}
 	if len(r.Gaps) == 0 {
 		t.Error("the lab fixture has gaps (no loki query log) but the report lists none")
