@@ -205,7 +205,7 @@ func (g *gaps) rowGap(c graph.Consumer, id string, reasons []string) Gap {
 // and the acknowledged ones, each with its reason.
 func split(gs []Gap) (open, acked []string) {
 	open, acked = []string{}, []string{}
-	for _, g := range gs {
+	for _, g := range uniqueGaps(gs) {
 		if g.Acknowledged {
 			acked = append(acked, g.Text+" (acknowledged: "+g.Reason+")")
 		} else {
@@ -213,6 +213,20 @@ func split(gs []Gap) (open, acked []string) {
 		}
 	}
 	return open, acked
+}
+
+// uniqueGaps drops repeats, keeping the first: one assumed reader can
+// reach a signal directly and through a recording rule, with the same text.
+func uniqueGaps(gs []Gap) []Gap {
+	seen := map[Gap]bool{}
+	out := make([]Gap, 0, len(gs))
+	for _, g := range gs {
+		if !seen[g] {
+			seen[g] = true
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 func plural(n int, one, many string) string {

@@ -25,6 +25,9 @@ type History struct {
 	// LastReads are the most recent reads query logs ever showed, kept
 	// after they leave every log (store.LastReads), sweeps excluded.
 	LastReads []PastRead
+	// LastViewed is each stored consumer's latest view (dashboards, and
+	// query-log panels), kept after the Grafana log line rotates away.
+	LastViewed map[string]time.Time
 }
 
 // PastRead is a signal's most recent read in any earlier scan.

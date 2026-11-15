@@ -396,6 +396,15 @@ func Build(in Inputs) (Output, error) {
 		out.VolumeTruncated = in.VolumeTruncated
 	}
 	out.References = res.sorted()
+	// A view an earlier scan saw counts after its log line rotates away;
+	// the window check in classify and scoring still ages it out. The store
+	// keeps the later of the two, so the written row agrees.
+	for i := range out.Consumers {
+		c := &out.Consumers[i]
+		if v, ok := in.History.LastViewed[c.ID]; ok && v.After(c.LastViewed) && !v.After(in.Start) {
+			c.LastViewed = v
+		}
+	}
 	seasonSources, missed := seasons(in.Seasons, since, in.Start)
 	if err := classify(out.Signals, out.Consumers, out.References, in.Owners, mentioned(in), missed, since, in.Start); err != nil {
 		return Output{}, err

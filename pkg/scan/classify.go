@@ -37,6 +37,12 @@ func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.R
 		byID[c.ID] = c
 	}
 	facts := map[string]*score.Facts{}
+	// resultKept: metrics whose labels a protecting consumer's result keeps
+	// (no aggregation removes them, as in rate(x[5m]) > 100). Not a read
+	// of any label, but removing one merges series and changes what the
+	// alert fires on or the viewed panel shows, so each label of the
+	// metric is protected like the metric.
+	resultKept := map[string]*score.Facts{}
 	for _, r := range refs {
 		f := facts[r.SignalID]
 		if f == nil {
@@ -49,9 +55,17 @@ func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.R
 			continue
 		}
 		f.Read = true
-		f.HardKeep = f.HardKeep || c.Kind.HardKeep()
-		if isDashboard(c.Kind) && !c.LastViewed.IsZero() && !c.LastViewed.Before(since) && !c.LastViewed.After(until) {
-			f.Viewed = true
+		hard := c.Kind.HardKeep()
+		viewed := isDashboard(c.Kind) && !c.LastViewed.IsZero() && !c.LastViewed.Before(since) && !c.LastViewed.After(until)
+		f.HardKeep = f.HardKeep || hard
+		f.Viewed = f.Viewed || viewed
+		if r.ResultLabels && (hard || viewed) {
+			k := resultKept[r.SignalID]
+			if k == nil {
+				k = &score.Facts{}
+				resultKept[r.SignalID] = k
+			}
+			k.HardKeep, k.Viewed = k.HardKeep || hard, k.Viewed || viewed
 		}
 	}
 	for i := range signals {
@@ -59,6 +73,12 @@ func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.R
 		f := score.Facts{}
 		if p := facts[s.ID]; p != nil {
 			f = *p
+		}
+		if s.Kind == graph.KindLabel {
+			if k := resultKept[ResultKeptMetric(*s)]; k != nil {
+				f.Read = true
+				f.HardKeep, f.Viewed = f.HardKeep || k.HardKeep, f.Viewed || k.Viewed
+			}
 		}
 		f.Name = s.Name
 		if s.Kind == graph.KindLabel {
@@ -80,6 +100,12 @@ func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.R
 		s.Class, s.Dormant = string(class), why
 	}
 	return nil
+}
+
+// ResultKeptMetric is the ID of a label signal's metric: references to it
+// with ResultLabels carry the label into their result.
+func ResultKeptMetric(s graph.Signal) string {
+	return s.Source + ":metric:" + s.Parent
 }
 
 func isDashboard(k graph.ConsumerKind) bool {

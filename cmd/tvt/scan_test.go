@@ -1159,3 +1159,41 @@ func TestScanScoresWindowAndHistory(t *testing.T) {
 		}
 	}
 }
+
+// A dashboard view from an earlier scan protects after the Grafana log
+// line has rotated away: rescanning with an empty router log keeps every
+// keep_high signal keep_high.
+func TestScanKeepsViewsAfterLogRotation(t *testing.T) {
+	setNow(t)
+	dir := t.TempDir()
+	db := filepath.Join(dir, "tvt.db")
+	var out bytes.Buffer
+	if err := runScan(context.Background(), labOptions(newLab(t, nil), db), env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	before := readGraph(t, db)
+	empty := filepath.Join(dir, "grafana.log")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := labOptions(newLab(t, nil), db)
+	o.GrafanaLogs = stringList{empty}
+	out.Reset()
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatalf("rescan: %v\n%s", err, out.String())
+	}
+	after := readGraph(t, db)
+	var kept int
+	for id, s := range before.signals {
+		if s.Class != string(score.ClassKeepHigh) {
+			continue
+		}
+		kept++
+		if c := after.signals[id].Class; c != string(score.ClassKeepHigh) {
+			t.Errorf("%s: keep_high before the log rotated, %s after", id, c)
+		}
+	}
+	if kept == 0 {
+		t.Fatal("the lab scan has no keep_high signal")
+	}
+}
