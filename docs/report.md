@@ -178,4 +178,16 @@ Queries compare with whitespace and enclosing parentheses ignored (Loki logs `(a
 
 Not yet: a "broad stream selector" finding (no lab case to check it against), and `no_series` over the whole window rather than the scan's TSDB head. The scan prints a `rules` line (`16 of 16 priced from logged evaluations, 10 findings (duplicate_rule 2, …)`). Golden: `TestRuleFindings` on the benchmark's `rule-efficiency` state, against tvt-lab's `rule_findings:`; every lab rule is listed there or under `no_findings`, so any other finding fails.
 
-Readers check `version` (now 6: 2 made gaps structured, 3 added `services`, 4 added `scan.repriced_from`, 5 added `line_findings`, 6 added `rules` and `totals.rule_findings`) and refuse one they don't know.
+## Query load (S6 item 2)
+
+`query_load` (version 7) is what the logged queries in the window read, as the backends measure it, split by S3's clients (`dashboard`, `rule`, `explore`, `agent`, `api`):
+
+| Log | Cost per query |
+| --- | --- |
+| Prometheus | `stats.samples.totalQueryableSamples` |
+| Mimir | query-frontend `samples_processed` |
+| Loki | metrics.go `total_bytes` |
+
+Each query's cost goes to the consumer it was attributed to (`graph.QueryCost`, schema v18 `query_costs`: queries, samples, bytes per consumer). A query that matches several panels or rules is split evenly among them, so client and consumer totals add up to the log's. `clients` gives each client's queries, samples and bytes with their shares of the total, heaviest first; `top` lists the 10 consumers that cost most to run (ranked by share of samples plus share of bytes, so PromQL and LogQL load compare on one scale). Samples and bytes are measured work, not money: no price card prices query work yet. Agents are named in `tvt.yaml` `clients.agents` (an MCP user agent counts too); without that, an agent's queries are `api`. Rule evaluations by the rulers themselves aren't query-log consumers: their cost is in `rules`. The scan prints a `query load` line (`139 queries; samples: agent 0%, dashboard 100%, …`). Golden: `TestQueryLoadRuleEfficiency` on the benchmark's `rule-efficiency` state (agents 0.4% of samples, dashboards 99.6%).
+
+Readers check `version` (now 7: 2 made gaps structured, 3 added `services`, 4 added `scan.repriced_from`, 5 added `line_findings`, 6 added `rules` and `totals.rule_findings`, 7 added `query_load`) and refuse one they don't know.

@@ -83,6 +83,9 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 			Actor:        l.kv["header_x_grafana_user"],
 			Client:       l.kv["user_agent"],
 			DashboardUID: l.kv["header_x_dashboard_uid"],
+			// Measured cost (S6 item 2): samples the query processed.
+			Samples: nonNegative(l.kv["samples_processed"]),
+			Instant: strings.HasSuffix(l.kv["path"], "/api/v1/query"),
 		}
 		if lq.DashboardUID != "" {
 			lq.PanelID, _ = strconv.Atoi(l.kv["header_x_panel_id"])
@@ -95,6 +98,15 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
 	return out, nil
+}
+
+// nonNegative reads a logged count; 0 when it is missing or invalid.
+func nonNegative(s string) int64 {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // ProbeSeen reports whether the log holds tvt's marker query for nonce.

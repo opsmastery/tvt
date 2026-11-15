@@ -30,9 +30,11 @@ func TestMimirQueryLogFixture(t *testing.T) {
 	}
 	want := []collect.LoggedQuery{
 		{Source: "mimir", Expr: "sum by (op) (rate(shop_cart_operations_total[5m]))", Language: "promql",
-			Actor: "admin", Client: "Grafana/12.1.0", DashboardUID: "shop-overview", PanelID: 4, OrgID: 1},
+			Actor: "admin", Client: "Grafana/12.1.0", DashboardUID: "shop-overview", PanelID: 4, OrgID: 1,
+			Samples: 174000, Instant: true}, // samples_processed, path=/prometheus/api/v1/query
 		{Source: "mimir", Expr: "sum by (mode) (rate(node_cpu_seconds_total[1m]))", Language: "promql",
-			Actor: "admin", Client: "Grafana/12.1.0", DashboardUID: "shop-overview", PanelID: 5, OrgID: 1},
+			Actor: "admin", Client: "Grafana/12.1.0", DashboardUID: "shop-overview", PanelID: 5, OrgID: 1,
+			Samples: 17568}, // a query_range
 	}
 	for i := range want {
 		g := got[i]
