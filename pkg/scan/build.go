@@ -108,6 +108,9 @@ type Inputs struct {
 	StreamVolumes []collect.StreamVolume
 	// VolumeTruncated: the volume API hit its series limit.
 	VolumeTruncated bool
+	// Seasons are tvt.yaml seasons: one the window misses is a gap, and
+	// its services' unread signals are dormant.
+	Seasons []config.Season
 	// Mentions are names incident write-ups (postmortems) give without
 	// querying them; runbooks' mentions come from Runbooks. An unread
 	// metric one names is dormant, not a drop candidate.
@@ -129,6 +132,9 @@ const (
 	// (collect.QueryLanguage) among every dashboard panel, variable and
 	// annotation query and every Grafana-managed rule query.
 	SourceDatasources = "datasources"
+	// SourceSeasonPrefix starts each season's source: "season <name>".
+	// A season the window misses has coverage 0 and a gap.
+	SourceSeasonPrefix = "season "
 )
 
 // Output is one scan's graph rows.
@@ -390,7 +396,8 @@ func Build(in Inputs) (Output, error) {
 		out.VolumeTruncated = in.VolumeTruncated
 	}
 	out.References = res.sorted()
-	if err := classify(out.Signals, out.Consumers, out.References, in.Owners, mentioned(in), since, in.Start); err != nil {
+	seasonSources, missed := seasons(in.Seasons, since, in.Start)
+	if err := classify(out.Signals, out.Consumers, out.References, in.Owners, mentioned(in), missed, since, in.Start); err != nil {
 		return Output{}, err
 	}
 
@@ -402,6 +409,7 @@ func Build(in Inputs) (Output, error) {
 		definitionSource(SourceSLOs, in.SLOsConfigured, len(in.SLOs), len(sloGaps), sloGaps),
 		definitionSource(SourceRunbooks, len(in.Runbooks) > 0, len(in.Runbooks), rbBad, rbGaps),
 		definitionSource(SourceDatasources, dsq.total > 0, dsq.total, dsq.unknown, dsq.gaps()))
+	sources = append(sources, seasonSources...)
 	seen := map[string]bool{}
 	var sum float64
 	var logs int
@@ -420,7 +428,7 @@ func Build(in Inputs) (Output, error) {
 			s.WindowStart = since
 		}
 		out.Sources = append(out.Sources, s)
-		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources {
+		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
 			continue
 		}
 		sum += s.Coverage
