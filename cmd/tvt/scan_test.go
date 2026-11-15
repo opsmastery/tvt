@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -151,8 +153,36 @@ func newLabAt(t *testing.T, dir string, promOverride map[string]http.HandlerFunc
 		"/prometheus/api/v1/rules":  "loki/prom_rules.json",
 		"/loki/api/v1/labels":       "loki/labels.json",
 		"/loki/api/v1/index/volume": "loki/volume_by_stream.json",
-	}, nil)
+	}, patternsRoute(t, dir))
 	return labServers{prom, graf, loki, promLog, probes}
+}
+
+// patternsRoute serves the snapshot's recorded pattern API answers
+// (loki/patterns.json, one per stream selector, S5 items 3-4) by the
+// query's selector. A snapshot without them has no route, so the scan sees
+// a Loki without the pattern ingester (404).
+func patternsRoute(t *testing.T, dir string) map[string]http.HandlerFunc {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "loki/patterns.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded map[string]json.RawMessage
+	if err := json.Unmarshal(b, &recorded); err != nil {
+		t.Fatal(err)
+	}
+	return map[string]http.HandlerFunc{"/loki/api/v1/patterns": func(w http.ResponseWriter, r *http.Request) {
+		body, ok := recorded[r.URL.Query().Get("query")]
+		if !ok {
+			t.Errorf("patterns query %q: no recorded answer", r.URL.Query().Get("query"))
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(body)
+	}}
 }
 
 func labOptions(l labServers, db string) scanOptions {

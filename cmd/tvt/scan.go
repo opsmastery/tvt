@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -313,6 +315,11 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			}
 		}
 		fmt.Fprintf(out, "%-12s %s (%s)\n", "loki", plural(len(rules), "rule", "rules"), volume)
+		if len(in.StreamVolumes) > 0 {
+			var msg string
+			in.Patterns, msg = streamPatterns(ctx, lc, in.StreamVolumes)
+			fmt.Fprintf(out, "%-12s %s\n", "patterns", msg)
+		}
 	}
 
 	// Grafana: who tvt is (to exclude its own loads), the org, dashboards.
@@ -426,6 +433,9 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		classes[string(score.ClassCandidate)], len(in.External))
 
 	fmt.Fprintf(out, "%-12s %s\n", "scores", scoreSummary(g.Scores, in.MinWindowDays))
+	if in.Patterns != nil {
+		fmt.Fprintf(out, "%-12s %s\n", "lines", lineSummary(g.LineFindings))
+	}
 
 	id, err := save(ctx, o.DB, start, o.Window, g)
 	if err != nil {
@@ -511,6 +521,55 @@ func history(ctx context.Context, path string) (scan.History, error) {
 		return scan.History{}, err
 	}
 	return h, nil
+}
+
+// patternWindow is how far back a scan reads Loki's line patterns: about
+// what the pattern ingester keeps.
+const patternWindow = 3 * time.Hour
+
+// streamPatterns reads the line patterns of the scan.PatternStreams largest
+// streams, one patterns call per stream (its full label set). Patterns are
+// an input to line findings, not protection: a Loki without the pattern
+// ingester, or a failed call, leaves the scan without line findings (nil)
+// and says why.
+func streamPatterns(ctx context.Context, lc *loki.Client, vols []collect.StreamVolume) (map[string][]collect.LinePattern, string) {
+	top := slices.Clone(vols)
+	sort.SliceStable(top, func(i, j int) bool { return top[i].Bytes > top[j].Bytes })
+	top = top[:min(len(top), scan.PatternStreams)]
+	out := map[string][]collect.LinePattern{}
+	var lines int
+	for _, v := range top {
+		sel := loki.StreamSelector(v.Labels)
+		ps, err := lc.Patterns(ctx, sel, patternWindow)
+		switch {
+		case errors.Is(err, loki.ErrNotFound):
+			return nil, "unavailable: Loki's pattern API answered 404 (enable pattern_ingester for line findings)"
+		case err != nil:
+			return nil, fmt.Sprintf("unavailable: %v", err)
+		}
+		out[sel] = ps
+		lines += len(ps)
+	}
+	return out, fmt.Sprintf("%s in the %d largest streams over the last %s", plural(lines, "pattern", "patterns"), len(top), patternWindow)
+}
+
+// lineSummary is the scan's one-line account of its line findings.
+func lineSummary(fs []graph.LineFinding) string {
+	if len(fs) == 0 {
+		return "no line findings"
+	}
+	n := map[string]int{}
+	for _, f := range fs {
+		n[f.Kind]++
+	}
+	var parts []string
+	if c := n[graph.LineRepeated]; c > 0 {
+		parts = append(parts, plural(c, "repeated line", "repeated lines"))
+	}
+	if c := n[graph.LineHandoff]; c > 0 {
+		parts = append(parts, plural(c, "line-level hand-off", "line-level hand-offs")+" to zeroreads")
+	}
+	return strings.Join(parts, ", ") + fmt.Sprintf("; top: %q in %s (%.0f%% of its bytes)", fs[0].Pattern, fs[0].Stream, fs[0].Share*100)
 }
 
 // scoreSummary is the scan's one-line account of its scores: how many
@@ -626,6 +685,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 	}
 	for _, r := range g.Scores {
 		if err := sc.PutScore(ctx, r); err != nil {
+			return err
+		}
+	}
+	for _, f := range g.LineFindings {
+		if err := sc.PutLineFinding(ctx, f); err != nil {
 			return err
 		}
 	}

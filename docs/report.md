@@ -113,4 +113,12 @@ An acknowledged gap stays in the header with its reason and moves to the row's `
 
 `scan` (ID, start, window, log coverage, price card), `sources` (every evidence source's coverage), `gaps` (every gap, acknowledged or not, above), `unmatched_acknowledgements`, `totals` (candidates, recommendations, dormant signals, metric savings, and stream savings apart, since stream selectors overlap), `held`.
 
-Readers check `version` (now 4: 2 made gaps structured, 3 added `services`, 4 added `scan.repriced_from`) and refuse one they don't know.
+## Line-level findings
+
+`line_findings` (version 5) lists line patterns worth cutting inside a stream, from Loki's pattern API (`/loki/api/v1/patterns`, which Loki doesn't log as a query) over its last 3 hours. `tvt scan` asks about the 10 largest streams, one stream's full label set per call. Each finding has the stream, the pattern (`<_>` for each variable field), its line count and average rate over the window, its estimated share of the stream's bytes (lines × pattern length, 8 bytes per field), that share of the stream's measured bytes per day, and an approximate monthly saving at the card's log price. tvt never acts on them: per ADR 0006 it doesn't write line filters, and each finding points to [zeroreads](https://github.com/Bisman-Singh/zeroreads) for the proven cut.
+
+- `repeated_line` (S5 item 3): one pattern with identical text (no variable field) is at least 25% of the stream's estimated bytes. Fix it at the source (log once, rate-limit) or cut the repeats with zeroreads.
+
+A stream the dormant rules hold (an error stream by name, or a tier 0 or 1 owner's) gets no line finding: lines repeated in an error stream are a symptom, never a saving. A Loki without the pattern ingester answers 404, and the scan goes on without line findings and says so.
+
+Readers check `version` (now 5: 2 made gaps structured, 3 added `services`, 4 added `scan.repriced_from`, 5 added `line_findings`) and refuse one they don't know.

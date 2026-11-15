@@ -1239,3 +1239,36 @@ func TestReferenceFirstSeen(t *testing.T) {
 		t.Errorf("refs = %+v, want first seen %v", refs, t0)
 	}
 }
+
+// Line findings (schema v16) round-trip, most bytes first, and a finding
+// without a stream or pattern, or out of range, is refused.
+func TestLineFindings(t *testing.T) {
+	s, _ := open(t)
+	want := []graph.LineFinding{
+		{Stream: `{app="shop", level="warn"}`, Pattern: `msg="x" key=y`, Kind: graph.LineRepeated, Lines: 10000, Window: 90 * time.Second, Share: 0.55, BytesPerDay: 9e6, MonthlyCost: 1.5},
+		{Stream: `{app="shop", level="info"}`, Pattern: `route=/healthz status=200 replica=<_>`, Kind: graph.LineHandoff, Lines: 300000, Window: 3 * time.Hour, Share: 0.6, BytesPerDay: 3e9, MonthlyCost: 40},
+	}
+	id := scan(t, s, t0, func(sc *Scan) {
+		for _, f := range want {
+			must(t, sc.PutLineFinding(ctx, f))
+		}
+		for _, bad := range []graph.LineFinding{
+			{Pattern: "p", Kind: graph.LineRepeated},
+			{Stream: "s", Kind: graph.LineRepeated},
+			{Stream: "s", Pattern: "p", Kind: "line_filter"},
+			{Stream: "s", Pattern: "q", Kind: graph.LineRepeated, Share: 1.5},
+		} {
+			if err := sc.PutLineFinding(ctx, bad); err == nil {
+				t.Errorf("line finding %+v accepted", bad)
+			}
+		}
+	})
+	got, err := s.LineFindings(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(got, []graph.LineFinding{want[1], want[0]}) {
+		t.Errorf("line findings\n got %+v\nwant %+v", got, []graph.LineFinding{want[1], want[0]})
+	}
+	if got, err := s.LineFindings(ctx, id+1); err != nil || len(got) != 0 {
+		t.Errorf("another scan's findings: %+v %v", got, err)
+	}
+}

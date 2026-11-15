@@ -257,6 +257,40 @@ type StreamVolume struct {
 	BytesPerDay int64
 }
 
+// Line finding kinds (S5 items 3-4). tvt reports both with an estimated
+// saving and never proposes a line-level change itself (ADR 0006).
+const (
+	// LineRepeated: one identical line (no variable fields) is a large
+	// share of a stream's bytes.
+	LineRepeated = "repeated_line"
+	// LineHandoff: the dominant unread pattern of a kept stream, handed to
+	// zeroreads for the proven line-level cut.
+	LineHandoff = "line_handoff"
+)
+
+// LineFinding is a line pattern inside one stream that is worth cutting:
+// its stream's full label set, the pattern (Loki's, <_> for each variable
+// field), how many lines matched it over Window, its estimated share of the
+// stream's bytes, and those bytes per day and their monthly cost.
+type LineFinding struct {
+	Stream      string
+	Pattern     string
+	Kind        string
+	Lines       int64
+	Window      time.Duration
+	Share       float64
+	BytesPerDay int64
+	MonthlyCost float64
+}
+
+// PerSecond is the pattern's average line rate over its window.
+func (f LineFinding) PerSecond() float64 {
+	if f.Window <= 0 {
+		return 0
+	}
+	return float64(f.Lines) / f.Window.Seconds()
+}
+
 // DashboardLoad aggregates loads of one dashboard by one login in a scan's
 // window. Browser loads (from the dashboard page) are views; API loads by
 // anyone but tvt are recorded as evidence of use but not counted as views.

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "states": {
     "after-deploy": {
       "evidence": {
@@ -9,15 +9,16 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 303,
+        "true_positives": 304,
         "false_positives": 0,
-        "false_negatives": 2,
+        "false_negatives": 3,
         "precision": 1,
-        "recall": 0.9934,
+        "recall": 0.9902,
         "wrong": [],
         "missed": [
           "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend"
+          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend",
+          "line:healthz_success: not raised, want line_handoff"
         ]
       }
     },
@@ -29,15 +30,16 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 304,
+        "true_positives": 305,
         "false_positives": 0,
-        "false_negatives": 2,
+        "false_negatives": 3,
         "precision": 1,
-        "recall": 0.9935,
+        "recall": 0.9903,
         "wrong": [],
         "missed": [
           "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend"
+          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend",
+          "line:healthz_success: not raised, want line_handoff"
         ]
       }
     }

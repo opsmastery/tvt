@@ -108,6 +108,9 @@ type Inputs struct {
 	StreamVolumes []collect.StreamVolume
 	// VolumeTruncated: the volume API hit its series limit.
 	VolumeTruncated bool
+	// Patterns are Loki's line patterns per stream (its canonical full
+	// label set), for the line findings; nil when not collected.
+	Patterns map[string][]collect.LinePattern
 	// Seasons are tvt.yaml seasons: one the window misses is a gap, and
 	// its services' unread signals are dormant.
 	Seasons []config.Season
@@ -162,6 +165,9 @@ type Output struct {
 	// set, so any selector or label drop can be priced later.
 	StreamVolumes   []graph.StreamVolume
 	VolumeTruncated bool
+	// LineFindings are line patterns worth cutting inside streams (S5
+	// items 3-4), largest first.
+	LineFindings []graph.LineFinding
 	// TSDB is what the Prometheus server reported (Inputs.Storage), stored
 	// so the scan can be repriced; nil when it wasn't read.
 	TSDB *collect.Storage
@@ -451,6 +457,9 @@ func Build(in Inputs) (Output, error) {
 		return Output{}, err
 	}
 	out.PriceCard, out.Storage, out.TSDB = in.PriceCard, st, in.Storage
+	if out.LineFindings, err = lineFindings(in.Patterns, out.StreamVolumes, in.Owners, in.PriceCard); err != nil {
+		return Output{}, err
+	}
 	out.Scores = scoreCandidates(in, out.Signals, out.Consumers, out.References, out.Costs, out.Sources, since)
 	return out, nil
 }

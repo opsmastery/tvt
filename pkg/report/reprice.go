@@ -33,6 +33,11 @@ func Reprice(in Input, card cost.PriceCard, tsdb *collect.Storage) (Input, error
 	}
 	out := in
 	out.Costs, out.Scores = costs, scores
+	out.LineFindings = make([]graph.LineFinding, len(in.LineFindings))
+	for i, f := range in.LineFindings {
+		f.MonthlyCost = card.LogMonthly(f.BytesPerDay)
+		out.LineFindings[i] = f
+	}
 	from := in.Scan.PriceCard
 	if from == "" {
 		from = "(none)"
