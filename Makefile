@@ -7,7 +7,7 @@ LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.Commit=$(COMMIT) \
 	-X $(MODULE)/internal/version.Date=$(DATE)
 
-.PHONY: all build test race vet fmt fmt-check lint clean hooks e2e
+.PHONY: all build test race vet fmt fmt-check lint clean hooks e2e bench bench-update
 
 all: lint test build
 
@@ -19,6 +19,16 @@ test:
 
 race:
 	go test -race ./...
+
+# The ground-truth benchmark (S5 item 1): scores evidence found and
+# recommendation precision and recall on the frozen lab states in
+# testdata/bench, and fails on any drop below testdata/bench/baseline.json.
+bench:
+	go test -count=1 -run '^TestBenchmark$$' -v ./cmd/tvt
+
+# Re-record the baseline after a deliberate change; commit the diff.
+bench-update:
+	go test -count=1 -run '^TestBenchmark$$' ./cmd/tvt -update-bench
 
 vet:
 	go vet ./...
