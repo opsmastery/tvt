@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 18
+const SchemaVersion = 19
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -374,6 +374,24 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			    PRIMARY KEY (scan_id, consumer_id)
 			)`,
 			`UPDATE meta SET value = '18' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
+	if from < 19 {
+		for _, q := range []string{
+			`CREATE TABLE IF NOT EXISTS slo_findings (
+			    scan_id INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+			    kind    TEXT NOT NULL CHECK (kind IN ('service_without_slo', 'paging_not_burn_rate', 'slo_without_alert')),
+			    subject TEXT NOT NULL,
+			    name    TEXT NOT NULL,
+			    detail  TEXT NOT NULL,
+			    fix     TEXT NOT NULL,
+			    PRIMARY KEY (scan_id, kind, subject)
+			)`,
+			`UPDATE meta SET value = '19' WHERE key = 'schema_version'`,
 		} {
 			if _, err := tx.ExecContext(ctx, q); err != nil {
 				return err
@@ -777,6 +795,26 @@ func (s *Store) QueryCosts(ctx context.Context, scanID int64) ([]graph.QueryCost
 	return out, rows.Err()
 }
 
+// SLOFindings returns the SLO coverage findings of scan scanID, by kind
+// and subject.
+func (s *Store) SLOFindings(ctx context.Context, scanID int64) ([]graph.SLOFinding, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT kind, subject, name, detail, fix FROM slo_findings WHERE scan_id = ? ORDER BY kind, subject`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.SLOFinding
+	for rows.Next() {
+		var f graph.SLOFinding
+		if err := rows.Scan(&f.Kind, &f.Subject, &f.Name, &f.Detail, &f.Fix); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // RuleCosts returns the rule costs of scan scanID, by consumer.
 func (s *Store) RuleCosts(ctx context.Context, scanID int64) ([]graph.RuleCost, error) {
 	rows, err := s.db.QueryContext(ctx,
@@ -859,6 +897,7 @@ type Scan struct {
 	ruleCost    *sql.Stmt
 	ruleFinding *sql.Stmt
 	queryCost   *sql.Stmt
+	sloFinding  *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -963,6 +1002,7 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 			VALUES (?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.ruleFinding, `INSERT INTO rule_findings (scan_id, consumer_id, kind, detail, fix) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.queryCost, `INSERT INTO query_costs (scan_id, consumer_id, queries, samples, bytes) VALUES (?, ?, ?, ?, ?)`},
+		{&sc.sloFinding, `INSERT INTO slo_findings (scan_id, kind, subject, name, detail, fix) VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.score, `INSERT INTO scores (scan_id, signal_id, monthly_cost, usage_weight, strongest, confidence, priority, held)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
@@ -1154,6 +1194,19 @@ func (sc *Scan) PutQueryCost(ctx context.Context, c graph.QueryCost) error {
 	}
 	_, err := sc.queryCost.ExecContext(ctx, sc.ID, c.ConsumerID, c.Queries, c.Samples, c.Bytes)
 	return wrap("query cost", c.ConsumerID, err)
+}
+
+// PutSLOFinding records one SLO coverage finding, once per kind and
+// subject.
+func (sc *Scan) PutSLOFinding(ctx context.Context, f graph.SLOFinding) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if f.Kind == "" || f.Subject == "" {
+		return errors.New("store: SLO finding: Kind and Subject are required")
+	}
+	_, err := sc.sloFinding.ExecContext(ctx, sc.ID, f.Kind, f.Subject, f.Name, f.Detail, f.Fix)
+	return wrap("SLO finding", f.Kind+" "+f.Subject, err)
 }
 
 // PutScore records a candidate signal's rank in this scan, once per signal.

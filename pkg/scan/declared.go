@@ -18,9 +18,9 @@ import (
 //	runbook:<link>                 a runbook link from alert annotations
 
 // sloConsumers adds one consumer per SLO and its SLI queries. It returns a
-// gap line per SLO whose SLI tvt can't read.
-func sloConsumers(slos []collect.SLO, ids *idSet, out *Output, queries *[]query) []string {
-	var gaps []string
+// gap line per SLO whose SLI tvt can't read, and each SLO's consumer ID.
+func sloConsumers(slos []collect.SLO, ids *idSet, out *Output, queries *[]query) ([]string, []string) {
+	var gaps, sloIDs []string
 	for _, s := range slos {
 		var exprs []string
 		for _, q := range s.Queries {
@@ -33,6 +33,7 @@ func sloConsumers(slos []collect.SLO, ids *idSet, out *Output, queries *[]query)
 			Expr: strings.Join(exprs, "\n"),
 		}
 		out.Consumers = append(out.Consumers, c)
+		sloIDs = append(sloIDs, c.ID)
 		for _, q := range s.Queries {
 			lang := "promql"
 			if q.Language == "logql" {
@@ -44,7 +45,7 @@ func sloConsumers(slos []collect.SLO, ids *idSet, out *Output, queries *[]query)
 			gaps = append(gaps, fmt.Sprintf("SLO %s (%s): %s", s.Name, s.Origin, s.Unreadable))
 		}
 	}
-	return gaps
+	return gaps, sloIDs
 }
 
 // runbookConsumers adds one consumer per runbook link and the queries its

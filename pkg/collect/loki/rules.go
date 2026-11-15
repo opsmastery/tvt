@@ -29,7 +29,7 @@ const promRulesPath = "/prometheus/api/v1/rules"
 const maxRulesBody = 64 << 20
 
 // ruleGroup is one group in Loki's rules listing (Prometheus rule-file
-// format). Fields tvt doesn't use (for, labels) are ignored.
+// format). Fields tvt doesn't use (for) are ignored.
 type ruleGroup struct {
 	Name     string `yaml:"name"`
 	Interval string `yaml:"interval"` // empty: the ruler's evaluation_interval
@@ -39,6 +39,7 @@ type ruleGroup struct {
 		Expr   string `yaml:"expr"`
 		// Annotations: alerting rules only (runbook_url and friends).
 		Annotations map[string]string `yaml:"annotations"`
+		Labels      map[string]string `yaml:"labels"`
 	} `yaml:"rules"`
 }
 
@@ -132,6 +133,9 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 				}
 				if len(r.Annotations) > 0 {
 					rule.Annotations = r.Annotations
+				}
+				if len(r.Labels) > 0 {
+					rule.Labels = r.Labels
 				}
 				out = append(out, rule)
 			}

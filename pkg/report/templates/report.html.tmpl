@@ -157,6 +157,20 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </table>
 </div>
 
+<h2>SLO coverage</h2>
+<p class="muted">Report only. Services are the owners tvt.yaml names; paging alerts are severity critical or page.</p>
+{{define "slorows"}}{{range .}}<tr><td>{{.Name}}</td><td>{{.Detail}}<br><span class="muted">Fix: {{.Fix}}</span></td></tr>{{else}}<tr><td colspan="2" class="muted">None.</td></tr>{{end}}{{end}}
+<div class="table-wrap">
+<table>
+<thead><tr><th>Service without an SLO</th><th>Why</th></tr></thead>
+<tbody>{{template "slorows" .SLOCoverage.ServicesWithoutSLO}}</tbody>
+<thead><tr><th>Paging alert not on burn rate</th><th>Why</th></tr></thead>
+<tbody>{{template "slorows" .SLOCoverage.PagingNotBurnRate}}</tbody>
+<thead><tr><th>SLO without an alert</th><th>Why</th></tr></thead>
+<tbody>{{template "slorows" .SLOCoverage.SLOsWithoutAlert}}</tbody>
+</table>
+</div>
+
 <h2>Query load</h2>
 <p class="muted">What the logged queries read in the window, as the backends report it (samples for PromQL, bytes for LogQL), by who sent them. A query matching several panels or rules is split evenly among them.</p>
 <div class="table-wrap">

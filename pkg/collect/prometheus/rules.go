@@ -24,6 +24,7 @@ type rulesData struct {
 			Type  string `json:"type"` // "alerting" or "recording"
 			// Annotations: alerting rules only.
 			Annotations map[string]string `json:"annotations"`
+			Labels      map[string]string `json:"labels"`
 		} `json:"rules"`
 	} `json:"groups"`
 }
@@ -64,6 +65,7 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 				GroupEvaluation: time.Duration(min(max(g.EvaluationTime, 0), 86400) * float64(time.Second)),
 
 				Annotations: nonEmpty(r.Annotations),
+				Labels:      nonEmpty(r.Labels),
 			})
 		}
 	}
