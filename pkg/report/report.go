@@ -14,7 +14,7 @@ import (
 
 // Version is the JSON report's schema version. Readers (the HTML report,
 // propose, check) refuse a version they don't know.
-const Version = 3
+const Version = 4
 
 // Actions a recommendation can propose.
 const (
@@ -80,6 +80,10 @@ type Scan struct {
 	Currency    string    `json:"currency,omitempty"`
 	// Approximate: the card is a vendor preset, not the buyer's contract.
 	Approximate bool `json:"approximate,omitempty"`
+	// RepricedFrom is set on a what-if report (tvt report --price-card):
+	// the card the scan was priced at. PriceCard and Currency are then the
+	// what-if card's.
+	RepricedFrom string `json:"repriced_from,omitempty"`
 }
 
 // Source is one evidence source's coverage for the scan's window.

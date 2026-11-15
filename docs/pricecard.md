@@ -136,7 +136,7 @@ A month is 30 days.
 
 ## What-if pricing
 
-A stored scan can be priced at any other card without rescanning: "what would this usage cost on vendor X, or on our own disks?" is answered with your own series, intervals and bytes. `cost.Reprice(card, costs, tsdb)` takes a scan's stored cost rows and its stored TSDB measurements (`scans.tsdb_*`, read from Prometheus's `/metrics` on every Prometheus scan whatever the card) and returns the costs that card gives. It's exactly what a scan with that card would have recorded; the golden test checks this signal by signal, there and back. `tvt report --price-card <file|preset>` exposes it in S4.
+A stored scan can be priced at any other card without rescanning: "what would this usage cost on vendor X, or on our own disks?" is answered with your own series, intervals and bytes. `cost.Reprice(card, costs, tsdb)` takes a scan's stored cost rows and its stored TSDB measurements (`scans.tsdb_*`, read from Prometheus's `/metrics` on every Prometheus scan whatever the card) and returns the costs that card gives. It's exactly what a scan with that card would have recorded; the golden test checks this signal by signal, there and back. `tvt report --price-card <file|preset>` (S4 item 8) uses it for a what-if report: see `docs/report.md`.
 
 Limits: Mimir scans and scans from before schema v11 have no TSDB measurements, so a self-hosted card needs `retention_days` to price them (bytes per sample is then assumed, 1.5). A self-hosted card has no log rates, so streams cost zero on it.
 
