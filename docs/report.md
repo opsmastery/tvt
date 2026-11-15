@@ -91,6 +91,7 @@ A gap is a way the evidence falls short: a reader it would have shown can't be r
 | `assumed` | References tvt inferred rather than read (one header gap per consumer, with how many signals and why) |
 | `season` | A `tvt.yaml` season the window misses: its readers couldn't show |
 | `storage` | A storage hygiene warning about the Prometheus TSDB (source `prometheus storage`): no `retention.size`, or one above 85% of the volume `tvt.yaml` `storage.volume_size` declares. It hides no reader and is never a saving, so it stays in the header and never reaches a row |
+| `monitors` | A ServiceMonitor or PodMonitor in `tvt.yaml` `kubernetes.manifests` that no Prometheus selects (source `kubernetes monitors`), one tvt can't decide, or a scrape pool naming a monitor the manifests don't show as selected. It hides no reader and is never a saving, so it stays in the header |
 
 Grafana Cloud's blind spots (direct Loki API queries Usage Insights doesn't see) join with the Cloud adapters (Sprint 2 item 11).
 
@@ -104,6 +105,20 @@ A Prometheus scan reads the server's limits from its own `/metrics` (`prometheus
 - **`retention.size` above 85% of the volume**, when `tvt.yaml` `storage.volume_size` gives the volume (the PVC's requested storage, or what `df` shows: `50Gi`, `500GB`, bytes). Compaction writes new blocks before it deletes old ones, so the disk needs room past the limit; Prometheus' storage docs suggest 80-85%.
 
 tvt can't size the volume itself: `node_filesystem_size_bytes` would take a PromQL query, which tvt never runs against a backend that logs queries, and it doesn't read Kubernetes. Without `storage.volume_size` only the first warning applies. Mimir keeps its blocks in object storage, so a `--mimir` scan has no `prometheus storage` source.
+
+### Selected monitors (S5 item 8)
+
+prometheus-operator scrapes only the ServiceMonitors and PodMonitors a `Prometheus` (or `PrometheusAgent`) object selects. kube-prometheus-stack's default (`serviceMonitorSelectorNilUsesHelmValues: true`) selects only monitors labelled with the release, so a team's monitor without `release: <name>` scrapes nothing, and an edit to it changes nothing. tvt reads manifests from disk, never a cluster:
+
+```yaml
+kubernetes:
+  manifests: [deploy/rendered/]   # files or directories, relative to tvt.yaml: helm template output, a GitOps checkout
+  namespace: monitoring           # for objects that name none (helm template's --namespace); default "default"
+```
+
+`kube.Resolve` applies the operator's rules: a missing or null monitor selector selects nothing and `{}` everything; a missing namespace selector means the server's own namespace and `{}` every namespace; any other namespace selector is matched against the `Namespace` objects in the manifests (every namespace also carries `kubernetes.io/metadata.name`). A namespace the manifests don't define makes the answer unknown, unless the selector reads only that name label; an invalid selector is unknown too. `matchLabels` and `matchExpressions` (`In`, `NotIn`, `Exists`, `DoesNotExist`) must all hold.
+
+The scan prints a `monitors` line (`15 of 17 monitors selected by 1 server, not selected: batch/legacy-jobs, shop/shop`) and stores source `kubernetes monitors`: coverage is the share of monitors tvt could decide (0 when the manifests hold no Prometheus), and each gap line is a monitor nothing selects, one tvt can't decide, or an operator scrape pool from `/api/v1/targets` (`serviceMonitor/<ns>/<name>/<n>`) naming a monitor the manifests don't show as selected (the manifests are out of date). `kube.Selection.ForPool` is the only way a scrape pool maps to a monitor, and it answers only for a selected one, so no series or saving is ever attributed to a monitor that doesn't scrape. A manifest path tvt can't read fails the scan before it contacts any backend.
 
 **Acknowledging a gap.** A gap you've accepted goes in `tvt.yaml`, with a reason:
 
