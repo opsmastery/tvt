@@ -167,8 +167,12 @@ type Reference struct {
 	SignalID   string
 	ConsumerID string
 	LastSeen   time.Time
-	Actor      string // user or agent that issued the query, when known
-	Via        string // recording rule ID when the dependency is transitive
+	// FirstSeen is when tvt first saw the reference: the start of the
+	// first scan that stored it. Set by the store when reading; ignored
+	// when writing.
+	FirstSeen time.Time
+	Actor     string // user or agent that issued the query, when known
+	Via       string // recording rule ID when the dependency is transitive
 	// Evidence is the class of the consumer's evidence (see
 	// ConsumerKind.Evidence). Required.
 	Evidence EvidenceClass
