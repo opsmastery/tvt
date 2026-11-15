@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 15
+const SchemaVersion = 16
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -307,6 +307,27 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			`ALTER TABLE refs ADD COLUMN first_scan INTEGER REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED`,
 			`UPDATE refs SET first_scan = last_scan`,
 			`UPDATE meta SET value = '15' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
+	if from < 16 {
+		for _, q := range []string{
+			`CREATE TABLE IF NOT EXISTS line_findings (
+			    scan_id       INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+			    stream        TEXT NOT NULL,
+			    pattern       TEXT NOT NULL,
+			    kind          TEXT NOT NULL CHECK (kind IN ('repeated_line', 'line_handoff')),
+			    lines         INTEGER NOT NULL CHECK (lines >= 0),
+			    window_ms     INTEGER NOT NULL CHECK (window_ms >= 0),
+			    share         REAL NOT NULL CHECK (share >= 0 AND share <= 1),
+			    bytes_per_day INTEGER NOT NULL CHECK (bytes_per_day >= 0),
+			    monthly_cost  REAL NOT NULL,
+			    PRIMARY KEY (scan_id, stream, pattern)
+			)`,
+			`UPDATE meta SET value = '16' WHERE key = 'schema_version'`,
 		} {
 			if _, err := tx.ExecContext(ctx, q); err != nil {
 				return err
@@ -669,6 +690,28 @@ func (s *Store) StreamVolumes(ctx context.Context, scanID int64) ([]graph.Stream
 	return out, rows.Err()
 }
 
+// LineFindings returns the line findings of scan scanID, most bytes first.
+func (s *Store) LineFindings(ctx context.Context, scanID int64) ([]graph.LineFinding, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT stream, pattern, kind, lines, window_ms, share, bytes_per_day, monthly_cost
+		 FROM line_findings WHERE scan_id = ? ORDER BY bytes_per_day DESC, stream, pattern`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.LineFinding
+	for rows.Next() {
+		var f graph.LineFinding
+		var ms int64
+		if err := rows.Scan(&f.Stream, &f.Pattern, &f.Kind, &f.Lines, &ms, &f.Share, &f.BytesPerDay, &f.MonthlyCost); err != nil {
+			return nil, err
+		}
+		f.Window = time.Duration(ms) * time.Millisecond
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // Scores returns the candidate ranks of scan scanID, highest priority
 // first.
 func (s *Store) Scores(ctx context.Context, scanID int64) ([]graph.Score, error) {
@@ -707,6 +750,7 @@ type Scan struct {
 	load    *sql.Stmt
 	volume  *sql.Stmt
 	score   *sql.Stmt
+	line    *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -805,6 +849,8 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start, gap)
 			VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.volume, `INSERT INTO stream_volumes (scan_id, selector, bytes_per_day) VALUES (?, ?, ?)`},
+		{&sc.line, `INSERT INTO line_findings (scan_id, stream, pattern, kind, lines, window_ms, share, bytes_per_day, monthly_cost)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.score, `INSERT INTO scores (scan_id, signal_id, monthly_cost, usage_weight, strongest, confidence, priority, held)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
@@ -946,6 +992,19 @@ func (sc *Scan) PutStreamVolume(ctx context.Context, v graph.StreamVolume) error
 	}
 	_, err := sc.volume.ExecContext(ctx, sc.ID, v.Selector, v.BytesPerDay)
 	return wrap("stream volume", v.Selector, err)
+}
+
+// PutLineFinding records a line pattern worth cutting, once per stream and
+// pattern.
+func (sc *Scan) PutLineFinding(ctx context.Context, f graph.LineFinding) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if f.Stream == "" || f.Pattern == "" {
+		return fmt.Errorf("store: line finding %q in %q: Stream and Pattern are required", f.Pattern, f.Stream)
+	}
+	_, err := sc.line.ExecContext(ctx, sc.ID, f.Stream, f.Pattern, f.Kind, f.Lines, f.Window.Milliseconds(), f.Share, f.BytesPerDay, f.MonthlyCost)
+	return wrap("line finding", f.Stream+" "+f.Pattern, err)
 }
 
 // PutScore records a candidate signal's rank in this scan, once per signal.

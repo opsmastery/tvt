@@ -316,3 +316,21 @@ type StreamVolume struct {
 	Bytes  int64
 	Window time.Duration
 }
+
+// PatternSource lists the line patterns in one log stream (Loki's pattern
+// ingester, /loki/api/v1/patterns). Loki doesn't log these calls as queries,
+// so reading them is not usage.
+type PatternSource interface {
+	Patterns(ctx context.Context, selector string, window time.Duration) ([]LinePattern, error)
+}
+
+// LinePattern is one pattern the pattern ingester found in a stream: its
+// text, with <_> for each variable field, and how many lines matched it
+// over the window.
+type LinePattern struct {
+	Pattern string
+	Lines   int64
+	// Window is the time the counts cover: from the first sample to the
+	// last plus one step. Zero when there were no samples.
+	Window time.Duration
+}

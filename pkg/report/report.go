@@ -14,7 +14,7 @@ import (
 
 // Version is the JSON report's schema version. Readers (the HTML report,
 // propose, check) refuse a version they don't know.
-const Version = 4
+const Version = 5
 
 // Actions a recommendation can propose.
 const (
@@ -65,6 +65,10 @@ type Report struct {
 	// incident-critical (by name, tier, or a runbook or postmortem naming
 	// them). Each is a question for the owner, never a drop candidate.
 	Confirm []Confirm `json:"confirm"`
+	// LineFindings are line patterns worth cutting inside streams (S5
+	// items 3-4, version 5): reported with an estimated saving and handed
+	// to zeroreads, never acted on (ADR 0006).
+	LineFindings []LineFinding `json:"line_findings"`
 	// Held are candidates tvt can't recommend yet, by reason
 	// (score.Held*): a short window, no coverage, a new signal.
 	Held map[string]int `json:"held,omitempty"`
@@ -252,6 +256,8 @@ type Input struct {
 	Costs      []graph.Cost
 	Sources    []graph.SourceCoverage
 	Scores     []graph.Score
+	// LineFindings are the scan's line findings (store.LineFindings).
+	LineFindings []graph.LineFinding
 	// LastReads are every signal's most recent logged read across all
 	// scans (store.LastReads).
 	LastReads []LastReadOf
@@ -351,6 +357,7 @@ func Build(in Input, limit int) Report {
 		r.Recommendations = r.Recommendations[:limit]
 	}
 	r.Confirm = confirmRows(in.Signals, costs, gs, listed, in.Scan, limit)
+	r.LineFindings = lineFindings(in.LineFindings, in.Scan.Currency)
 	r.Gaps = gs.all(in.Sources, gs.assumedGaps(in.References, consumers))
 	r.UnmatchedAcknowledgements = gs.unmatched()
 	for _, s := range in.Signals {
