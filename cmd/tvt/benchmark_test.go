@@ -647,18 +647,29 @@ func ratio(n, d int) float64 {
 	return math.Round(float64(n)/float64(d)*1e4) / 1e4
 }
 
-// TestScanRepeatedLine (S5 item 3): the before-deploy scan reads the
-// largest streams' patterns and reports the startup burst, an identical
-// warn line, as a repeated line with its rate and saving; the finding
-// never makes the stream itself a recommendation.
-func TestScanRepeatedLine(t *testing.T) {
+// TestScanLineFindings (S5 items 3-4): the before-deploy scan reads the
+// largest streams' patterns. It reports the startup burst, an identical
+// warn line, as a repeated line with its rate and saving, and hands the
+// info stream's successful health checks (Loki's three probe patterns,
+// merged) to zeroreads; neither makes its stream a recommendation.
+func TestScanLineFindings(t *testing.T) {
 	bm, dirs := loadBenchmark(t)
 	st := bm.States[slices.IndexFunc(bm.States, func(s benchState) bool { return s.Name == "before-deploy" })]
 	_, r, _ := scanState(t, st, dirs[st.Name])
 	const warn = `{app="shop", component="api", level="warn"}`
-	var found bool
+	const info = `{app="shop", component="api", level="info"}`
+	var found, handoff bool
 	for _, f := range r.LineFindings {
-		if f.Kind != graph.LineRepeated {
+		if f.Kind == graph.LineHandoff {
+			if f.Stream != info || f.Pattern != `method=GET route=/healthz status=200 duration_ms=<_> probe=<_> replica=<_> request_id=<_> user=-` {
+				t.Errorf("hand-off %s in %s: %q", f.ID, f.Stream, f.Pattern)
+				continue
+			}
+			handoff = true
+			// tvt-lab: about 64% of the info stream's bytes.
+			if f.Share < 0.55 || f.Share > 0.75 || f.Savings.Monthly <= 0 || !strings.Contains(f.Action, "zeroreads") || f.Handoff != report.ZeroreadsURL {
+				t.Errorf("healthz hand-off %+v", f)
+			}
 			continue
 		}
 		if f.Stream != warn || !strings.Contains(f.Pattern, "key=cache.ttl") {
@@ -670,12 +681,12 @@ func TestScanRepeatedLine(t *testing.T) {
 			t.Errorf("burst finding %+v", f)
 		}
 	}
-	if !found {
-		t.Fatalf("no repeated-line finding for the startup burst: %+v", r.LineFindings)
+	if !found || !handoff {
+		t.Fatalf("burst found %v, healthz hand-off %v: %+v", found, handoff, r.LineFindings)
 	}
 	for _, rec := range r.Recommendations {
-		if rec.Signal.ID == "loki:stream:"+warn {
-			t.Errorf("the warn stream itself is recommended: %s (%s)", rec.ID, rec.Action)
+		if rec.Signal.ID == "loki:stream:"+warn || rec.Signal.ID == "loki:stream:"+info {
+			t.Errorf("a stream with a line finding is recommended: %s (%s)", rec.ID, rec.Action)
 		}
 	}
 }

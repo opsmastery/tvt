@@ -457,7 +457,8 @@ func Build(in Inputs) (Output, error) {
 		return Output{}, err
 	}
 	out.PriceCard, out.Storage, out.TSDB = in.PriceCard, st, in.Storage
-	if out.LineFindings, err = lineFindings(in.Patterns, out.StreamVolumes, in.Owners, in.PriceCard); err != nil {
+	readers := newStreamReaders(out.Signals, out.Consumers, out.References)
+	if out.LineFindings, err = lineFindings(in.Patterns, out.StreamVolumes, in.Owners, in.PriceCard, readers); err != nil {
 		return Output{}, err
 	}
 	out.Scores = scoreCandidates(in, out.Signals, out.Consumers, out.References, out.Costs, out.Sources, since)
