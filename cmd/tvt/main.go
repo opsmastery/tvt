@@ -25,7 +25,7 @@ Usage:
 
 Commands:
   scan      Build the usage graph from Grafana, Prometheus/Mimir and Loki (read-only)
-  report    Render the ranked savings report (HTML + JSON)
+  report    Write the ranked savings report (JSON; HTML follows)
   propose   Generate drop/relabel/routing config and open a pull request
   check     CI gate: fail if a config change drops data an alert, SLO or viewed dashboard uses
   version   Print version information
@@ -45,7 +45,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch cmd, rest := args[0], args[1:]; cmd {
 	case "scan":
 		return cmdScan(rest, stdout, stderr)
-	case "report", "propose", "check":
+	case "report":
+		return cmdReport(rest, stdout, stderr)
+	case "propose", "check":
 		fmt.Fprintf(stderr, "tvt %s: not implemented yet\n", cmd)
 		return exitNotImplemented
 	case "version", "--version":
