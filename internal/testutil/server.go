@@ -106,10 +106,14 @@ func File(t testing.TB, name string) http.Handler {
 	})
 }
 
-// ReadFile returns testdata/<name>, failing the test if it can't be read.
+// ReadFile returns testdata/<name> (or name itself when it is absolute),
+// failing the test if it can't be read.
 func ReadFile(t testing.TB, name string) []byte {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(Testdata, name))
+	if !filepath.IsAbs(name) {
+		name = filepath.Join(Testdata, name)
+	}
+	b, err := os.ReadFile(name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,9 +125,16 @@ func ReadFile(t testing.TB, name string) []byte {
 // as soon as capture-fixtures.sh records it.
 func Dashboards(t testing.TB) map[string]string {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join(Lab, "grafana", "dashboard_*.json"))
+	return DashboardsIn(t, Lab)
+}
+
+// DashboardsIn is Dashboards for the fixtures in dir (a lab snapshot laid
+// out like testdata/lab).
+func DashboardsIn(t testing.TB, dir string) map[string]string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(dir, "grafana", "dashboard_*.json"))
 	if err != nil || len(paths) == 0 {
-		t.Fatalf("no dashboard fixtures in %s: %v", filepath.Join(Lab, "grafana"), err)
+		t.Fatalf("no dashboard fixtures in %s: %v", filepath.Join(dir, "grafana"), err)
 	}
 	out := map[string]string{}
 	for _, p := range paths {

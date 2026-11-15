@@ -1,0 +1,34 @@
+# The tvt benchmark (S5 item 1): tvt-lab's ground truth, scored on frozen
+# fixture snapshots of each lab state. cmd/tvt/benchmark_test.go scans each
+# state, builds the report and scores two things separately: evidence found
+# (readers, non-readers and query-log sources resolved) and recommendations
+# (precision and recall of what the report raises). Recorded scores are in
+# baseline.json; any score below them fails the build.
+#
+# Bump version when the scoring rules change (not when a state or ground
+# truth is added), and re-record: go test ./cmd/tvt -run TestBenchmark -update-bench
+#
+# Each state's dir is captured from the live lab with
+#   OUT=testdata/bench/<dir> ./scripts/capture-fixtures.sh
+# plus tvt-lab.yaml (copied from testdata/lab). A state with a base is an
+# overlay: only the files that changed, laid over the base's.
+version: 1
+states:
+  - name: before-deploy
+    dir: before
+    scan_time: 2026-11-15T03:22:30Z
+    about: >
+      tvt-lab with the S5 distractors (shop_cart_operation_total, the reconciler's
+      error stream, panel 9's ${counter} variable) and the startup burst, captured
+      Nov 15, 2026 03:22 UTC.
+    proven: [prometheus query log, loki query log, grafana router log]
+  - name: after-deploy
+    dir: after
+    base: before-deploy
+    scan_time: 2026-11-15T03:37:30Z
+    about: >
+      Right after the deploy that added ShopHealthcheckSlow (tvt-lab #16, loaded 03:35 UTC):
+      shop_healthcheck_duration_seconds_bucket gains a reader and is a hard keep. The
+      overlay is the Prometheus rules API answer and the ground truth captured at 03:37;
+      every other fixture is the before-deploy one.
+    proven: [prometheus query log, loki query log, grafana router log]
