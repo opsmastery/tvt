@@ -60,6 +60,17 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 - Shop spans named with raw product paths, the spanmetrics histogram on default buckets, a volatile resource attribute in the metric identity, and a debug exporter left on.
 
+## kube-prometheus-stack fixtures (from S5)
+
+[kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) is how most teams run Prometheus on Kubernetes. Render it with `helm template` at a pinned chart version (93.3.0 when this was written) so CI can test readers and writers without a cluster. SnowOps Labs below is the live run.
+
+- A `make kps-fixtures` target that renders the pinned chart into `fixtures/kube-prometheus-stack/` (rules, ServiceMonitors, PodMonitors, dashboards, the default values) plus a hand-checked golden list of declared readers. Bump the pin only on purpose, with the golden diff reviewed in the PR.
+- S5: monitor selection (`serviceMonitorSelectorNilUsesHelmValues`), including a monitor without the release label that must not count.
+- S6: the chart's 41 rule files and dashboards as declared evidence; its default kubelet drops as ground truth (dropped series have no consumers, `container_memory_swap` protected).
+- S7 and S8: an overlay that sets `cAdvisorMetricRelabelings` with only tvt's rules must fail `check`; the writer's overlay must keep the chart's defaults.
+- S10: the default kubelet drop of some `le` buckets on `csi_operations` and `storage_operation_duration` as a bucket-reduction case.
+- S11: retention (`retention`, `retentionSize`, 10d by default) read from the values for the disk and cost model.
+
 ## Optional realism suite: SnowOps Labs (from S7)
 
 [SnowOps Labs](https://github.com/snowops-oss/snowopslabs) (Apache 2.0) builds a real Kubernetes platform on k3d or kind: kube-prometheus-stack, Grafana, Loki with Promtail, Tempo with Alloy for traces, Istio, Kafka, Vault, Argo CD and OpenCost, with 12 reversible faults graded against the live cluster. tvt-lab stays the source of exact ground truth; SnowOps tests precision, safety and scale, so it has no golden output. It needs Docker with at least 2 CPUs and 4 GB per scenario: run it in a Codespace or apart from tvt-lab's Podman stack, and review its `install.sh` first.
