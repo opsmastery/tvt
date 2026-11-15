@@ -137,5 +137,6 @@ Bug fixes (Nov 15, S5 debug pass):
 - Label filters aren't line filters. `filterSelects` (the line hand-off's "does a reader pick these lines out") read a label filter after a parser, `| logfmt | status != "200"`, as a negative line filter, so a reader filtering on the healthz lines didn't count and the hand-off was raised anyway. An operator right after a label name is now skipped.
 - Patterns per exact stream. The pattern API was asked with each stream's own label set, which also matches a stream carrying more labels (`pod="a"`), adding its lines to the share. `loki.ExactStreamSelector` pins every other stream's label names to `""` (Loki accepts it: checked on the lab); `capture-fixtures.sh` asks the same way, and the test route drops the pins to find the recorded answer.
 - `e2e_test.go`: `TestE2EReadOnlyTransport`'s doc comment sat on `TestE2EReport`.
+- New fuzz targets `FuzzFilterSelects` and `FuzzMergePatterns` (merging keeps every line and byte).
 
 Run `scripts/capture-fixtures.sh` against the lab first and build against those fixtures.
