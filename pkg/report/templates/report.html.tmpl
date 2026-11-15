@@ -139,6 +139,24 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </table>
 </div>
 
+<h2>Rules</h2>
+<p class="muted">Every rule's evaluations: how often it runs and what each evaluation read, measured from the query logs (samples for PromQL, bytes for LogQL). Rules with findings come first. Report only: tvt never edits a rule.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Rule</th><th>Findings</th><th class="num">Evaluations / day</th><th class="num">Read / day</th></tr></thead>
+<tbody>
+{{range .Rules}}
+<tr id="{{.ID}}"><td><strong>{{.Name}}</strong><br><span class="tag">{{.Source}} {{.Kind}}{{if .EvaluatedBy}}, evaluated by {{.EvaluatedBy}}{{end}}</span><br><code>{{.Expr}}</code></td>
+<td>{{range .Findings}}<p><span class="tag">{{.Kind}}</span> {{.Detail}}<br><span class="muted">Fix: {{.Fix}}</span></p>{{else}}<span class="muted">None</span>{{end}}</td>
+<td class="num">{{if .EvalsPerDay}}{{printf "%.0f" .EvalsPerDay}}{{else}}<span class="muted">unknown</span>{{end}}</td>
+<td class="num">{{if .CostUnknown}}<span class="muted">unknown: {{.CostUnknown}}</span>{{else}}{{if .SamplesPerDay}}{{printf "%.0f" .SamplesPerDay}} samples{{end}}{{if .BytesPerDay}}{{if .SamplesPerDay}}<br>{{end}}{{bytes .BytesPerDay}}{{end}}<br><span class="muted">from {{.Evaluations}} evaluations</span>{{end}}</td></tr>
+{{else}}
+<tr><td colspan="4" class="muted">No rules.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
 <h2>Evidence sources</h2>
 <div class="table-wrap">
 <table>
