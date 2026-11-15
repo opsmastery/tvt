@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tvt report: scan {{.Scan.ID}}</title>
+<style>
+:root { --fg:#1d1f23; --muted:#5f6670; --line:#dde1e6; --bg:#fff; --soft:#f5f7f9; --warn:#8a5a00; --warnbg:#fff6e0; --accent:#1f5fbf; }
+@media (prefers-color-scheme: dark) { :root { --fg:#e6e8eb; --muted:#9aa3ad; --line:#353a41; --bg:#16181b; --soft:#1f2226; --warn:#f0c264; --warnbg:#2c2414; --accent:#7fb0ff; } }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color:var(--fg); background:var(--bg); }
+main { max-width:1100px; margin:0 auto; padding:24px 16px 64px; }
+h1 { font-size:22px; margin:0 0 4px; }
+h2 { font-size:16px; margin:32px 0 8px; }
+.muted { color:var(--muted); }
+.cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin:16px 0; }
+.card { background:var(--soft); border:1px solid var(--line); border-radius:8px; padding:12px; }
+.card b { display:block; font-size:20px; }
+.gaps { background:var(--warnbg); color:var(--warn); border-radius:8px; padding:10px 14px; }
+.gaps ul { margin:4px 0 0; padding-left:18px; }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { font-size:12px; color:var(--muted); font-weight:600; }
+td.num, th.num { text-align:right; white-space:nowrap; }
+code { font:12px ui-monospace, SFMono-Regular, Menlo, monospace; word-break:break-all; }
+.tag { display:inline-block; font-size:11px; padding:1px 6px; border-radius:10px; border:1px solid var(--line); color:var(--muted); }
+details { margin-top:6px; }
+summary { cursor:pointer; color:var(--accent); }
+.detail { background:var(--soft); border-radius:6px; padding:8px 10px; margin-top:6px; }
+.detail ul { margin:2px 0 8px; padding-left:18px; }
+.rowgap { color:var(--warn); font-size:12px; }
+.table-wrap { overflow-x:auto; }
+</style>
+</head>
+<body>
+<main>
+<h1>Telemetry Value Tracker report</h1>
+<p class="muted">Scan {{.Scan.ID}}, {{.Scan.WindowDays}}-day window to {{date .Scan.StartedAt}}{{if .Scan.PriceCard}}, priced on {{.Scan.PriceCard}}{{if .Scan.Approximate}} (a vendor preset: approximate){{end}}{{end}}. Generated {{when .GeneratedAt}} UTC.</p>
+
+<div class="cards">
+  <div class="card"><span class="muted">Recommendations</span><b>{{.Totals.Recommendations}}</b><span class="muted">of {{.Totals.Candidates}} candidates</span></div>
+  <div class="card"><span class="muted">Metric savings / month</span><b>{{money .Totals.MetricSavings .Scan.Currency}}</b></div>
+  {{if .Totals.StreamSavings}}<div class="card"><span class="muted">Stream savings / month</span><b>up to {{money .Totals.StreamSavings .Scan.Currency}}</b><span class="muted">selectors overlap</span></div>{{end}}
+  <div class="card"><span class="muted">Usage log coverage</span><b>{{pct .Scan.LogCoverage}}</b></div>
+  {{range $reason, $n := .Held}}<div class="card"><span class="muted">Held: {{$reason}}</span><b>{{$n}}</b><span class="muted">not recommended yet</span></div>{{end}}
+</div>
+
+{{if .Gaps}}
+<div class="gaps"><b>Evidence gaps</b>: a reader these sources would have shown can't be ruled out.
+<ul>{{range .Gaps}}<li>{{.}}</li>{{end}}</ul></div>
+{{end}}
+
+<h2>Recommendations</h2>
+<p class="muted">Ranked by savings per minute of checking. Confirm each with its cheapest check before anything changes.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>#</th><th>Change</th><th>Claim and check</th><th class="num">Saves / month</th><th class="num">Check</th><th>Owner</th></tr></thead>
+<tbody>
+{{range $i, $r := .Recommendations}}
+<tr id="{{$r.ID}}">
+<td class="num">{{inc $i}}</td>
+<td><span class="tag">{{$r.Action}}</span><br><code>{{$r.Signal.ID}}</code></td>
+<td>{{$r.Claim}}<br><b>Check:</b> {{$r.CheapestCheck}}
+{{if $r.Evidence.Gaps}}<div class="rowgap">Gaps: {{join $r.Evidence.Gaps "; "}}</div>{{end}}
+<details><summary>Evidence, readers and assumptions</summary><div class="detail">
+<b>Score</b>: usage weight {{printf "%.2f" $r.Score.UsageWeight}} ({{$r.Score.Strongest}}), confidence {{printf "%.2f" $r.Score.Confidence}}, priority {{printf "%.2f" $r.Score.Priority}}.
+Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.RiskIfWrong.Dormant}}, dormant{{end}}{{if $r.RiskIfWrong.Tier}}, tier {{$r.RiskIfWrong.Tier}}{{end}}.
+{{with $r.Evidence.LastRead}}<br><b>Last read</b>: {{when .At}}{{if .Actor}} by {{.Actor}}{{end}} (<code>{{.Consumer}}</code>).{{end}}
+<br><b>Readers</b>{{if not $r.Downstream}}: none.{{end}}
+{{if $r.Downstream}}<ul>{{range $r.Downstream}}<li>{{.Name}} <span class="tag">{{.Kind}}</span> <span class="tag">{{.Evidence}}</span> from {{.Source}}{{if .Sweep}}, a sweep{{end}}{{if not .Exact}}, inferred{{end}}{{if .Actor}}, by {{.Actor}}{{end}}{{if not .LastSeen.IsZero}}, last {{when .LastSeen}}{{end}}</li>{{end}}</ul>{{end}}
+{{if $r.Evidence.QueryLog}}<b>Logged queries</b><ul>{{range $r.Evidence.QueryLog}}<li><code>{{.Expr}}</code>{{if .Client}} ({{.Client}}){{end}}</li>{{end}}</ul>{{end}}
+{{if $r.Assumptions}}<b>Assumptions</b><ul>{{range $r.Assumptions}}<li>{{.}}</li>{{end}}</ul>{{end}}
+</div></details>
+</td>
+<td class="num">{{money $r.Savings.Monthly $r.Savings.Currency}}{{if $r.Savings.Approximate}}<br><span class="muted">approx.</span>{{end}}</td>
+<td class="num">{{$r.CheckMinutes}} min</td>
+<td>{{if $r.Owner}}{{$r.Owner}}{{else}}<span class="muted">unknown</span>{{end}}</td>
+</tr>
+{{else}}
+<tr><td colspan="6" class="muted">Nothing to recommend{{if .Held}}: every candidate is held (see above){{end}}.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+<h2>Evidence sources</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Source</th><th>Configured</th><th class="num">Coverage</th><th>Gap</th></tr></thead>
+<tbody>{{range .Sources}}<tr><td>{{.Name}}</td><td>{{if .Configured}}yes{{else}}no{{end}}</td><td class="num">{{pct .Coverage}}</td><td>{{.Gap}}</td></tr>{{end}}</tbody>
+</table>
+</div>
+<p class="muted">Rendered from report.json (version {{.Version}}). tvt is read-only: nothing changes until a reviewed pull request.</p>
+</main>
+</body>
+</html>

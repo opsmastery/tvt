@@ -1,11 +1,14 @@
 # The report
 
-`tvt report` reads the latest scan in the database and writes the JSON report. The JSON report is the internal API: the HTML report (S4 item 2), `propose`, `check` and later the MCP server read it, never the database.
+`tvt report` reads the latest scan in the database and writes the JSON report, then renders the HTML report from that JSON. The JSON report is the internal API: the HTML report, `propose`, `check` and later the MCP server read it, never the database.
 
 ```sh
 tvt scan ... --db tvt.db
-tvt report --db tvt.db --json report.json --top 50   # --json - for stdout, --top 0 for all
+tvt report --db tvt.db --json report.json --html report.html --top 50
+# --json - writes only the JSON, to stdout; --html "" skips the page; --top 0 keeps every recommendation
 ```
+
+The HTML page is one self-contained file (an embedded `html/template`, inline CSS, no scripts or external assets), so it can be attached or archived as is. `report.RenderHTMLFromJSON` decodes the JSON first and refuses a version it doesn't know, so the page can only show what the JSON holds. Each row shows the claim, the cheapest check, its gaps, savings, check minutes and owner, with evidence, readers and assumptions folded under it; each row's anchor is its `id`.
 
 `tvt report` never creates a database and never talks to a backend.
 
