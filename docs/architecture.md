@@ -26,7 +26,7 @@ Every scan stores a class on every signal (`score.Classify`, applied in `scan.Bu
 | `dormant` | Nothing reads it, but its name says error, latency, saturation or queue depth, its owner's tier is 0 or 1, a runbook or postmortem names it without querying it, or its owner has a `tvt.yaml` season the window missed | Ask the owner ("dormant: confirm" in the report); never a drop candidate |
 | `candidate` | Everything else | Ranked by the weights below |
 
-`hard_keep` and `keep_high` are both protected; they stay separate so the report can tell a declared dependency from "people look at it". Owners and tiers come from `ownership.owners` in `tvt.yaml` (first match; a label takes its metric's owner).
+`hard_keep` and `keep_high` are both protected; they stay separate so the report can tell a declared dependency from "people look at it". Owners and tiers come from `ownership.owners` in `tvt.yaml` (first match; a label takes its metric's owner). A label nobody reads still takes `hard_keep` or `keep_high` when a protecting consumer keeps its metric's labels in the result (`refs.result_labels`: no aggregation, as in `rate(x[5m]) > 100`): removing it would merge series and change what the alert fires on or the viewed panel shows. It isn't counted as a read, so a raw ad hoc query protects nothing; `tvt why` lists such consumers as inferred readers.
 
 ## Usage weights (defaults, tunable)
 

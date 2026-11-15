@@ -457,6 +457,10 @@ func recommend(s graph.Signal, sc graph.Score, refs []graph.Reference, consumers
 	}
 	rec.ID = rec.Action + ":" + s.ID
 	rowGaps := gs.forSignal(s, listed)
+	if s.Kind == graph.KindLabel {
+		rec.Assumptions = append(rec.Assumptions,
+			"removing the label merges series that differ only in it: it needs aggregation (a recording rule or ingest-time aggregation), never a plain labeldrop, which would collide series and lose samples")
+	}
 	if s.Kind == graph.KindStream {
 		rec.Assumptions = append(rec.Assumptions,
 			"stream selectors overlap, so this saving may count bytes another stream row also counts",
