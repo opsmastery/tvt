@@ -46,3 +46,14 @@ states:
       duplicate alert. Full snapshot captured Nov 15, 2026 20:54 UTC; ground truth's rule_findings
       is scored by TestRuleFindings (S6 item 1).
     proven: [prometheus query log, loki query log, grafana router log]
+  - name: slo-coverage
+    dir: slo
+    base: rule-efficiency
+    scan_time: 2026-11-15T21:50:30Z
+    about: >
+      After the SLO coverage seeds (tvt-lab #19; tvt S6 item 3): the shop availability Sloth SLO and
+      its multiwindow burn-rate page alert ShopAvailabilityBurn, loaded 21:3x UTC. The overlay is the
+      Prometheus rules API answer captured at 21:50, the new SLO file, the ground truth and a
+      tvt-lab.yaml naming the lab's services as owners; every other fixture is the rule-efficiency
+      one. Ground truth's slo_coverage is scored by TestSLOCoverage.
+    proven: [prometheus query log, loki query log, grafana router log]

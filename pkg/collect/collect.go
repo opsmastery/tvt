@@ -181,6 +181,9 @@ type Rule struct {
 	// Annotations are an alert's annotations (runbook_url, summary, …):
 	// a runbook or Grafana link there can declare more dependencies.
 	Annotations map[string]string
+	// Labels are the rule's own labels (severity, team, sloth_slo, …), for
+	// S6's SLO coverage: which alerts page, which belong to an SLO.
+	Labels map[string]string
 	// GroupEvaluation is how long the rule's group last took to evaluate
 	// (Prometheus and Mimir rules API evaluationTime); zero when unknown.
 	GroupEvaluation time.Duration
@@ -194,6 +197,14 @@ const EvaluatedByGrafana = "grafana"
 type SLO struct {
 	Format string // "sloth", "pyrra", "openslo", "grafana"
 	Name   string // service/name where the format has a service
+	// Service is the service the definition names (Sloth service, OpenSLO
+	// spec.service); Pyrra names none (its namespace is in Name). Short is
+	// the SLO's own name without the service.
+	Service, Short string
+	// Alert is the alert name the definition generates, when it names one
+	// (Sloth alerting.name, Pyrra's ErrorBudgetBurn with an slo label):
+	// S6's SLO coverage looks for it in the rulers.
+	Alert string
 	// Origin is where it was read: a file path, or an API.
 	Origin string
 	// Queries are the SLI's queries. Empty with Unreadable set when tvt

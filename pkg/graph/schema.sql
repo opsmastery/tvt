@@ -242,6 +242,19 @@ CREATE TABLE IF NOT EXISTS query_costs (
     PRIMARY KEY (scan_id, consumer_id)
 );
 
+-- SLO coverage findings (graph.SLOFinding, S6 item 3; report only).
+-- subject: the alert's or SLO's consumer ID, or service:<owner> (not a
+-- consumer, so no foreign key).
+CREATE TABLE IF NOT EXISTS slo_findings (
+    scan_id INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    kind    TEXT NOT NULL CHECK (kind IN ('service_without_slo', 'paging_not_burn_rate', 'slo_without_alert')),
+    subject TEXT NOT NULL,
+    name    TEXT NOT NULL,
+    detail  TEXT NOT NULL,
+    fix     TEXT NOT NULL,
+    PRIMARY KEY (scan_id, kind, subject)
+);
+
 -- Dashboard loads in a scan's window, per login and kind. browser = 1 is a
 -- view from the dashboard page; 0 is an API client other than tvt.
 CREATE TABLE IF NOT EXISTS dashboard_loads (

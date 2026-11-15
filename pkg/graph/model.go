@@ -344,6 +344,23 @@ type RuleFinding struct {
 	Fix        string
 }
 
+// SLO coverage finding kinds (S6 item 3).
+const (
+	SLOServiceWithout    = "service_without_slo"
+	SLOPagingNotBurnRate = "paging_not_burn_rate"
+	SLOWithoutAlert      = "slo_without_alert"
+)
+
+// SLOFinding is one SLO coverage finding (S6 item 3). Subject is the
+// alert's or SLO's consumer ID, or "service:<owner>" for a service.
+type SLOFinding struct {
+	Kind    string
+	Subject string
+	Name    string
+	Detail  string
+	Fix     string
+}
+
 // DashboardLoad aggregates loads of one dashboard by one login in a scan's
 // window. Browser loads (from the dashboard page) are views; API loads by
 // anyone but tvt are recorded as evidence of use but not counted as views.
