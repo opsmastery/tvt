@@ -45,7 +45,9 @@ type groundTruth struct {
 		Reads  []string `yaml:"reads"`
 	} `yaml:"runbooks"`
 	Labels map[string]gtEntry `yaml:"labels"`
-	Mimir  struct {
+	// Line-level findings inside kept streams (S5 items 3-4).
+	LinePatterns map[string]gtLinePattern `yaml:"line_patterns"`
+	Mimir        struct {
 		Rules   map[string]gtRule  `yaml:"rules"`
 		Metrics map[string]gtEntry `yaml:"metrics"`
 	} `yaml:"mimir"`
@@ -54,6 +56,15 @@ type groundTruth struct {
 type gtEntry struct {
 	Class  string `yaml:"class"`
 	Source string `yaml:"source"` // where the evidence comes from, when not a rule tvt reads
+}
+
+// gtLinePattern is a line pattern inside a stream: Loki's pattern text
+// (<_> for a variable field, "..." for any run of text) and its class
+// (repeated_line, line_handoff, or a class meaning no line finding).
+type gtLinePattern struct {
+	Stream  string `yaml:"stream"`
+	Pattern string `yaml:"pattern"`
+	Class   string `yaml:"class"`
 }
 
 type gtRule struct {

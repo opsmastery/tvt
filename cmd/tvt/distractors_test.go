@@ -99,6 +99,11 @@ func TestBenchmarkDistractors(t *testing.T) {
 				t.Errorf("recommendation %s (%s) covers the reconciler's error stream", rec.ID, rec.Action)
 			}
 		}
+		for _, f := range r.LineFindings {
+			if selectorMatches(t, f.Stream, labels) {
+				t.Errorf("line finding %s (%s, %q) in the reconciler's error stream", f.ID, f.Kind, f.Pattern)
+			}
+		}
 		for _, ref := range streamRefs(t, g, labels) {
 			t.Errorf("the reconciler's stream is read by %s (%s)", ref.ConsumerID, g.consumers[ref.ConsumerID].Expr)
 		}

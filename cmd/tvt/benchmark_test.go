@@ -28,6 +28,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -544,11 +545,7 @@ func scoreRecommendations(t *testing.T, g scanGraph, gt groundTruth, r report.Re
 	}
 
 	var s recScore
-	for _, id := range sortedKeys(want) {
-		w, o := want[id], got[id]
-		if o == "" {
-			o = outKeep
-		}
+	judge := func(id string, w, o outcome) {
 		switch {
 		case o == w && w != outKeep:
 			s.TruePositives++
@@ -565,10 +562,63 @@ func scoreRecommendations(t *testing.T, g scanGraph, gt groundTruth, r report.Re
 			s.Missed = append(s.Missed, fmt.Sprintf("%s: not raised, want %s", id, w))
 		}
 	}
+	for _, id := range sortedKeys(want) {
+		o := got[id]
+		if o == "" {
+			o = outKeep
+		}
+		judge(id, want[id], o)
+	}
+
+	// Line findings (version 2): each ground-truth line pattern is raised
+	// as its kind, or not at all; a finding ground truth doesn't list is
+	// wrong.
+	matched := map[int]bool{}
+	for _, name := range sortedKeys(gt.LinePatterns) {
+		lp := gt.LinePatterns[name]
+		w := outKeep
+		if lp.Class == graph.LineRepeated || lp.Class == graph.LineHandoff {
+			w = outcome(lp.Class)
+		}
+		o := outKeep
+		for i, f := range r.LineFindings {
+			if f.Stream == canonicalStream(t, lp.Stream) && linePatternMatches(lp.Pattern, f.Pattern) {
+				o, matched[i] = outcome(f.Kind), true
+			}
+		}
+		judge("line:"+name, w, o)
+	}
+	for i, f := range r.LineFindings {
+		if !matched[i] {
+			judge(fmt.Sprintf("line:%s %q", f.Stream, f.Pattern), outKeep, outcome(f.Kind))
+		}
+	}
 	s.Wrong, s.Missed = orEmpty(s.Wrong), orEmpty(s.Missed)
 	s.Precision = ratio(s.TruePositives, s.TruePositives+s.FalsePositives)
 	s.Recall = ratio(s.TruePositives, s.TruePositives+s.FalseNegatives)
 	return s
+}
+
+// linePatternMatches: does Loki's pattern got match ground truth's want,
+// where "..." in want stands for any text?
+func linePatternMatches(want, got string) bool {
+	parts := strings.Split(want, "...")
+	if len(parts) == 1 {
+		return want == got
+	}
+	if !strings.HasPrefix(got, strings.TrimSpace(parts[0])) {
+		return false
+	}
+	rest := got[len(strings.TrimSpace(parts[0])):]
+	for _, p := range parts[1:] {
+		p = strings.TrimSpace(p)
+		i := strings.Index(rest, p)
+		if i < 0 {
+			return false
+		}
+		rest = rest[i+len(p):]
+	}
+	return strings.HasSuffix(got, strings.TrimSpace(parts[len(parts)-1]))
 }
 
 func canonicalStream(t *testing.T, key string) string {
@@ -595,4 +645,37 @@ func ratio(n, d int) float64 {
 		return 1
 	}
 	return math.Round(float64(n)/float64(d)*1e4) / 1e4
+}
+
+// TestScanRepeatedLine (S5 item 3): the before-deploy scan reads the
+// largest streams' patterns and reports the startup burst, an identical
+// warn line, as a repeated line with its rate and saving; the finding
+// never makes the stream itself a recommendation.
+func TestScanRepeatedLine(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	st := bm.States[slices.IndexFunc(bm.States, func(s benchState) bool { return s.Name == "before-deploy" })]
+	_, r, _ := scanState(t, st, dirs[st.Name])
+	const warn = `{app="shop", component="api", level="warn"}`
+	var found bool
+	for _, f := range r.LineFindings {
+		if f.Kind != graph.LineRepeated {
+			continue
+		}
+		if f.Stream != warn || !strings.Contains(f.Pattern, "key=cache.ttl") {
+			t.Errorf("repeated line %s in %s: %q", f.ID, f.Stream, f.Pattern)
+			continue
+		}
+		found = true
+		if f.Lines != 10000 || f.Share < 0.5 || f.Share > 0.6 || f.PerSecond <= 0 || f.Savings.Monthly <= 0 || !f.Savings.Approximate || f.Handoff != report.ZeroreadsURL {
+			t.Errorf("burst finding %+v", f)
+		}
+	}
+	if !found {
+		t.Fatalf("no repeated-line finding for the startup burst: %+v", r.LineFindings)
+	}
+	for _, rec := range r.Recommendations {
+		if rec.Signal.ID == "loki:stream:"+warn {
+			t.Errorf("the warn stream itself is recommended: %s (%s)", rec.ID, rec.Action)
+		}
+	}
 }

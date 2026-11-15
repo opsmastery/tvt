@@ -121,6 +121,24 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </table>
 </div>
 
+<h2>Line-level findings</h2>
+<p class="muted">Line patterns inside a stream worth cutting, from Loki's pattern API over its last few hours. Savings are estimates (patterns count lines, not bytes). tvt never writes a line filter: <a href="{{zeroreads}}">zeroreads</a> proves which lines nothing reads and generates the cut.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Stream and pattern</th><th>What to do</th><th class="num">Lines/s</th><th class="num">Saving / month</th></tr></thead>
+<tbody>
+{{range .LineFindings}}
+<tr id="{{.ID}}"><td><span class="tag">{{if eq .Kind "repeated_line"}}repeated line{{else}}hand-off to zeroreads{{end}}</span><br><code>{{.Stream}}</code><br><code>{{.Pattern}}</code></td>
+<td>{{.Action}}</td>
+<td class="num">{{printf "%.2f" .PerSecond}}</td>
+<td class="num">{{money .Savings.Monthly .Savings.Currency}}<br><span class="muted">{{pct .Share}} of the stream</span></td></tr>
+{{else}}
+<tr><td colspan="4" class="muted">No line findings.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
 <h2>Evidence sources</h2>
 <div class="table-wrap">
 <table>
