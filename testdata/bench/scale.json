@@ -1,0 +1,7 @@
+{
+  "metrics": 100,
+  "series": 200000,
+  "total_alloc_bytes": 84892624,
+  "peak_heap_bytes": 3321368,
+  "elapsed_ns": 697542367
+}
