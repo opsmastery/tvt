@@ -1,0 +1,1 @@
+{"status":"success","data":{"application":"Grafana Mimir","version":"2.16.0","revision":"b4f36da","branch":"HEAD","goVersion":"go1.23.7","features":{"ruler_config_api":"true","alertmanager_config_api":"true","query_sharding":"false","federated_rules":"false"}}}

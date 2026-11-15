@@ -80,6 +80,12 @@ type Inputs struct {
 	// select is a hard keep. Owners map signals to owners and tiers.
 	External []config.ExternalConsumer
 	Owners   []config.Owner
+	// Pipelines are tvt.yaml's pipelines (S6 item 4); LabelMetrics says
+	// which values of each label their handles match on each metric
+	// carries (nil when not read, with LabelMetricsErr saying why).
+	Pipelines       []config.Pipeline
+	LabelMetrics    collect.LabelMetrics
+	LabelMetricsErr string
 	// Clients identifies query-log clients the logs can't name.
 	Clients config.Clients
 	// SweepShare overrides DefaultSweepShare when positive.
@@ -192,6 +198,9 @@ type Output struct {
 	QueryCosts []graph.QueryCost
 	// SLOFindings are the SLO coverage findings (S6 item 3). Report only.
 	SLOFindings []graph.SLOFinding
+	// PipelineTargets map every metric, label and stream signal, and every
+	// listed stream, to its pipeline (S6 item 4); nil without pipelines.
+	PipelineTargets []graph.PipelineTarget
 }
 
 // Build maps inputs to graph rows. It rejects inputs a scan should never
@@ -459,6 +468,11 @@ func Build(in Inputs) (Output, error) {
 		st, _ := StorageHygiene(*in.Storage, in.VolumeBytes)
 		sources = append(sources, st)
 	}
+	var pipeSrc graph.SourceCoverage
+	out.PipelineTargets, pipeSrc = pipelineTargets(in, out.Signals, out.Consumers, out.Costs)
+	if pipeSrc.Configured {
+		sources = append(sources, pipeSrc)
+	}
 	if in.Monitors != nil {
 		var pools []string
 		if in.Scrape != nil {
@@ -485,7 +499,7 @@ func Build(in Inputs) (Output, error) {
 			s.WindowStart = since
 		}
 		out.Sources = append(out.Sources, s)
-		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || s.Source == SourceStorage || s.Source == SourceMonitors || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
+		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || s.Source == SourceStorage || s.Source == SourceMonitors || s.Source == SourcePipelines || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
 			continue
 		}
 		sum += s.Coverage
