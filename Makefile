@@ -23,12 +23,14 @@ race:
 # The ground-truth benchmark (S5 item 1): scores evidence found and
 # recommendation precision and recall on the frozen lab states in
 # testdata/bench, and fails on any drop below testdata/bench/baseline.json.
+# The scale regression (S5 item 7) fails when a 200k-series scan's
+# allocation or peak heap more than doubles against testdata/bench/scale.json.
 bench:
-	go test -count=1 -run '^TestBenchmark$$' -v ./cmd/tvt
+	go test -count=1 -run '^(TestBenchmark|TestScanScaleRegression)$$' -v ./cmd/tvt
 
 # Re-record the baseline after a deliberate change; commit the diff.
 bench-update:
-	go test -count=1 -run '^TestBenchmark$$' ./cmd/tvt -update-bench
+	go test -count=1 -run '^(TestBenchmark|TestScanScaleRegression)$$' ./cmd/tvt -update-bench
 
 vet:
 	go vet ./...
