@@ -115,3 +115,20 @@ func ReadFile(t testing.TB, name string) []byte {
 	}
 	return b
 }
+
+// Dashboards maps each recorded dashboard's UID to its fixture file name in
+// lab/grafana (dashboard_<uid>.json), so a dashboard the lab gains is served
+// as soon as capture-fixtures.sh records it.
+func Dashboards(t testing.TB) map[string]string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(Lab, "grafana", "dashboard_*.json"))
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("no dashboard fixtures in %s: %v", filepath.Join(Lab, "grafana"), err)
+	}
+	out := map[string]string{}
+	for _, p := range paths {
+		name := filepath.Base(p)
+		out[strings.TrimSuffix(strings.TrimPrefix(name, "dashboard_"), ".json")] = name
+	}
+	return out
+}

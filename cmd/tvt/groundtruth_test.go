@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"path"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -285,9 +287,20 @@ var fixtureLag = map[string]string{}
 // groundTruthConflicts lists ground-truth entries that contradict the lab's
 // own seeds, to fix in tvt-lab. The golden test skips them and fails once a
 // ground-truth update resolves them.
-var groundTruthConflicts = map[string]string{
-	`{app="shop", component="api", level="debug"}`: `route_cold says "never queried", but Shop Overview panel 8 ` +
-		`(sum by (level) (rate({app="shop", component="api"}[$__auto]))) reads every api stream, debug included`,
+// Empty since the Nov 15 recapture: tvt-lab's panel 8 and on-call query
+// now name the levels they read, so the route_cold debug stream is unread.
+var groundTruthConflicts = map[string]string{}
+
+// routeColdSince: when a route_cold stream really became unread in the
+// lab. A live scan still sees reads from before then until they leave the
+// window. tvt-lab 2d78309 narrowed the debug stream's readers on Nov 12
+// (the new panel 8 query first ran at 01:03 UTC), but the old version kept
+// running in an open browser until 20:02 UTC, so its reads are gone from a
+// 30-day window by Dec 13. Reads before the date are expected; any read
+// after it fails. Remove an entry once a live scan a full window after it
+// passes without it.
+var routeColdSince = map[string]time.Time{
+	`{app="shop", component="api", level="debug"}`: time.Date(2026, 11, 12, 20, 3, 0, 0, time.UTC),
 }
 
 // refsTo returns every reference to a signal with its consumer.
@@ -470,13 +483,18 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 	}
 	for key, e := range gt.Streams {
 		labels := streamLabels(t, key)
-		var viewed, read bool
+		var viewed, read, oldOnly bool
+		var readers []string
+		since, fixed := routeColdSince[key]
+		oldOnly = fixed
 		for _, r := range g.refs {
 			s, c := g.signals[r.SignalID], g.consumers[r.ConsumerID]
 			if s.Kind != graph.KindStream || !selectorMatches(t, s.Name, labels) {
 				continue
 			}
 			read = true
+			readers = append(readers, fmt.Sprintf("%s (%s, last %s): %s", c.ID, s.Name, r.LastSeen.Format(time.RFC3339), c.Expr))
+			oldOnly = oldOnly && !r.LastSeen.IsZero() && r.LastSeen.Before(since)
 			viewed = viewed || isDashboard(c.Kind) && !c.LastViewed.IsZero()
 		}
 		switch e.Class {
@@ -491,8 +509,10 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 				t.Errorf("route_cold stream %s is no longer referenced: remove it from groundTruthConflicts", key)
 			case known:
 				t.Logf("%s (route_cold): skipped, %s", key, conflict)
+			case read && oldOnly:
+				t.Logf("%s (route_cold): only read before %s, when tvt-lab made it unread", key, since.Format(time.RFC3339))
 			case read:
-				t.Errorf("route_cold stream %s is referenced", key)
+				t.Errorf("route_cold stream %s is referenced by %s", key, strings.Join(readers, "; "))
 			}
 		}
 	}
