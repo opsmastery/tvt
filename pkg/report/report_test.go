@@ -104,8 +104,10 @@ func TestBuildRecommendsOnlyTrustedCandidates(t *testing.T) {
 	if _, ok := got["label_removal:prom:label:unread:pod"]; ok {
 		t.Error("a label of a dropped metric was recommended on its own")
 	}
-	if _, ok := got["label_removal:prom:label:kept:pod"]; !ok {
+	if rec, ok := got["label_removal:prom:label:kept:pod"]; !ok {
 		t.Error("a label of a kept metric wasn't recommended")
+	} else if len(rec.Assumptions) == 0 || !strings.Contains(rec.Assumptions[0], "never a plain labeldrop") {
+		t.Errorf("label row assumptions = %v", rec.Assumptions)
 	}
 	if r.Held["new"] != 1 || len(r.Held) != 1 {
 		t.Errorf("held = %v", r.Held)
@@ -359,5 +361,23 @@ func TestSourceGapKinds(t *testing.T) {
 		if got := sourceGaps(tc.s); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%+v: %+v, want %+v", tc.s, got, tc.want)
 		}
+	}
+}
+
+// One assumed reader reaching a signal directly and through a recording
+// rule is one gap on the row.
+func TestRowGapsUnique(t *testing.T) {
+	in := fixture()
+	in.References = append(in.References, graph.Reference{SignalID: "prom:metric:stale", ConsumerID: "panel:1:d:3:0", Via: "rule:prom:a/g/rec",
+		Evidence: graph.EvidenceObserved, Assumed: true, Reasons: []string{"variable $metric"}})
+	rec := byID(Build(in, 0))["drop:prom:metric:stale"]
+	n := 0
+	for _, g := range rec.Evidence.Gaps {
+		if strings.Contains(g, "assumed to read it") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d assumed gaps on the row: %v", n, rec.Evidence.Gaps)
 	}
 }
