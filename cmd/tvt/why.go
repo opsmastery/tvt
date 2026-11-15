@@ -139,7 +139,7 @@ func printWhy(out io.Writer, w report.Why) error {
 	fmt.Fprintln(tw, "  EVIDENCE\tEXACT\tSOURCE\tREADER\tFIRST SEEN\tLAST SEEN")
 	for _, r := range w.Readers {
 		exact := "exact"
-		if !r.Exact || r.Via != "" || r.Sweep {
+		if len(r.Inferred) > 0 {
 			exact = "inferred"
 		}
 		name := r.Consumer
