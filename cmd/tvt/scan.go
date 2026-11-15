@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 	"github.com/Opsmastery-Summit/tvt/pkg/score"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
@@ -185,6 +187,18 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 				}
 			}
 			fmt.Fprintf(out, "%-12s %s, %d with an SLI tvt can't read\n", "slos", plural(len(in.SLOs), "SLO", "SLOs"), unreadable)
+		}
+		if len(cfg.Postmortems.Paths) > 0 {
+			if in.Mentions, err = postmortems(cfg.Postmortems.Paths); err != nil {
+				return err
+			}
+			names := map[string]bool{}
+			for _, m := range in.Mentions {
+				for _, n := range m.Names {
+					names[n] = true
+				}
+			}
+			fmt.Fprintf(out, "%-12s %s naming %s\n", "postmortems", plural(len(in.Mentions), "file", "files"), plural(len(names), "metric-shaped name", "metric-shaped names"))
 		}
 	}
 	if !in.SLOsConfigured {
@@ -419,6 +433,53 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	fmt.Fprintf(out, "scan %d written to %s: %d signals, %d consumers, %d references, %d dashboard loads, log coverage %s\n",
 		id, o.DB, len(g.Signals), len(g.Consumers), len(g.References), loads(g), percent(g.LogCoverage))
 	return nil
+}
+
+// postmortemExts are the files a postmortem directory is searched for.
+var postmortemExts = map[string]bool{".md": true, ".markdown": true, ".txt": true, ".html": true, ".htm": true}
+
+// postmortems reads every postmortem file under paths (files or
+// directories, walked recursively) and returns the names each mentions.
+// They are local files the user listed: one tvt can't read fails the scan
+// rather than leaving a signal it names unprotected.
+func postmortems(paths []string) ([]scan.Mention, error) {
+	var out []scan.Mention
+	read := func(path string) error {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("postmortem: %w", err)
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if names := parse.Mentions(string(b), ext == ".html" || ext == ".htm"); len(names) > 0 {
+			out = append(out, scan.Mention{Source: "postmortem " + path, Names: names})
+		}
+		return nil
+	}
+	for _, p := range paths {
+		fi, err := os.Stat(p)
+		if err != nil {
+			return nil, fmt.Errorf("postmortems: %w", err)
+		}
+		if !fi.IsDir() {
+			if err := read(p); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		err = filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !postmortemExts[strings.ToLower(filepath.Ext(path))] {
+				return nil
+			}
+			return read(path)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("postmortems: %w", err)
+		}
+	}
+	return out, nil
 }
 
 // history reads what earlier scans stored, for scoring: each signal's

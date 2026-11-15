@@ -102,12 +102,14 @@ func (l liveLab) config(t *testing.T) string {
 	body := fmt.Sprintf(`pricecard: grafana-cloud
 slos:
   paths: [%q]
+postmortems:
+  paths: [%q]
 runbooks:
   fetch: false
   mirrors:
     - url_prefix: https://github.com/Opsmastery-Summit/tvt-lab/blob/main/
       path: %q
-`, filepath.Join(l.dir, "slos"), l.dir)
+`, filepath.Join(l.dir, "slos"), filepath.Join(l.dir, "postmortems"), l.dir)
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -168,8 +168,8 @@ else
 fi
 
 # Declared dependencies the golden scan reads through tvt.yaml (Sprint 2
-# item 7): the lab's SLO definitions and runbooks, copied as they are.
-for d in slos runbooks; do
+# item 7): the lab's SLO definitions, runbooks and postmortems, copied as they are.
+for d in slos runbooks postmortems; do
   if [ -d "$LAB_DIR/$d" ] && rm -rf "${OUT:?}/$d" && cp -R "$LAB_DIR/$d" "$OUT/$d"; then
     echo "  ok  $OUT/$d/"
   else
