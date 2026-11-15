@@ -12,7 +12,9 @@
 #   OUT=testdata/bench/<dir> ./scripts/capture-fixtures.sh
 # plus tvt-lab.yaml (copied from testdata/lab). A state with a base is an
 # overlay: only the files that changed, laid over the base's.
-version: 1
+# Version 2 (S5 item 3): recommendations also score line findings against
+# ground truth's line_patterns.
+version: 2
 states:
   - name: before-deploy
     dir: before
