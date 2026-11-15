@@ -9,16 +9,15 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 304,
+        "true_positives": 305,
         "false_positives": 0,
-        "false_negatives": 3,
+        "false_negatives": 2,
         "precision": 1,
-        "recall": 0.9902,
+        "recall": 0.9935,
         "wrong": [],
         "missed": [
           "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend",
-          "line:healthz_success: not raised, want line_handoff"
+          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend"
         ]
       }
     },
@@ -30,16 +29,15 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 305,
+        "true_positives": 306,
         "false_positives": 0,
-        "false_negatives": 3,
+        "false_negatives": 2,
         "precision": 1,
-        "recall": 0.9903,
+        "recall": 0.9935,
         "wrong": [],
         "missed": [
           "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend",
-          "line:healthz_success: not raised, want line_handoff"
+          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend"
         ]
       }
     }
