@@ -89,7 +89,11 @@ type benchBaseline struct {
 	States  map[string]benchScore `json:"states"`
 }
 
-func TestBenchmark(t *testing.T) {
+// loadBenchmark reads benchmark.yaml and returns its states with the
+// directory each one's fixtures are in (an overlay state's laid over its
+// base in a temporary directory).
+func loadBenchmark(t *testing.T) (benchmark, map[string]string) {
+	t.Helper()
 	var bm benchmark
 	if err := yaml.Unmarshal(testutil.ReadFile(t, "bench/benchmark.yaml"), &bm); err != nil {
 		t.Fatal(err)
@@ -97,7 +101,6 @@ func TestBenchmark(t *testing.T) {
 	if bm.Version == 0 || len(bm.States) == 0 {
 		t.Fatalf("benchmark.yaml: no version or states: %+v", bm)
 	}
-	got := benchBaseline{Version: bm.Version, States: map[string]benchScore{}}
 	dirs := map[string]string{}
 	for _, st := range bm.States {
 		dir := filepath.Join(testutil.Testdata, "bench", st.Dir)
@@ -109,8 +112,16 @@ func TestBenchmark(t *testing.T) {
 			dir = overlay(t, base, dir)
 		}
 		dirs[st.Name] = dir
+	}
+	return bm, dirs
+}
+
+func TestBenchmark(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	got := benchBaseline{Version: bm.Version, States: map[string]benchScore{}}
+	for _, st := range bm.States {
 		t.Run(st.Name, func(t *testing.T) {
-			got.States[st.Name] = scoreState(t, st, dir)
+			got.States[st.Name] = scoreState(t, st, dirs[st.Name])
 		})
 	}
 	if t.Failed() {
@@ -214,6 +225,31 @@ func overlay(t *testing.T, base, dir string) string {
 // scoreState scans one frozen state, builds its report and scores both.
 func scoreState(t *testing.T, st benchState, dir string) benchScore {
 	t.Helper()
+	g, r, gt := scanState(t, st, dir)
+	s := benchScore{
+		Evidence:        scoreEvidence(t, g, gt, r, dir, st.Proven),
+		Recommendations: scoreRecommendations(t, g, gt, r),
+	}
+	t.Logf("evidence %d/%d = %.4f; recommendations: precision %.4f, recall %.4f (tp %d, fp %d, fn %d)",
+		s.Evidence.Found, s.Evidence.Total, s.Evidence.Score,
+		s.Recommendations.Precision, s.Recommendations.Recall,
+		s.Recommendations.TruePositives, s.Recommendations.FalsePositives, s.Recommendations.FalseNegatives)
+	for _, m := range s.Evidence.Missed {
+		t.Logf("  evidence missed: %s", m)
+	}
+	for _, m := range s.Recommendations.Wrong {
+		t.Logf("  wrongly raised: %s", m)
+	}
+	for _, m := range s.Recommendations.Missed {
+		t.Logf("  not raised: %s", m)
+	}
+	return s
+}
+
+// scanState scans one frozen state with the clock at its scan time and
+// returns the stored graph, the full report and the state's ground truth.
+func scanState(t *testing.T, st benchState, dir string) (scanGraph, report.Report, groundTruth) {
+	t.Helper()
 	setNowAt(t, st.ScanTime)
 	// The capture asked for 200 series (limit=200), so Prometheus marked the
 	// answer truncated, which tvt refuses (fail closed). Served as the
@@ -255,25 +291,7 @@ func scoreState(t *testing.T, st benchState, dir string) benchScore {
 	r := report.Build(in, 0)
 
 	gt := parseGroundTruth(t, testutil.ReadFile(t, filepath.Join(dir, "ground-truth.yaml")))
-	g := readGraph(t, db)
-	s := benchScore{
-		Evidence:        scoreEvidence(t, g, gt, r, dir, st.Proven),
-		Recommendations: scoreRecommendations(t, g, gt, r),
-	}
-	t.Logf("evidence %d/%d = %.4f; recommendations: precision %.4f, recall %.4f (tp %d, fp %d, fn %d)",
-		s.Evidence.Found, s.Evidence.Total, s.Evidence.Score,
-		s.Recommendations.Precision, s.Recommendations.Recall,
-		s.Recommendations.TruePositives, s.Recommendations.FalsePositives, s.Recommendations.FalseNegatives)
-	for _, m := range s.Evidence.Missed {
-		t.Logf("  evidence missed: %s", m)
-	}
-	for _, m := range s.Recommendations.Wrong {
-		t.Logf("  wrongly raised: %s", m)
-	}
-	for _, m := range s.Recommendations.Missed {
-		t.Logf("  not raised: %s", m)
-	}
-	return s
+	return readGraph(t, db), r, gt
 }
 
 // tally collects pass/fail items.
