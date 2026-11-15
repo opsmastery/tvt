@@ -36,3 +36,13 @@ states:
       overlay is the Prometheus rules API answer and the ground truth captured at 03:37;
       every other fixture is the before-deploy one.
     proven: [prometheus query log, loki query log, grafana router log]
+  - name: rule-efficiency
+    dir: rules
+    scan_time: 2026-11-15T20:55:30Z
+    about: >
+      After the rule-efficiency seeds (tvt-lab #17, #18; tvt Sprint 2 item 12): a Grafana-managed
+      LogQL alert parsing raw logs every 30s, its well-built Loki recording rule version, a [24h]
+      window every minute, a 5s group on a 10s scrape, an alert on a metric that never existed and a
+      duplicate alert. Full snapshot captured Nov 15, 2026 20:54 UTC; ground truth's rule_findings
+      is scored by TestRuleFindings (S6 item 1).
+    proven: [prometheus query log, loki query log, grafana router log]

@@ -14,7 +14,7 @@ import (
 
 // Version is the JSON report's schema version. Readers (the HTML report,
 // propose, check) refuse a version they don't know.
-const Version = 5
+const Version = 6
 
 // Actions a recommendation can propose.
 const (
@@ -69,6 +69,10 @@ type Report struct {
 	// items 3-4, version 5): reported with an estimated saving and handed
 	// to zeroreads, never acted on (ADR 0006).
 	LineFindings []LineFinding `json:"line_findings"`
+	// Rules are every rule's measured cost and findings (S6 item 1,
+	// version 6), rules with findings first. Report only: tvt never edits
+	// rules.
+	Rules []Rule `json:"rules"`
 	// Held are candidates tvt can't recommend yet, by reason
 	// (score.Held*): a short window, no coverage, a new signal.
 	Held map[string]int `json:"held,omitempty"`
@@ -108,6 +112,8 @@ type Totals struct {
 	Dormant       int     `json:"dormant"`
 	MetricSavings float64 `json:"metric_savings"`
 	StreamSavings float64 `json:"stream_savings"`
+	// RuleFindings counts every rule finding (S6 item 1).
+	RuleFindings int `json:"rule_findings"`
 }
 
 // Recommendation is one proposed change and everything needed to check it.
@@ -258,6 +264,10 @@ type Input struct {
 	Scores     []graph.Score
 	// LineFindings are the scan's line findings (store.LineFindings).
 	LineFindings []graph.LineFinding
+	// RuleCosts and RuleFindings are the scan's rules (store.RuleCosts,
+	// store.RuleFindings).
+	RuleCosts    []graph.RuleCost
+	RuleFindings []graph.RuleFinding
 	// StreamVolumes are the scan's streams (store.StreamVolumes): tvt why
 	// uses them to find readers of a stream signal's streams through an
 	// overlapping selector.
@@ -362,6 +372,7 @@ func Build(in Input, limit int) Report {
 	}
 	r.Confirm = confirmRows(in.Signals, costs, gs, listed, in.Scan, limit)
 	r.LineFindings = lineFindings(in.LineFindings, in.Scan.Currency)
+	r.Rules, r.Totals.RuleFindings = rules(consumers, in.RuleCosts, in.RuleFindings)
 	r.Gaps = gs.all(in.Sources, gs.assumedGaps(in.References, consumers))
 	r.UnmatchedAcknowledgements = gs.unmatched()
 	for _, s := range in.Signals {

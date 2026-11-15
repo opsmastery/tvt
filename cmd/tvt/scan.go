@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -422,6 +423,16 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		src.WindowStart = since
 		in.Sources = append(in.Sources, src)
 		in.Queries = append(in.Queries, queries...)
+		// A log that also records the ruler's own evaluations prices rules
+		// (S6 item 1); a failure here only leaves rule costs unknown.
+		if re, ok := ql.reader.(collect.RuleEvaluationSource); ok && ql.reader != nil {
+			evals, err := re.RuleEvaluations(ctx, since)
+			if err != nil {
+				fmt.Fprintf(out, "%-12s rule evaluations unreadable (%v): rule costs unknown\n", ql.label, err)
+			} else {
+				in.RuleEvaluations = append(in.RuleEvaluations, evals...)
+			}
+		}
 	}
 
 	if in.History, err = history(ctx, o.DB); err != nil {
@@ -448,6 +459,9 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		classes[string(score.ClassCandidate)], len(in.External))
 
 	fmt.Fprintf(out, "%-12s %s\n", "scores", scoreSummary(g.Scores, in.MinWindowDays))
+	if len(g.RuleCosts) > 0 {
+		fmt.Fprintf(out, "%-12s %s\n", "rules", ruleSummary(g.RuleCosts, g.RuleFindings))
+	}
 	if in.Patterns != nil {
 		fmt.Fprintf(out, "%-12s %s\n", "lines", lineSummary(g.LineFindings))
 	}
@@ -716,6 +730,16 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 	}
 	for _, f := range g.LineFindings {
 		if err := sc.PutLineFinding(ctx, f); err != nil {
+			return err
+		}
+	}
+	for _, c := range g.RuleCosts {
+		if err := sc.PutRuleCost(ctx, c); err != nil {
+			return err
+		}
+	}
+	for _, f := range g.RuleFindings {
+		if err := sc.PutRuleFinding(ctx, f); err != nil {
 			return err
 		}
 	}
@@ -1013,4 +1037,28 @@ func humanBytes(n int64) string {
 		f /= 1000
 	}
 	return ""
+}
+
+// ruleSummary is the scan's rules line: how many rules were priced from
+// logged evaluations, and the findings by kind.
+func ruleSummary(costs []graph.RuleCost, findings []graph.RuleFinding) string {
+	measured := 0
+	for _, c := range costs {
+		if c.Unknown == "" {
+			measured++
+		}
+	}
+	s := fmt.Sprintf("%d of %d priced from logged evaluations, %s", measured, len(costs), plural(len(findings), "finding", "findings"))
+	if len(findings) == 0 {
+		return s
+	}
+	kinds := map[string]int{}
+	for _, f := range findings {
+		kinds[f.Kind]++
+	}
+	var parts []string
+	for _, k := range slices.Sorted(maps.Keys(kinds)) {
+		parts = append(parts, fmt.Sprintf("%s %d", k, kinds[k]))
+	}
+	return s + " (" + strings.Join(parts, ", ") + ")"
 }
