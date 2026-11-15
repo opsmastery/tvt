@@ -212,7 +212,7 @@ func TestReportGapsAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"version":8`, `"slo_coverage":{"services_without_slo":[],"paging_not_burn_rate":[],"slos_without_alert":[]}`, `"slo_findings":0`, `"line_findings":[]`, `"rules":[]`, `"query_load":{"queries":0,"samples":0,"bytes":0,"clients":[],"top":[]}`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
+	for _, key := range []string{`"version":9`, `"pipelines":{"pipelines":[],"unmapped":{"name":"unmapped","recommendations":0,"savings":0},"unmapped_streams":[]}`, `"slo_coverage":{"services_without_slo":[],"paging_not_burn_rate":[],"slos_without_alert":[]}`, `"slo_findings":0`, `"line_findings":[]`, `"rules":[]`, `"query_load":{"queries":0,"samples":0,"bytes":0,"clients":[],"top":[]}`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
 		`"savings"`, `"risk_if_wrong"`, `"assumptions"`, `"status":"open"`, `"savings_per_minute"`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("JSON has no %s", key)
@@ -526,6 +526,69 @@ func TestSLOCoverageReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range []string{"SLO coverage", "&lt;A&gt;", "reconciler", "declares alert B", "Fix: load it"} {
+		if !strings.Contains(page.String(), s) {
+			t.Errorf("HTML lacks %q", s)
+		}
+	}
+}
+
+// TestPipelineTargetsReport (S6 item 4): rows carry their pipeline; an
+// unmapped one is reported, not proposable, with its gap; the header
+// sums each pipeline and lists streams no pipeline claims.
+func TestPipelineTargetsReport(t *testing.T) {
+	in := Input{
+		Scan: Scan{ID: 1, StartedAt: time.Date(2026, 11, 15, 23, 0, 0, 0, time.UTC), Currency: "USD"},
+		Signals: []graph.Signal{
+			{ID: "prom:metric:a", Kind: graph.KindMetric, Name: "a", Source: "prom", Class: "candidate"},
+			{ID: "prom:metric:b", Kind: graph.KindMetric, Name: "b", Source: "prom", Class: "candidate"},
+		},
+		Costs: []graph.Cost{{SignalID: "prom:metric:a", MonthlyCost: 10}, {SignalID: "prom:metric:b", MonthlyCost: 4}},
+		Scores: []graph.Score{
+			{SignalID: "prom:metric:a", Confidence: 1, Priority: 10},
+			{SignalID: "prom:metric:b", Confidence: 1, Priority: 4},
+		},
+		PipelineTargets: []graph.PipelineTarget{
+			{Subject: "prom:metric:a", Pipeline: "alloy-apps"},
+			{Subject: "prom:metric:b", Note: "claimed by several pipelines: x, y"},
+			{Subject: `stream:{app="r"}`, Note: "no pipeline's handles match"},
+		},
+		StreamVolumes: []graph.StreamVolume{{Selector: `{app="r"}`, BytesPerDay: 2_000_000}},
+	}
+	r := Build(in, 0)
+	by := map[string]Recommendation{}
+	for _, rec := range r.Recommendations {
+		by[rec.Signal.ID] = rec
+	}
+	if a := by["prom:metric:a"]; a.Pipeline != "alloy-apps" || !a.Proposable {
+		t.Errorf("a: %+v", a)
+	}
+	b := by["prom:metric:b"]
+	if b.Pipeline != Unmapped || b.Proposable || b.PipelineNote != "claimed by several pipelines: x, y" ||
+		!slices.ContainsFunc(b.Evidence.Gaps, func(g string) bool { return strings.Contains(g, "prom:metric:b: unmapped") }) {
+		t.Errorf("b: %+v", b)
+	}
+	p := r.Pipelines
+	if len(p.Pipelines) != 1 || p.Pipelines[0].Savings != 10 || p.Unmapped.Recommendations != 1 || p.Unmapped.Savings != 4 ||
+		len(p.UnmappedStreams) != 1 || p.UnmappedStreams[0].BytesPerDay != 2_000_000 {
+		t.Errorf("pipelines %+v", p)
+	}
+	// An acknowledged unmapped gap moves to the acknowledged list.
+	in.Acknowledged = []Acknowledgement{{Source: "pipelines", Match: "prom:metric:b", Reason: "moving to OTel"}}
+	r = Build(in, 0)
+	for _, rec := range r.Recommendations {
+		if rec.Signal.ID == "prom:metric:b" && (len(rec.Evidence.Acknowledged) != 1 || slices.ContainsFunc(rec.Evidence.Gaps, func(g string) bool { return strings.Contains(g, "unmapped") })) {
+			t.Errorf("acknowledged: %+v / %+v", rec.Evidence.Gaps, rec.Evidence.Acknowledged)
+		}
+	}
+	b2, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page strings.Builder
+	if err := RenderHTMLFromJSON(&page, b2); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{"<h2>Pipelines</h2>", "alloy-apps", "<b>unmapped</b>", "claimed by several pipelines", `{app=&#34;r&#34;}`, "2.0 MB"} {
 		if !strings.Contains(page.String(), s) {
 			t.Errorf("HTML lacks %q", s)
 		}

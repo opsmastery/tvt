@@ -2,8 +2,7 @@
 //
 // Decoding is strict: an unknown key is an error, so a typo can't silently
 // drop an external consumer and with it a hard keep. Sections that later
-// sprints read (backends, price card, pipelines) are accepted but not yet
-// interpreted; the CLI still takes backends from flags.
+// sprints read (backends) are accepted but not yet interpreted; the CLI still takes backends from flags.
 package config
 
 import (
@@ -16,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -71,10 +71,36 @@ type Config struct {
 	WindowDays int `yaml:"window_days"`
 
 	// Read by later sprints; accepted so one tvt.yaml serves every command.
-	Grafana   yaml.Node `yaml:"grafana"`
-	Metrics   yaml.Node `yaml:"metrics"`
-	Logs      yaml.Node `yaml:"logs"`
-	Pipelines yaml.Node `yaml:"pipelines"`
+	Grafana yaml.Node `yaml:"grafana"`
+	Metrics yaml.Node `yaml:"metrics"`
+	Logs    yaml.Node `yaml:"logs"`
+	// Pipelines are where signals are shaped (ADR 0007, S6 item 4): each
+	// signal maps to the one pipeline whose handles match its labels.
+	Pipelines []Pipeline `yaml:"pipelines"`
+}
+
+// Pipeline kinds (ADR 0007).
+var PipelineKinds = []string{"prometheus", "alloy", "otelcol"}
+
+// Pipeline is one place signals are ingested and shaped (ADR 0007).
+type Pipeline struct {
+	Name   string `yaml:"name"`
+	Kind   string `yaml:"kind"`
+	Repo   string `yaml:"repo"`
+	Branch string `yaml:"branch"`
+	// Files to change, or HelmValues when the config is rendered from Helm.
+	Files      []string    `yaml:"files"`
+	HelmValues *HelmValues `yaml:"helm_values"`
+	// Handles are label selectors ({job=~"shop|node"}) for the metric
+	// series and log streams this pipeline ingests.
+	Handles   []string `yaml:"handles"`
+	Reviewers []string `yaml:"reviewers"`
+}
+
+// HelmValues points at the Helm values key a pipeline's config renders from.
+type HelmValues struct {
+	File string `yaml:"file"`
+	Path string `yaml:"path"`
 }
 
 // Clients identifies query-log clients.
@@ -320,6 +346,33 @@ func (c *Config) validate() error {
 	for i, p := range c.SLOs.Paths {
 		if p == "" {
 			return fmt.Errorf("slos.paths[%d]: empty path", i)
+		}
+	}
+	pipelines := map[string]bool{}
+	for i, p := range c.Pipelines {
+		if p.Name == "" {
+			return fmt.Errorf("pipelines[%d]: name is required", i)
+		}
+		if pipelines[p.Name] {
+			return fmt.Errorf("pipelines: %q appears twice", p.Name)
+		}
+		pipelines[p.Name] = true
+		if !slices.Contains(PipelineKinds, p.Kind) {
+			return fmt.Errorf("pipeline %q: kind %q, want one of %s", p.Name, p.Kind, strings.Join(PipelineKinds, ", "))
+		}
+		if len(p.Handles) == 0 {
+			return fmt.Errorf("pipeline %q: handles is required (the label selectors of the signals it ingests)", p.Name)
+		}
+		for _, h := range p.Handles {
+			if _, err := StreamMatchers(h); err != nil {
+				return fmt.Errorf("pipeline %q: handles %q: %w", p.Name, h, err)
+			}
+		}
+		if p.HelmValues != nil && (p.HelmValues.File == "" || p.HelmValues.Path == "") {
+			return fmt.Errorf("pipeline %q: helm_values needs file and path", p.Name)
+		}
+		if p.HelmValues != nil && len(p.Files) > 0 {
+			return fmt.Errorf("pipeline %q: files or helm_values, not both", p.Name)
 		}
 	}
 	for i, p := range c.Postmortems.Paths {
