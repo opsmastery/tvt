@@ -30,13 +30,15 @@ func TestLokiQueryLogFixture(t *testing.T) {
 		}
 		byExpr[q.Expr]++
 	}
-	if len(got) != 37 || len(byExpr) != 3 {
+	if len(got) != 54 || len(byExpr) != 3 {
 		t.Errorf("got %d queries, %d distinct: %v", len(got), len(byExpr), byExpr)
 	}
+	// Since tvt-lab's route_cold fix, panel 8 and the on-call query name
+	// the levels they read, so neither reads the debug stream.
 	for _, e := range []string{
 		`{app="shop", level=~"info|warn|error"}`,
-		`sum by (level) (rate({app="shop", component="api"}[1m]))`,
-		`{app="shop", component="api"} |= "route=/healthz" != "status=200"`,
+		`sum by (level) (rate({app="shop", component="api", level=~"info|warn|error"}[1m]))`,
+		`{app="shop", component="api", level=~"warn|error"} |= "route=/healthz" != "status=200"`,
 	} {
 		if byExpr[e] == 0 {
 			t.Errorf("missing %s", e)
