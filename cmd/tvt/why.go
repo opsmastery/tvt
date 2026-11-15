@@ -64,7 +64,7 @@ func runWhy(ctx context.Context, o whyOptions, out io.Writer) error {
 	if _, err := os.Stat(o.DB); errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("%s: no such database (run tvt scan first)", o.DB)
 	}
-	in, err := loadReport(ctx, o.DB)
+	in, _, err := loadReport(ctx, o.DB)
 	if err != nil {
 		return err
 	}

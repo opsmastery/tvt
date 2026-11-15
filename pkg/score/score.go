@@ -175,9 +175,16 @@ func Score(in Input, c Context) (Result, bool) {
 		UsageWeight: w,
 		Strongest:   strongest,
 		Confidence:  conf,
-		Priority:    in.MonthlyCost / (1 + w) * conf,
+		Priority:    Priority(in.MonthlyCost, w, conf),
 		Held:        held,
 	}, true
+}
+
+// Priority is a scored signal's rank: monthly cost discounted by its usage
+// weight and scaled by confidence. Repricing a stored score at another
+// card recomputes it from the new cost with the same weight and confidence.
+func Priority(monthlyCost, usageWeight, confidence float64) float64 {
+	return monthlyCost / (1 + usageWeight) * confidence
 }
 
 // Rank scores all inputs and returns candidates in descending priority,

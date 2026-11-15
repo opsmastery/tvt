@@ -6,7 +6,10 @@
 tvt scan ... --db tvt.db
 tvt report --db tvt.db --config tvt.yaml --json report.json --html report.html --top 50
 # --json - writes only the JSON, to stdout; --html "" skips the page; --top 0 keeps every recommendation
+tvt report --db tvt.db --price-card pricecard-selfhosted.yaml   # what-if: the same scan on another card
 ```
+
+`--price-card <file|preset>` makes a what-if report: the stored scan's cost rows are repriced at that card (`cost.Reprice`, with the scan's stored TSDB measurements for a self-hosted card, so it equals what a scan with that card would have recorded), and each score's cost and priority are recomputed with the same usage weight and confidence (`score.Priority`). Evidence, classes, confidence and gaps don't depend on price, so only savings, disk, ranking and totals move. `scan.price_card` and `currency` become the what-if card's, `scan.repriced_from` names the card the scan used, and the HTML page says it's a what-if. A relative card path is relative to the working directory; a name that isn't a file is a preset.
 
 The HTML page is one self-contained file (an embedded `html/template`, inline CSS, no scripts or external assets), so it can be attached or archived as is. `report.RenderHTMLFromJSON` decodes the JSON first and refuses a version it doesn't know, so the page can only show what the JSON holds. Each row shows the claim, the cheapest check, its gaps, savings, check minutes and owner, with evidence, readers and assumptions folded under it; each row's anchor is its `id`.
 
@@ -110,4 +113,4 @@ An acknowledged gap stays in the header with its reason and moves to the row's `
 
 `scan` (ID, start, window, log coverage, price card), `sources` (every evidence source's coverage), `gaps` (every gap, acknowledged or not, above), `unmatched_acknowledgements`, `totals` (candidates, recommendations, dormant signals, metric savings, and stream savings apart, since stream selectors overlap), `held`.
 
-Readers check `version` (now 3: 2 made gaps structured, 3 added `services`) and refuse one they don't know.
+Readers check `version` (now 4: 2 made gaps structured, 3 added `services`, 4 added `scan.repriced_from`) and refuse one they don't know.

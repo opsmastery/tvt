@@ -12,8 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
+	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
+	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
@@ -24,6 +27,9 @@ type reportOptions struct {
 	JSON   string
 	HTML   string
 	Top    int
+	// PriceCard reprices the scan for a what-if report: a card file or a
+	// preset name. Empty keeps the scan's prices.
+	PriceCard string
 }
 
 func cmdReport(args []string, stdout, stderr io.Writer) int {
@@ -34,6 +40,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.Config, "config", "", "tvt.yaml: gaps.acknowledge entries (optional)")
 	fs.StringVar(&o.JSON, "json", "report.json", "where to write the JSON report (- for stdout)")
 	fs.StringVar(&o.HTML, "html", "report.html", "where to write the HTML report, rendered from the JSON (empty: skip)")
+	fs.StringVar(&o.PriceCard, "price-card", "", "what-if: reprice the scan at this price card (a file or a preset: "+strings.Join(cost.Presets(), ", ")+") without rescanning")
 	fs.IntVar(&o.Top, "top", 50, "recommendations to keep, highest savings per minute of checking first (0: all)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -64,12 +71,21 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 	if _, err := os.Stat(o.DB); errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("%s: no such database (run tvt scan first)", o.DB)
 	}
-	in, err := loadReport(ctx, o.DB)
+	in, tsdb, err := loadReport(ctx, o.DB)
 	if err != nil {
 		return err
 	}
 	if in.Acknowledged, err = acknowledgements(o.Config); err != nil {
 		return err
+	}
+	if o.PriceCard != "" {
+		card, err := cost.Load(o.PriceCard)
+		if err != nil {
+			return err
+		}
+		if in, err = report.Reprice(in, card, tsdb); err != nil {
+			return fmt.Errorf("--price-card %s: %w", o.PriceCard, err)
+		}
 	}
 	r := report.Build(in, o.Top)
 	b, err := json.MarshalIndent(r, "", "  ")
@@ -94,6 +110,9 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 		}
 	}
 	fmt.Fprintf(out, "report of scan %d: %d recommendations (of %d candidates)", r.Scan.ID, r.Totals.Recommendations, r.Totals.Candidates)
+	if r.Scan.RepricedFrom != "" {
+		fmt.Fprintf(out, ", what-if on %s (scanned on %s)", r.Scan.PriceCard, r.Scan.RepricedFrom)
+	}
 	if r.Scan.Currency != "" {
 		fmt.Fprintf(out, ", %.2f %s/month in metrics", r.Totals.MetricSavings, r.Scan.Currency)
 		if r.Totals.StreamSavings > 0 {
@@ -143,47 +162,54 @@ func acknowledgements(path string) ([]report.Acknowledgement, error) {
 	return out, nil
 }
 
-func loadReport(ctx context.Context, path string) (report.Input, error) {
+// loadReport reads the latest scan in path, plus the TSDB measurements it
+// stored (nil when it scanned no Prometheus) for what-if repricing.
+func loadReport(ctx context.Context, path string) (report.Input, *collect.Storage, error) {
+	in, info, err := readLatest(ctx, path)
+	return in, info.TSDB, err
+}
+
+func readLatest(ctx context.Context, path string) (report.Input, store.ScanInfo, error) {
 	st, err := store.Open(ctx, path)
 	if err != nil {
-		return report.Input{}, err
+		return report.Input{}, store.ScanInfo{}, err
 	}
 	defer st.Close()
 	info, err := st.LatestScan(ctx)
 	if err != nil {
-		return report.Input{}, err
+		return report.Input{}, info, err
 	}
 	in := report.Input{Scan: report.Scan{
 		ID: info.ID, StartedAt: info.StartedAt, WindowDays: info.WindowDays, LogCoverage: info.LogCoverage,
 		PriceCard: info.PriceCard, Currency: info.Currency, Approximate: info.PricePreset,
 	}}
 	if in.Signals, err = st.Signals(ctx, info.ID); err != nil {
-		return in, err
+		return in, info, err
 	}
 	if in.Consumers, err = st.Consumers(ctx, info.ID); err != nil {
-		return in, err
+		return in, info, err
 	}
 	if in.References, err = st.References(ctx, info.ID); err != nil {
-		return in, err
+		return in, info, err
 	}
 	if in.Costs, err = st.Costs(ctx, info.ID); err != nil {
-		return in, err
+		return in, info, err
 	}
 	if in.Sources, err = st.Sources(ctx, info.ID); err != nil {
-		return in, err
+		return in, info, err
 	}
 	if in.Scores, err = st.Scores(ctx, info.ID); err != nil {
-		return in, err
+		return in, info, err
 	}
 	reads, err := st.LastReads(ctx)
 	if err != nil {
-		return in, err
+		return in, info, err
 	}
 	for _, r := range reads {
 		in.LastReads = append(in.LastReads, report.LastReadOf{SignalID: r.SignalID,
 			LastRead: report.LastRead{Consumer: r.ConsumerID, Actor: r.Actor, At: r.At}})
 	}
-	return in, nil
+	return in, info, nil
 }
 
 // writeFileAtomic writes b to path through a temporary file in the same
