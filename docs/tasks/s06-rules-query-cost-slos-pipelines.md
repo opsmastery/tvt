@@ -21,3 +21,4 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md`, `docs/query-lo
 ## Should have
 
 7. **Label-drop safety.** Only recommend dropping a label when the remaining labels still identify every series uniquely: compare series counts with and without it (Prometheus series API, or Mimir's cardinality API) and refuse the drop if series would merge. Sprint 2 item 13's "always aggregated out" list is the candidate source. Label drops stay behind a flag until a precision review on real data passes.
+8. **kube-prometheus-stack as a golden case.** Read the rules, ServiceMonitors and dashboards rendered from the pinned chart (see `lab-backlog.md`) and match a hand-checked list of declared readers. The chart's default kubelet `cAdvisorMetricRelabelings` already drop some series and keep `container_memory_swap` because a recording rule and dashboards use it: tvt must agree on both.
