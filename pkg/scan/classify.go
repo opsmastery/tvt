@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
@@ -26,7 +27,7 @@ import (
 //
 // A label signal takes its metric's owner, tier and name rules; a stream
 // signal's name rules run over its selector.
-func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.Reference, owners []config.Owner, mentions map[string]string, since, until time.Time) error {
+func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.Reference, owners []config.Owner, mentions map[string]string, missed map[string]string, since, until time.Time) error {
 	om, err := newOwnerMatcher(owners)
 	if err != nil {
 		return err
@@ -69,6 +70,7 @@ func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.R
 		f.Tier = -1
 		if o := om.match(*s); o != nil {
 			s.Owner = o.Name
+			f.Seasonal = missed[o.Name]
 			if o.Tier != nil {
 				t := *o.Tier
 				s.Tier, f.Tier = &t, t
@@ -218,4 +220,42 @@ func mentioned(in Inputs) map[string]string {
 		}
 	}
 	return out
+}
+
+// seasons returns a source per season, and for each service the first
+// (sorted) season the window [since, until] misses. A season is seen when
+// the window touches any of its months; one it misses couldn't show its
+// readers, so it is a gap (coverage 0) and its services' unread signals
+// are dormant.
+func seasons(ss []config.Season, since, until time.Time) ([]graph.SourceCoverage, map[string]string) {
+	touched := map[time.Month]bool{}
+	for t := time.Date(since.Year(), since.Month(), 1, 0, 0, 0, 0, time.UTC); !t.After(until); t = t.AddDate(0, 1, 0) {
+		touched[t.Month()] = true
+	}
+	sorted := slices.Clone(ss)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+	var out []graph.SourceCoverage
+	missed := map[string]string{}
+	for _, se := range sorted {
+		src := graph.SourceCoverage{Source: SourceSeasonPrefix + se.Name, Configured: true, Coverage: 1, WindowStart: since}
+		seen := false
+		for _, m := range se.Months {
+			seen = seen || touched[time.Month(m)]
+		}
+		if !seen {
+			names := make([]string, len(se.Months))
+			for i, m := range se.Months {
+				names[i] = time.Month(m).String()[:3]
+			}
+			src.Coverage = 0
+			src.Gap = fmt.Sprintf("runs in %s, outside the window: readers of %s can't show", strings.Join(names, ", "), strings.Join(se.Services, ", "))
+			for _, svc := range se.Services {
+				if _, ok := missed[svc]; !ok {
+					missed[svc] = se.Name
+				}
+			}
+		}
+		out = append(out, src)
+	}
+	return out, missed
 }

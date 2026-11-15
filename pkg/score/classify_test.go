@@ -18,6 +18,8 @@ func TestClassify(t *testing.T) {
 		{Facts{Name: "plain_total", Tier: -1, Mentioned: "runbook https://r/x"}, ClassDormant, "mentioned in runbook https://r/x"},
 		{Facts{Name: "http_errors_total", Tier: -1, Mentioned: "postmortem p.md"}, ClassDormant, "error signal"}, // the name rule says it first
 		{Facts{Read: true, Name: "plain_total", Tier: -1, Mentioned: "postmortem p.md"}, ClassCandidate, ""},     // read: a mention changes nothing
+		{Facts{Name: "plain_total", Tier: -1, Seasonal: "holiday peak"}, ClassDormant, "seasonal reader: holiday peak falls outside the window"},
+		{Facts{Read: true, Name: "plain_total", Tier: -1, Seasonal: "holiday peak"}, ClassCandidate, ""},
 	} {
 		c, why := Classify(tc.f)
 		if c != tc.class || why != tc.why {
