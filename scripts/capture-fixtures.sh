@@ -80,9 +80,14 @@ import json, sys, time, urllib.parse, urllib.request
 loki, vol = sys.argv[1], sys.argv[2]
 end = int(time.time())
 out = {}
-for r in json.load(open(vol))["data"]["result"]:
-    sel = "{" + ", ".join('%s="%s"' % (k, v) for k, v in sorted(r["metric"].items())) + "}"
-    q = urllib.parse.urlencode({"query": sel, "start": end - 3 * 3600, "end": end})
+streams = [r["metric"] for r in json.load(open(vol))["data"]["result"]]
+names = sorted({k for m in streams for k in m})
+for m in streams:
+    sel = "{" + ", ".join('%s="%s"' % (k, v) for k, v in sorted(m.items())) + "}"
+    # Exactly this stream: other streams' label names pinned to "" (as tvt
+    # asks, loki.ExactStreamSelector); keyed by the plain selector.
+    exact = "{" + ", ".join('%s="%s"' % (k, m.get(k, "")) for k in names) + "}"
+    q = urllib.parse.urlencode({"query": exact, "start": end - 3 * 3600, "end": end})
     out[sel] = json.load(urllib.request.urlopen(loki + "/loki/api/v1/patterns?" + q, timeout=30))
 json.dump(out, sys.stdout, indent=1, sort_keys=True)
 PY

@@ -570,6 +570,25 @@ func scoreRecommendations(t *testing.T, g scanGraph, gt groundTruth, r report.Re
 		judge(id, want[id], o)
 	}
 
+	// Covering a keep (version 3): a reroute whose selector selects a
+	// stream ground truth keeps moves that stream's lines too, whatever
+	// the selector's own class. Each such stream is a false positive.
+	for _, rec := range r.Recommendations {
+		if rec.Signal.Kind != string(graph.KindStream) {
+			continue
+		}
+		for _, key := range sortedKeys(gt.Streams) {
+			id := "loki:stream:" + canonicalStream(t, key)
+			if id == rec.Signal.ID || want[id] != outKeep {
+				continue
+			}
+			if selectorMatches(t, rec.Signal.Name, streamLabels(t, key)) {
+				s.FalsePositives++
+				s.Wrong = append(s.Wrong, fmt.Sprintf("%s: %s covers %s, want keep", rec.Signal.ID, outRecommend, id))
+			}
+		}
+	}
+
 	// Line findings (version 2): each ground-truth line pattern is raised
 	// as its kind, or not at all; a finding ground truth doesn't list is
 	// wrong.
@@ -684,9 +703,17 @@ func TestScanLineFindings(t *testing.T) {
 	if !found || !handoff {
 		t.Fatalf("burst found %v, healthz hand-off %v: %+v", found, handoff, r.LineFindings)
 	}
-	for _, rec := range r.Recommendations {
-		if rec.Signal.ID == "loki:stream:"+warn || rec.Signal.ID == "loki:stream:"+info {
-			t.Errorf("a stream with a line finding is recommended: %s (%s)", rec.ID, rec.Action)
+	// No reroute may cover either stream, through its own selector or a
+	// wider one: the on-call query's {app="shop", component="api",
+	// level=~"warn|error"} selects the warn stream, which Shop Overview
+	// panel 6 shows (fixed in the S5 debug pass: overlapping selectors
+	// share readers).
+	for _, stream := range []string{warn, info} {
+		labels := streamLabels(t, stream)
+		for _, rec := range r.Recommendations {
+			if rec.Signal.Kind == string(graph.KindStream) && selectorMatches(t, rec.Signal.Name, labels) {
+				t.Errorf("recommendation %s (%s) covers %s, which has a line finding", rec.ID, rec.Action, stream)
+			}
 		}
 	}
 }

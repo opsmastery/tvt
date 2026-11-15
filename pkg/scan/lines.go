@@ -267,7 +267,14 @@ func filterSelects(expr, pattern string) bool {
 		prev, expr = expr, selectorBraces.ReplaceAllString(expr, " ")
 	}
 	var positive bool
-	for _, m := range lineFilterRe.FindAllStringSubmatch(expr, -1) {
+	for _, loc := range lineFilterRe.FindAllStringSubmatchIndex(expr, -1) {
+		// A label filter after a parser (| json | status != "200") has
+		// the same operators but follows a label name; a line filter
+		// follows the selector, another filter, or a bracket.
+		if before := strings.TrimRight(expr[:loc[0]], " \t\n"); before != "" && isLabelChar(before[len(before)-1]) {
+			continue
+		}
+		m := []string{expr[loc[0]:loc[1]], expr[loc[2]:loc[3]], expr[loc[4]:loc[5]]}
 		text := m[2]
 		if strings.HasPrefix(text, "`") {
 			text = strings.Trim(text, "`")
@@ -288,4 +295,8 @@ func filterSelects(expr, pattern string) bool {
 		}
 	}
 	return positive
+}
+
+func isLabelChar(c byte) bool {
+	return c == '_' || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
 }
