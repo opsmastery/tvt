@@ -27,7 +27,7 @@ The MVP covers the Grafana stack, self-hosted (OSS) and Grafana Cloud.
 | `tvt report` | Ranks recommendations by savings per minute of checking; HTML and JSON | Planned |
 | `tvt why <signal>` | Every reader of a signal, with its source, first and last seen, and whether it's exact or inferred | Planned |
 | `tvt init` | Asks for each backend, tests the URL, token scope and log settings, and writes `tvt.yaml` | Planned |
-| `tvt propose` | Writes Prometheus `metric_relabel_configs`, Alloy `prometheus.relabel`/`loki.process`, OTel Collector `filter`/`transform` or Fluent Bit filters into the pipeline's repo, one PR per repo | Planned |
+| `tvt propose` | Writes Prometheus `metric_relabel_configs`, Prometheus Operator `ServiceMonitor`/`PodMonitor` `metricRelabelings`, Alloy `prometheus.relabel`/`loki.process`, OTel Collector `filter`/`transform` or Fluent Bit filters into the pipeline's repo, one PR per repo | Planned |
 | `tvt check` | CI gate: fails a config PR that would break an alert, SLO, viewed dashboard or record, or that lacks an acknowledged evidence gap | Planned |
 
 MVP scope in more detail:
