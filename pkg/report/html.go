@@ -29,9 +29,10 @@ var page = template.Must(template.New("report.html.tmpl").Funcs(template.FuncMap
 		}
 		return t.UTC().Format("2006-01-02 15:04")
 	},
-	"inc":  func(i int) int { return i + 1 },
-	"join": strings.Join,
-	"why":  WhyCommand,
+	"inc":       func(i int) int { return i + 1 },
+	"join":      strings.Join,
+	"why":       WhyCommand,
+	"zeroreads": func() string { return ZeroreadsURL },
 }).ParseFS(templates, "templates/report.html.tmpl"))
 
 // RenderHTML writes the HTML report. It reads only the JSON report, like
