@@ -90,10 +90,20 @@ A gap is a way the evidence falls short: a reader it would have shown can't be r
 | `unreadable` | A definition tvt couldn't read: a runbook it couldn't fetch, an SLO whose SLI it can't parse, panels on a datasource it doesn't parse (a consumer with `unparsed` set reads something tvt can't see, so its dashboard is never "unused") |
 | `assumed` | References tvt inferred rather than read (one header gap per consumer, with how many signals and why) |
 | `season` | A `tvt.yaml` season the window misses: its readers couldn't show |
+| `storage` | A storage hygiene warning about the Prometheus TSDB (source `prometheus storage`): no `retention.size`, or one above 85% of the volume `tvt.yaml` `storage.volume_size` declares. It hides no reader and is never a saving, so it stays in the header and never reaches a row |
 
 Grafana Cloud's blind spots (direct Loki API queries Usage Insights doesn't see) join with the Cloud adapters (Sprint 2 item 11).
 
 Every row lists the gaps that could hide one of its readers: its backend's query log, the Grafana router log, the definition sources, and its own assumed readers.
+
+### Storage hygiene (S5 item 6)
+
+A Prometheus scan reads the server's limits from its own `/metrics` (`prometheus_tsdb_retention_limit_bytes`, `_seconds`: a GET, never a query) and prints a `storage` line. Two warnings:
+
+- **No `retention.size`.** Only the time limit bounds the TSDB, so a cardinality spike (the kind tvt exists to find) can fill the disk before old blocks age out.
+- **`retention.size` above 85% of the volume**, when `tvt.yaml` `storage.volume_size` gives the volume (the PVC's requested storage, or what `df` shows: `50Gi`, `500GB`, bytes). Compaction writes new blocks before it deletes old ones, so the disk needs room past the limit; Prometheus' storage docs suggest 80-85%.
+
+tvt can't size the volume itself: `node_filesystem_size_bytes` would take a PromQL query, which tvt never runs against a backend that logs queries, and it doesn't read Kubernetes. Without `storage.volume_size` only the first warning applies. Mimir keeps its blocks in object storage, so a `--mimir` scan has no `prometheus storage` source.
 
 **Acknowledging a gap.** A gap you've accepted goes in `tvt.yaml`, with a reason:
 

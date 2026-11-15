@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -56,6 +58,9 @@ type Config struct {
 	// the series, naming no metric and restricting no label, is a sweep
 	// (weak evidence). 0 means the default, 0.5.
 	SweepShare float64 `yaml:"sweep_share"`
+	// Storage describes the metrics backend's disk, for storage hygiene
+	// warnings (S5 item 6).
+	Storage Storage `yaml:"storage"`
 	// WindowDays is the shortest observation window anything is
 	// recommended from: a scan with a shorter --window scores every
 	// candidate with confidence 0. 0 means the default, 30.
@@ -132,6 +137,49 @@ type GapAck struct {
 	Source string `yaml:"source"`
 	Match  string `yaml:"match"`
 	Reason string `yaml:"reason"`
+}
+
+// Storage describes the disk under the Prometheus TSDB.
+type Storage struct {
+	// VolumeSize is the size of the volume holding the TSDB (a PVC's
+	// requested storage, or what df reports): bytes, or a number with a
+	// unit. Ki, Mi, Gi, Ti, Pi and KiB…PiB are powers of 1024; K, M, G,
+	// T, P and KB…PB powers of 1000. Empty: unknown.
+	VolumeSize string `yaml:"volume_size"`
+}
+
+// VolumeBytes is VolumeSize in bytes; 0 when it isn't set.
+func (s Storage) VolumeBytes() (int64, error) {
+	if strings.TrimSpace(s.VolumeSize) == "" {
+		return 0, nil
+	}
+	return ParseSize(s.VolumeSize)
+}
+
+var sizeRe = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)\s*([KMGTP]?)(i?)(B?)$`)
+
+// ParseSize reads a byte size: "53687091200", "50Gi", "50GiB", "500G",
+// "1.5TB". A bare B is bytes; a unit with i is binary, without it decimal.
+func ParseSize(v string) (int64, error) {
+	m := sizeRe.FindStringSubmatch(strings.TrimSpace(v))
+	if m == nil || (m[2] == "" && m[3] != "") {
+		return 0, fmt.Errorf("size %q: want bytes or a number with a unit such as 50Gi or 500GB", v)
+	}
+	n, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0, fmt.Errorf("size %q: %w", v, err)
+	}
+	base := 1000.0
+	if m[3] == "i" {
+		base = 1024
+	}
+	if m[2] != "" {
+		n *= math.Pow(base, float64(strings.Index("KMGTP", m[2])+1))
+	}
+	if n < 1 || n > math.MaxInt64/2 {
+		return 0, fmt.Errorf("size %q: out of range", v)
+	}
+	return int64(n), nil
 }
 
 // Postmortems lists where incident write-ups live.
@@ -298,6 +346,9 @@ func (c *Config) validate() error {
 		if m.URLPrefix == "" || m.Path == "" {
 			return fmt.Errorf("runbooks.mirrors[%d]: url_prefix and path are required", i)
 		}
+	}
+	if _, err := c.Storage.VolumeBytes(); err != nil {
+		return fmt.Errorf("storage.volume_size: %w", err)
 	}
 	if c.WindowDays < 0 {
 		return fmt.Errorf("window_days %d: want a number of days", c.WindowDays)

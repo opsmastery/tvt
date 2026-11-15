@@ -357,10 +357,38 @@ func TestSourceGapKinds(t *testing.T) {
 		{graph.SourceCoverage{Source: scan.SourcePromQueryLog, Configured: true, Coverage: 1}, nil},
 		{graph.SourceCoverage{Source: "season holiday peak", Configured: true, Gap: "runs in Nov, outside the window"},
 			[]Gap{{Source: "season holiday peak", Kind: GapSeason, Text: "season holiday peak: runs in Nov, outside the window"}}},
+		{graph.SourceCoverage{Source: scan.SourceStorage, Configured: true, Coverage: 1, Gap: "no retention.size"},
+			[]Gap{{Source: scan.SourceStorage, Kind: GapStorage, Text: "prometheus storage: no retention.size"}}},
 	} {
 		if got := sourceGaps(tc.s); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%+v: %+v, want %+v", tc.s, got, tc.want)
 		}
+	}
+}
+
+// A storage warning (S5 item 6) is a header gap, never on a row and never
+// a saving.
+func TestStorageWarningIsHeaderOnly(t *testing.T) {
+	in := fixture()
+	before := Build(in, 0)
+	in.Sources = append(in.Sources, graph.SourceCoverage{Source: scan.SourceStorage, Configured: true, Coverage: 1, Gap: "no retention.size: only the 45d time limit bounds the TSDB"})
+	r := Build(in, 0)
+	var header bool
+	for _, g := range r.Gaps {
+		header = header || g.Kind == GapStorage
+	}
+	if !header {
+		t.Errorf("header gaps %+v: no storage warning", r.Gaps)
+	}
+	for _, rec := range r.Recommendations {
+		for _, g := range rec.Evidence.Gaps {
+			if strings.Contains(g, "retention.size") {
+				t.Errorf("%s lists the storage warning", rec.ID)
+			}
+		}
+	}
+	if r.Totals != before.Totals || len(r.Recommendations) != len(before.Recommendations) {
+		t.Errorf("totals %+v, want %+v unchanged", r.Totals, before.Totals)
 	}
 }
 

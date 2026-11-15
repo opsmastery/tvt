@@ -17,6 +17,7 @@ const (
 	GapUnreadable   = "unreadable"   // a definition tvt couldn't read: a runbook, an SLO, a datasource it doesn't parse
 	GapAssumed      = "assumed"      // a reference tvt inferred rather than read
 	GapSeason       = "season"       // a season (tvt.yaml seasons) the window missed: its readers couldn't show
+	GapStorage      = "storage"      // a storage hygiene warning (S5 item 6): no retention.size, or one too close to the volume; never a saving
 )
 
 // SourceAssumed names the gaps of assumed references.
@@ -57,6 +58,8 @@ func sourceGaps(s graph.SourceCoverage) []Gap {
 			kind = GapUnproven
 		case strings.HasPrefix(s.Source, scan.SourceSeasonPrefix):
 			kind = GapSeason
+		case s.Source == scan.SourceStorage:
+			kind = GapStorage
 		}
 		var out []Gap
 		for _, line := range strings.Split(s.Gap, "\n") {
