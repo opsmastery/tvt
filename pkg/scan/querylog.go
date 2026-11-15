@@ -291,6 +291,8 @@ type loggedGroup struct {
 	last          time.Time
 	actor, sender string // of the latest query (sender: IP or user agent)
 	count         int
+	// Measured cost (S6 item 2): this group's share of its queries.
+	queries, samples, bytes float64
 }
 
 // loggedConsumers turns query-log entries into consumers and queries to
@@ -310,7 +312,7 @@ type loggedGroup struct {
 // Each consumer's references carry the last time the query was seen and
 // who sent it then; the store keeps last_seen across scans, so an old read
 // is never lost.
-func loggedConsumers(logged []collect.LoggedQuery, dashboards []collect.Dashboard, collected []graph.Consumer, clients config.Clients, defaultOrg int64, ids *idSet) ([]graph.Consumer, []query) {
+func loggedConsumers(logged []collect.LoggedQuery, dashboards []collect.Dashboard, collected []graph.Consumer, clients config.Clients, defaultOrg int64, ids *idSet) ([]graph.Consumer, []query, []graph.QueryCost) {
 	tmpls := templates(collected)
 	cm := newClientMatcher(clients)
 	type entry struct {
@@ -348,7 +350,7 @@ func loggedConsumers(logged []collect.LoggedQuery, dashboards []collect.Dashboar
 	}
 
 	groups := map[string]*loggedGroup{}
-	add := func(e entry, g loggedGroup) {
+	add := func(e entry, g loggedGroup, share float64) {
 		g.source, g.lang, g.norm = e.q.Source, e.lang, e.norm
 		matchID := ""
 		if g.match != nil {
@@ -361,6 +363,9 @@ func loggedConsumers(logged []collect.LoggedQuery, dashboards []collect.Dashboar
 			groups[key] = cur
 		}
 		cur.count++
+		cur.queries += share
+		cur.samples += share * float64(e.q.Samples)
+		cur.bytes += share * float64(e.q.Bytes)
 		if !e.q.At.Before(cur.last) {
 			cur.last, cur.latest, cur.actor, cur.sender = e.q.At, e.q.Expr, e.q.Actor, e.q.Client
 		}
@@ -373,21 +378,21 @@ func loggedConsumers(logged []collect.LoggedQuery, dashboards []collect.Dashboar
 			if org == 0 {
 				org = defaultOrg
 			}
-			add(e, loggedGroup{client: ClientDashboard, org: org, dashboard: q.DashboardUID, panel: q.PanelID})
+			add(e, loggedGroup{client: ClientDashboard, org: org, dashboard: q.DashboardUID, panel: q.PanelID}, 1)
 		case e.agent != "":
-			add(e, loggedGroup{client: ClientAgent, agent: e.agent})
+			add(e, loggedGroup{client: ClientAgent, agent: e.agent}, 1)
 		case len(e.matches) > 0:
 			for _, m := range e.matches {
 				client := ClientDashboard
 				if m.Kind == graph.ConsumerAlertRule || m.Kind == graph.ConsumerRecordingRule {
 					client = ClientRule
 				}
-				add(e, loggedGroup{client: client, match: m})
+				add(e, loggedGroup{client: client, match: m}, 1/float64(len(e.matches)))
 			}
 		case cm.isGrafana(q):
-			add(e, loggedGroup{client: ClientExplore})
+			add(e, loggedGroup{client: ClientExplore}, 1)
 		default:
-			add(e, loggedGroup{client: ClientAPI})
+			add(e, loggedGroup{client: ClientAPI}, 1)
 		}
 	}
 	keys := make([]string, 0, len(groups))
@@ -410,6 +415,7 @@ func loggedConsumers(logged []collect.LoggedQuery, dashboards []collect.Dashboar
 
 	var consumers []graph.Consumer
 	var queries []query
+	var costs []graph.QueryCost
 	for _, k := range keys {
 		g := groups[k]
 		sum := sha256.Sum256([]byte(g.norm))
@@ -460,6 +466,7 @@ func loggedConsumers(logged []collect.LoggedQuery, dashboards []collect.Dashboar
 		c.ID = ids.unique(c.ID)
 		consumers = append(consumers, c)
 		queries = append(queries, query{consumer: c, expr: g.latest, lang: g.lang, seen: g.last, actor: actor})
+		costs = append(costs, graph.QueryCost{ConsumerID: c.ID, Queries: g.queries, Samples: g.samples, Bytes: g.bytes})
 	}
-	return consumers, queries
+	return consumers, queries, costs
 }

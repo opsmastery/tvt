@@ -229,6 +229,19 @@ CREATE TABLE IF NOT EXISTS rule_findings (
     PRIMARY KEY (scan_id, consumer_id, kind)
 );
 
+-- Schema version 18: the measured cost of each query-log consumer's
+-- queries in a scan's window (graph.QueryCost, S6 item 2): queries logged
+-- and the samples (PromQL) and bytes (LogQL) they read; a query matching
+-- several panels or rules is split evenly among them.
+CREATE TABLE IF NOT EXISTS query_costs (
+    scan_id     INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    consumer_id TEXT NOT NULL REFERENCES consumers (id) DEFERRABLE INITIALLY DEFERRED,
+    queries     REAL NOT NULL CHECK (queries >= 0),
+    samples     REAL NOT NULL CHECK (samples >= 0),
+    bytes       REAL NOT NULL CHECK (bytes >= 0),
+    PRIMARY KEY (scan_id, consumer_id)
+);
+
 -- Dashboard loads in a scan's window, per login and kind. browser = 1 is a
 -- view from the dashboard page; 0 is an API client other than tvt.
 CREATE TABLE IF NOT EXISTS dashboard_loads (
