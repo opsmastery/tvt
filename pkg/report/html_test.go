@@ -36,8 +36,8 @@ func TestRenderHTML(t *testing.T) {
 
 func TestRenderHTMLFromJSON(t *testing.T) {
 	var b bytes.Buffer
-	if err := RenderHTMLFromJSON(&b, []byte(`{"version":2}`)); err == nil || !strings.Contains(err.Error(), "version 2") {
-		t.Errorf("version 2: %v", err)
+	if err := RenderHTMLFromJSON(&b, []byte(`{"version":1}`)); err == nil || !strings.Contains(err.Error(), "version 1") {
+		t.Errorf("version 1: %v", err)
 	}
 	if err := RenderHTMLFromJSON(&b, []byte(`{`)); err == nil {
 		t.Error("bad JSON rendered")
