@@ -159,6 +159,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			return err
 		}
 		in.External, in.Owners, in.Clients, in.SweepShare = cfg.ExternalConsumers, cfg.Ownership.Owners, cfg.Clients, cfg.SweepShare
+		in.Pipelines = cfg.Pipelines
 		in.MinWindowDays = cfg.WindowDays
 		in.Seasons = cfg.Seasons
 		// Validated when the config was read.
@@ -263,6 +264,20 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	}
 	if in.Rules, err = pc.Rules(ctx); err != nil {
 		return err
+	}
+	// Pipeline targets (S6 item 4): which values of the labels pipelines'
+	// handles match on each metric carries. A failure leaves metrics
+	// unmapped with the reason, never the scan failed.
+	if labels := scan.HandledLabels(in.Pipelines); len(labels) > 0 {
+		lm, err := pc.LabelMetrics(ctx, labels)
+		switch {
+		case err != nil && lm == nil:
+			in.LabelMetricsErr = err.Error()
+		case err != nil:
+			in.LabelMetrics, in.LabelMetricsErr = lm, err.Error()
+		default:
+			in.LabelMetrics = lm
+		}
 	}
 	// Scrape intervals turn series into samples per month. They're a cost
 	// input, not protection: without them a metric's interval is assumed
@@ -464,6 +479,9 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	}
 	if len(g.QueryCosts) > 0 {
 		fmt.Fprintf(out, "%-12s %s\n", "query load", queryLoadSummary(g.Consumers, g.QueryCosts))
+	}
+	if len(in.Pipelines) > 0 {
+		fmt.Fprintf(out, "%-12s %s\n", "pipelines", pipelineSummary(in.Pipelines, g.PipelineTargets))
 	}
 	if in.SLOsConfigured {
 		fmt.Fprintf(out, "%-12s %s\n", "slo coverage", sloSummary(g.SLOFindings, len(in.Owners) > 0))
@@ -746,6 +764,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 	}
 	for _, f := range g.SLOFindings {
 		if err := sc.PutSLOFinding(ctx, f); err != nil {
+			return err
+		}
+	}
+	for _, t := range g.PipelineTargets {
+		if err := sc.PutPipelineTarget(ctx, t); err != nil {
 			return err
 		}
 	}
@@ -1053,6 +1076,33 @@ func humanBytes(n int64) string {
 		f /= 1000
 	}
 	return ""
+}
+
+// pipelineSummary is the scan's pipelines line (S6 item 4): signals per
+// pipeline, unmapped signals and streams, rule outputs.
+func pipelineSummary(ps []config.Pipeline, targets []graph.PipelineTarget) string {
+	per := map[string]int{}
+	var unmapped, streams, rule int
+	for _, t := range targets {
+		switch {
+		case strings.HasPrefix(t.Subject, "stream:"):
+			if t.Pipeline == "" {
+				streams++
+			}
+		case t.Note == scan.PipelineRuleOutput:
+			rule++
+		case t.Pipeline == "":
+			unmapped++
+		default:
+			per[t.Pipeline]++
+		}
+	}
+	var parts []string
+	for _, p := range ps {
+		parts = append(parts, fmt.Sprintf("%s %d", p.Name, per[p.Name]))
+	}
+	return fmt.Sprintf("%s signals; %d unmapped, %d recording-rule outputs; %d streams no pipeline claims",
+		strings.Join(parts, ", "), unmapped, rule, streams)
 }
 
 // sloSummary is the scan's SLO coverage line (S6 item 3).

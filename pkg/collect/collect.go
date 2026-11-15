@@ -192,6 +192,16 @@ type Rule struct {
 // EvaluatedByGrafana marks a rule Grafana evaluates itself.
 const EvaluatedByGrafana = "grafana"
 
+// LabelMetrics maps a label to its values and, for each value, the metric
+// names carrying it (S6 item 4): label -> value -> metric names.
+type LabelMetrics map[string]map[string][]string
+
+// LabelMetricsSource reads which metrics carry which values of the given
+// labels, for matching metrics against pipelines' handles.
+type LabelMetricsSource interface {
+	LabelMetrics(ctx context.Context, labels []string) (LabelMetrics, error)
+}
+
 // SLO is one service level objective. Whatever its SLI reads is a hard
 // keep: the SLO and its burn-rate alerts are evaluated from it.
 type SLO struct {
