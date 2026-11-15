@@ -101,8 +101,12 @@ type Inputs struct {
 	DefaultInterval       time.Duration
 	DefaultIntervalReason string
 	// Storage is what a Prometheus server reports about its TSDB, for a
-	// self_hosted price card; nil when the backend doesn't (Mimir).
+	// self_hosted price card and the storage hygiene warnings; nil when
+	// the backend doesn't (Mimir) or it couldn't be read.
 	Storage *collect.Storage
+	// VolumeBytes is the size of the volume under that TSDB (tvt.yaml
+	// storage.volume_size); 0 when unknown.
+	VolumeBytes int64
 	// StreamVolumes is every Loki stream's ingest (the volume API); nil
 	// when it wasn't collected, which leaves stream signals without costs.
 	StreamVolumes []collect.StreamVolume
@@ -425,6 +429,10 @@ func Build(in Inputs) (Output, error) {
 		definitionSource(SourceRunbooks, len(in.Runbooks) > 0, len(in.Runbooks), rbBad, rbGaps),
 		definitionSource(SourceDatasources, dsq.total > 0, dsq.total, dsq.unknown, dsq.gaps()))
 	sources = append(sources, seasonSources...)
+	if in.Storage != nil {
+		st, _ := StorageHygiene(*in.Storage, in.VolumeBytes)
+		sources = append(sources, st)
+	}
 	seen := map[string]bool{}
 	var sum float64
 	var logs int
@@ -443,7 +451,7 @@ func Build(in Inputs) (Output, error) {
 			s.WindowStart = since
 		}
 		out.Sources = append(out.Sources, s)
-		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
+		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || s.Source == SourceStorage || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
 			continue
 		}
 		sum += s.Coverage

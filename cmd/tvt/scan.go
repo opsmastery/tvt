@@ -159,6 +159,8 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		in.External, in.Owners, in.Clients, in.SweepShare = cfg.ExternalConsumers, cfg.Ownership.Owners, cfg.Clients, cfg.SweepShare
 		in.MinWindowDays = cfg.WindowDays
 		in.Seasons = cfg.Seasons
+		// Validated when the config was read.
+		in.VolumeBytes, _ = cfg.Storage.VolumeBytes()
 		if cfg.PriceCard != "" {
 			card, err := cost.Load(cfg.PriceCard)
 			if err != nil {
@@ -274,6 +276,8 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			fmt.Fprintf(out, "%-12s TSDB storage unavailable (%v): a self-hosted card uses its own and default values\n", "prom", err)
 		} else {
 			in.Storage = &st
+			_, summary := scan.StorageHygiene(st, in.VolumeBytes)
+			fmt.Fprintf(out, "%-12s %s\n", "storage", summary)
 		}
 	}
 	if c := in.PriceCard; c != nil && c.Kind == cost.KindSelfHosted {
