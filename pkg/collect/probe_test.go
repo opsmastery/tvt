@@ -93,3 +93,20 @@ func TestLokiProbeQueryRoundTrip(t *testing.T) {
 		t.Error("ProbeNonce accepts the Loki marker")
 	}
 }
+
+// FuzzLokiProbeNonce: only the exact marker yields a nonce, and it round
+// trips.
+func FuzzLokiProbeNonce(f *testing.F) {
+	f.Add(LokiProbeQuery("0f1e2d3c4b5a6978"))
+	f.Add(ProbeQuery("ab12"))
+	f.Add(`count_over_time({tvt_query_log_probe="ab"}[1m]) or vector(1)`)
+	f.Fuzz(func(t *testing.T, expr string) {
+		n, ok := LokiProbeNonce(expr)
+		if !ok {
+			return
+		}
+		if LokiProbeQuery(n) != expr {
+			t.Fatalf("LokiProbeNonce(%q) = %q, but its marker is %q", expr, n, LokiProbeQuery(n))
+		}
+	})
+}
