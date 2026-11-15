@@ -462,6 +462,9 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	if len(g.RuleCosts) > 0 {
 		fmt.Fprintf(out, "%-12s %s\n", "rules", ruleSummary(g.RuleCosts, g.RuleFindings))
 	}
+	if len(g.QueryCosts) > 0 {
+		fmt.Fprintf(out, "%-12s %s\n", "query load", queryLoadSummary(g.Consumers, g.QueryCosts))
+	}
 	if in.Patterns != nil {
 		fmt.Fprintf(out, "%-12s %s\n", "lines", lineSummary(g.LineFindings))
 	}
@@ -730,6 +733,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 	}
 	for _, f := range g.LineFindings {
 		if err := sc.PutLineFinding(ctx, f); err != nil {
+			return err
+		}
+	}
+	for _, c := range g.QueryCosts {
+		if err := sc.PutQueryCost(ctx, c); err != nil {
 			return err
 		}
 	}
@@ -1037,6 +1045,35 @@ func humanBytes(n int64) string {
 		f /= 1000
 	}
 	return ""
+}
+
+// queryLoadSummary is the scan's query load line (S6 item 2): queries
+// logged and the share of their samples and bytes each client drove.
+func queryLoadSummary(consumers []graph.Consumer, costs []graph.QueryCost) string {
+	client := map[string]string{}
+	for _, c := range consumers {
+		client[c.ID] = c.Client
+	}
+	var queries, samples, bytes float64
+	bySamples, byBytes := map[string]float64{}, map[string]float64{}
+	for _, c := range costs {
+		queries, samples, bytes = queries+c.Queries, samples+c.Samples, bytes+c.Bytes
+		bySamples[client[c.ConsumerID]] += c.Samples
+		byBytes[client[c.ConsumerID]] += c.Bytes
+	}
+	shares := func(by map[string]float64, total float64) string {
+		if total <= 0 {
+			return "none logged"
+		}
+		var parts []string
+		for _, k := range slices.Sorted(maps.Keys(by)) {
+			if by[k] > 0 {
+				parts = append(parts, fmt.Sprintf("%s %.0f%%", k, 100*by[k]/total))
+			}
+		}
+		return strings.Join(parts, ", ")
+	}
+	return fmt.Sprintf("%.0f queries; samples: %s; bytes: %s", queries, shares(bySamples, samples), shares(byBytes, bytes))
 }
 
 // ruleSummary is the scan's rules line: how many rules were priced from

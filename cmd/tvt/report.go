@@ -204,6 +204,9 @@ func readLatest(ctx context.Context, path string) (report.Input, store.ScanInfo,
 	if in.StreamVolumes, err = st.StreamVolumes(ctx, info.ID); err != nil {
 		return in, info, err
 	}
+	if in.QueryCosts, err = st.QueryCosts(ctx, info.ID); err != nil {
+		return in, info, err
+	}
 	if in.RuleCosts, err = st.RuleCosts(ctx, info.ID); err != nil {
 		return in, info, err
 	}

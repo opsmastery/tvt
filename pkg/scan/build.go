@@ -187,6 +187,9 @@ type Output struct {
 	// wrong with each (S6 item 1). Report only.
 	RuleCosts    []graph.RuleCost
 	RuleFindings []graph.RuleFinding
+	// QueryCosts are each query-log consumer's measured query cost (S6
+	// item 2), for the report's query load by client.
+	QueryCosts []graph.QueryCost
 }
 
 // Build maps inputs to graph rows. It rejects inputs a scan should never
@@ -399,7 +402,8 @@ func Build(in Inputs) (Output, error) {
 
 	// Query logs: one consumer per distinct query (per panel, when the log
 	// attributes it).
-	logged, lq := loggedConsumers(in.Queries, in.Dashboards, out.Consumers, in.Clients, in.OrgID, ids)
+	logged, lq, qcosts := loggedConsumers(in.Queries, in.Dashboards, out.Consumers, in.Clients, in.OrgID, ids)
+	out.QueryCosts = qcosts
 	out.Consumers = append(out.Consumers, logged...)
 	queries = append(queries, lq...)
 
