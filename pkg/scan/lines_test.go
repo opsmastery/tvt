@@ -118,6 +118,12 @@ func TestFilterSelects(t *testing.T) {
 		`sum by (level) (rate({app="shop"} |= "probe=" [5m]))`:  true,
 		`{app="shop"} |~ "route=/healthz" !~ "status=200"`:      false,
 		`{app="shop"} | json | line_format "{{.msg}}" |= "GET"`: true,
+		// Label filters after a parser aren't line filters (S5 debug pass).
+		`{app="shop"} |= "healthz" | logfmt | status != "200"`: true,
+		`{app="shop"} |= "healthz" | logfmt | status!="200"`:   true,
+		`{app="shop"} | logfmt | route |~ "x"`:                 false, // malformed, but no line filter
+		`{app="shop"} | logfmt | probe != "a" |= "healthz"`:    true,
+		`{app="shop"} |= "healthz" != "status=200" | logfmt`:   false,
 	} {
 		if got := filterSelects(expr, p); got != want {
 			t.Errorf("filterSelects(%s) = %v, want %v", expr, got, want)

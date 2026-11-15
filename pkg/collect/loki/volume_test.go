@@ -124,3 +124,16 @@ func TestStreamVolumesErrors(t *testing.T) {
 		}
 	}
 }
+
+// ExactStreamSelector pins every other stream's label names to "", so
+// Loki's patterns for it can't include a stream with more labels.
+func TestExactStreamSelector(t *testing.T) {
+	labels := map[string]string{"app": "shop", "level": "warn"}
+	got := ExactStreamSelector(labels, []string{"app", "pod", "level", "pod", "", "component"})
+	if want := `{app="shop", component="", level="warn", pod=""}`; got != want {
+		t.Errorf("ExactStreamSelector = %s, want %s", got, want)
+	}
+	if got := ExactStreamSelector(labels, nil); got != StreamSelector(labels) {
+		t.Errorf("no other names: %s, want %s", got, StreamSelector(labels))
+	}
+}

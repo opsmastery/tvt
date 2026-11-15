@@ -113,3 +113,41 @@ func TestCmdWhyFlagsAfterSignal(t *testing.T) {
 		t.Errorf("two signals: code %d", code)
 	}
 }
+
+// The on-call ad hoc query's selector selects the warn and error streams
+// Shop Overview's viewed log panel shows through another selector (S5
+// debug pass): it's keep_high, and tvt why names the panel as an inferred
+// reader of the same streams.
+func TestWhyOverlappingStream(t *testing.T) {
+	setNow(t)
+	l := newLab(t, nil)
+	db := filepath.Join(t.TempDir(), "tvt.db")
+	o := labOptions(l, db)
+	o.LokiQueryLogs = stringList{l.lokiLog}
+	var out bytes.Buffer
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	out.Reset()
+	const oncall = `loki:stream:{app="shop", component="api", level=~"warn|error"}`
+	if err := runWhy(context.Background(), whyOptions{DB: db, Signal: oncall, JSON: true}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var w report.Why
+	if err := json.Unmarshal(out.Bytes(), &w); err != nil {
+		t.Fatal(err)
+	}
+	if w.Class != "keep_high" || w.Row != "" {
+		t.Errorf("on-call stream: class %s, row %q; want keep_high and no row", w.Class, w.Row)
+	}
+	var panel bool
+	for _, r := range w.Readers {
+		if strings.HasPrefix(r.Consumer, "panel:1:shop-overview:") && !r.Exact && len(r.Inferred) == 1 &&
+			strings.HasPrefix(r.Inferred[0], "reads the same streams through {") {
+			panel = true
+		}
+	}
+	if !panel {
+		t.Errorf("no inferred Shop Overview panel reader: %+v", w.Readers)
+	}
+}
