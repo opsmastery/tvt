@@ -52,6 +52,9 @@ type Facts struct {
 	// Mentioned names a runbook or postmortem that names the signal (for
 	// a label, its metric) without querying it; empty when none does.
 	Mentioned string
+	// Seasonal names a season (tvt.yaml seasons) of the signal's owner
+	// that the window missed: its readers couldn't show.
+	Seasonal string
 }
 
 // Classify returns a signal's class and, for a dormant signal, why it
@@ -68,6 +71,9 @@ func Classify(f Facts) (Class, string) {
 		}
 		if f.Mentioned != "" {
 			return ClassDormant, "mentioned in " + f.Mentioned
+		}
+		if f.Seasonal != "" {
+			return ClassDormant, "seasonal reader: " + f.Seasonal + " falls outside the window"
 		}
 	}
 	return ClassCandidate, ""
