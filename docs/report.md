@@ -43,6 +43,10 @@ Dormant signals are never recommendations. Each becomes a `confirm` row: `id` (`
 
 Recommendations are ranked by **savings per minute of checking**: the score's priority (monthly cost ÷ (1 + usage weight) × confidence) divided by `check_minutes`. A cheap check of a moderate saving can outrank an expensive check of a larger one.
 
+## Evidence kept per service
+
+Next to what tvt would cut, `services` lists what stays protected, one entry per `ownership.owners` name (signals no owner claims are `(unowned)`), largest cut first. `cut` counts every recommendation for the service and its monthly savings, before `--top` trims the rows, so the proportion is honest. The kept tallies (`hard_keep`, `keep_high`, `dormant`, `incident`: signals with incident-class evidence, and `records`, zero until S7's records class) count metrics and streams with their monthly cost; a label's cost is already in its metric's, so labels aren't counted. A signal can be in `incident` and in a class tally at once. The HTML page shows it as the "Evidence kept per service" table.
+
 ## Each recommendation
 
 | Field | What it holds |
@@ -94,4 +98,4 @@ An acknowledged gap stays in the header with its reason and moves to the row's `
 
 `scan` (ID, start, window, log coverage, price card), `sources` (every evidence source's coverage), `gaps` (every gap, acknowledged or not, above), `unmatched_acknowledgements`, `totals` (candidates, recommendations, dormant signals, metric savings, and stream savings apart, since stream selectors overlap), `held`.
 
-Readers check `version` (now 2: gaps became structured) and refuse one they don't know.
+Readers check `version` (now 3: 2 made gaps structured, 3 added `services`) and refuse one they don't know.
