@@ -13,15 +13,17 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
 
 type reportOptions struct {
-	DB   string
-	JSON string
-	HTML string
-	Top  int
+	DB     string
+	Config string
+	JSON   string
+	HTML   string
+	Top    int
 }
 
 func cmdReport(args []string, stdout, stderr io.Writer) int {
@@ -29,6 +31,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&o.DB, "db", "tvt.db", "path to the usage graph database (from tvt scan)")
+	fs.StringVar(&o.Config, "config", "", "tvt.yaml: gaps.acknowledge entries (optional)")
 	fs.StringVar(&o.JSON, "json", "report.json", "where to write the JSON report (- for stdout)")
 	fs.StringVar(&o.HTML, "html", "report.html", "where to write the HTML report, rendered from the JSON (empty: skip)")
 	fs.IntVar(&o.Top, "top", 50, "recommendations to keep, highest savings per minute of checking first (0: all)")
@@ -64,6 +67,15 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 	in, err := loadReport(ctx, o.DB)
 	if err != nil {
 		return err
+	}
+	if o.Config != "" {
+		cfg, err := config.Load(o.Config)
+		if err != nil {
+			return err
+		}
+		for _, a := range cfg.Gaps.Acknowledge {
+			in.Acknowledged = append(in.Acknowledged, report.Acknowledgement{Source: a.Source, Match: a.Match, Reason: a.Reason})
+		}
 	}
 	r := report.Build(in, o.Top)
 	b, err := json.MarshalIndent(r, "", "  ")
@@ -106,7 +118,17 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 	if o.HTML != "" {
 		written += " and " + o.HTML
 	}
-	fmt.Fprintf(out, "; %d evidence gaps; written to %s\n", len(r.Gaps), written)
+	unacked := 0
+	for _, g := range r.Gaps {
+		if !g.Acknowledged {
+			unacked++
+		}
+	}
+	fmt.Fprintf(out, "; %d evidence gaps (%d acknowledged)", len(r.Gaps), len(r.Gaps)-unacked)
+	if n := len(r.UnmatchedAcknowledgements); n > 0 {
+		fmt.Fprintf(out, ", %d acknowledgements match no gap", n)
+	}
+	fmt.Fprintf(out, "; written to %s\n", written)
 	return nil
 }
 

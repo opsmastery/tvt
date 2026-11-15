@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -200,14 +201,15 @@ func TestBuildEvidenceAndRisk(t *testing.T) {
 
 func TestReportGapsAndJSON(t *testing.T) {
 	r := Build(fixture(), 0)
-	if !contains(r.Gaps, "loki query log not configured") || !contains(r.Gaps, "grafana router log covers 40% of the window") {
+	if texts := gapTexts(r.Gaps); !contains(texts, "loki query log not configured") || !contains(texts, "grafana router log covers 40% of the window") ||
+		!contains(texts, "Old / panel is assumed to read 1 signal (variable $metric)") {
 		t.Errorf("gaps = %v", r.Gaps)
 	}
 	b, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"version":1`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
+	for _, key := range []string{`"version":2`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
 		`"savings"`, `"risk_if_wrong"`, `"assumptions"`, `"status":"open"`, `"savings_per_minute"`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("JSON has no %s", key)
@@ -279,5 +281,81 @@ func TestConfirmRows(t *testing.T) {
 	}
 	if n := strings.Count(b.String(), `<tr class="confirm"`); n != 2 || !strings.Contains(b.String(), "Dormant: confirm") {
 		t.Errorf("HTML confirm rows %d", n)
+	}
+}
+
+func gapTexts(gs []Gap) []string {
+	var out []string
+	for _, g := range gs {
+		out = append(out, g.Text)
+	}
+	return out
+}
+
+// An acknowledged gap stays in the header with its reason and leaves the
+// rows; an unacknowledged one shows on every row it affects; an
+// acknowledgement that matches nothing is reported.
+func TestAcknowledgedGaps(t *testing.T) {
+	in := fixture()
+	in.Acknowledged = []Acknowledgement{
+		{Source: scan.SourceGrafanaLog, Reason: "views come from Usage Insights later"},
+		{Source: SourceAssumedRefs, Match: "Old / panel", Reason: "the variable only ever picks shop metrics"},
+		{Source: scan.SourceRunbooks, Reason: "stale entry"},
+	}
+	r := Build(in, 0)
+	var grafana, assumed bool
+	for _, g := range r.Gaps {
+		switch {
+		case g.Source == scan.SourceGrafanaLog:
+			grafana = g.Acknowledged && g.Reason == "views come from Usage Insights later" && g.Kind == GapPartial
+		case g.Source == SourceAssumedRefs:
+			assumed = g.Acknowledged && g.Kind == GapAssumed
+		case g.Source == scan.SourceLokiQueryLog:
+			if g.Acknowledged || g.Kind != GapUnconfigured {
+				t.Errorf("loki gap %+v", g)
+			}
+		}
+	}
+	if !grafana || !assumed {
+		t.Errorf("header gaps %+v", r.Gaps)
+	}
+	if len(r.UnmatchedAcknowledgements) != 1 || r.UnmatchedAcknowledgements[0].Source != scan.SourceRunbooks {
+		t.Errorf("unmatched = %+v", r.UnmatchedAcknowledgements)
+	}
+	got := byID(r)
+	owned := got["drop:prom:metric:owned"]
+	if len(owned.Evidence.Gaps) != 0 || !contains(owned.Evidence.Acknowledged, "grafana router log covers 40% of the window (acknowledged: views come from Usage Insights later)") {
+		t.Errorf("owned gaps %v, acknowledged %v", owned.Evidence.Gaps, owned.Evidence.Acknowledged)
+	}
+	stale := got["drop:prom:metric:stale"]
+	if contains(stale.Evidence.Gaps, "Old / panel is assumed to read it (variable $metric)") || len(stale.Evidence.Acknowledged) != 2 {
+		t.Errorf("stale gaps %v, acknowledged %v", stale.Evidence.Gaps, stale.Evidence.Acknowledged)
+	}
+	// Without acknowledgements, the assumed reader is a gap on its row.
+	plain := byID(Build(fixture(), 0))["drop:prom:metric:stale"]
+	if !contains(plain.Evidence.Gaps, "Old / panel is assumed to read it (variable $metric)") {
+		t.Errorf("unacknowledged assumed gap missing: %v", plain.Evidence.Gaps)
+	}
+	stream := got[`reroute:loki:stream:{app="shop"}`]
+	if !contains(stream.Evidence.Gaps, "loki query log not configured") {
+		t.Errorf("stream gaps %v", stream.Evidence.Gaps)
+	}
+}
+
+func TestSourceGapKinds(t *testing.T) {
+	for _, tc := range []struct {
+		s    graph.SourceCoverage
+		want []Gap
+	}{
+		{graph.SourceCoverage{Source: scan.SourceLokiQueryLog}, []Gap{{Source: scan.SourceLokiQueryLog, Kind: GapUnconfigured, Text: "loki query log not configured"}}},
+		{graph.SourceCoverage{Source: scan.SourcePromQueryLog, Configured: true, Gap: "probe never appeared"},
+			[]Gap{{Source: scan.SourcePromQueryLog, Kind: GapUnproven, Text: "prometheus query log: probe never appeared"}}},
+		{graph.SourceCoverage{Source: scan.SourceRunbooks, Configured: true, Coverage: 0.5, Gap: "runbook a: 404\nrunbook b: timeout"},
+			[]Gap{{Source: scan.SourceRunbooks, Kind: GapUnreadable, Text: "runbooks: runbook a: 404"}, {Source: scan.SourceRunbooks, Kind: GapUnreadable, Text: "runbooks: runbook b: timeout"}}},
+		{graph.SourceCoverage{Source: scan.SourcePromQueryLog, Configured: true, Coverage: 1}, nil},
+	} {
+		if got := sourceGaps(tc.s); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%+v: %+v, want %+v", tc.s, got, tc.want)
+		}
 	}
 }

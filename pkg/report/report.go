@@ -14,7 +14,7 @@ import (
 
 // Version is the JSON report's schema version. Readers (the HTML report,
 // propose, check) refuse a version they don't know.
-const Version = 1
+const Version = 2
 
 // Actions a recommendation can propose.
 const (
@@ -48,12 +48,16 @@ type Report struct {
 	Version     int       `json:"version"`
 	GeneratedAt time.Time `json:"generated_at"`
 	Scan        Scan      `json:"scan"`
-	// Sources is every evidence source's coverage; Gaps lists those that
-	// fall short (unconfigured, partial, unproven).
-	Sources         []Source         `json:"sources"`
-	Gaps            []string         `json:"gaps"`
-	Totals          Totals           `json:"totals"`
-	Recommendations []Recommendation `json:"recommendations"`
+	// Sources is every evidence source's coverage; Gaps is every way the
+	// evidence falls short (unconfigured, unproven, partial, unreadable,
+	// assumed), acknowledged or not.
+	Sources []Source `json:"sources"`
+	Gaps    []Gap    `json:"gaps"`
+	// UnmatchedAcknowledgements are tvt.yaml acknowledgements that matched
+	// no gap: stale config to remove.
+	UnmatchedAcknowledgements []Acknowledgement `json:"unmatched_acknowledgements,omitempty"`
+	Totals                    Totals            `json:"totals"`
+	Recommendations           []Recommendation  `json:"recommendations"`
 	// Confirm are the "dormant: confirm" rows: unread signals that look
 	// incident-critical (by name, tier, or a runbook or postmortem naming
 	// them). Each is a question for the owner, never a drop candidate.
@@ -137,8 +141,10 @@ type Confirm struct {
 	Tier     *int   `json:"tier,omitempty"`
 	// Savings is what dropping it would save, if the owner says it can go.
 	Savings Savings `json:"savings"`
-	// Gaps are the sources that could have shown a reader but fall short.
-	Gaps []string `json:"gaps"`
+	// Gaps are the unacknowledged gaps in the sources that could have
+	// shown a reader; Acknowledged are the accepted ones, with reasons.
+	Gaps         []string `json:"gaps"`
+	Acknowledged []string `json:"acknowledged_gaps"`
 }
 
 // SignalRef names a signal.
@@ -160,9 +166,11 @@ type Evidence struct {
 	// LastRead is the most recent read any query log ever showed, from any
 	// scan: it never decays into "never read". Nil when none ever did.
 	LastRead *LastRead `json:"last_read,omitempty"`
-	// Gaps are the evidence sources that could have shown a reader but
-	// didn't fully cover the window.
-	Gaps []string `json:"gaps"`
+	// Gaps are the unacknowledged gaps that could hide a reader of this
+	// signal: its sources' gaps and its own assumed references. Every
+	// row lists them; Acknowledged are the accepted ones, with reasons.
+	Gaps         []string `json:"gaps"`
+	Acknowledged []string `json:"acknowledged_gaps"`
 }
 
 // LoggedQuery is one query-log consumer that touched the signal.
@@ -240,6 +248,8 @@ type Input struct {
 	// LastReads are every signal's most recent logged read across all
 	// scans (store.LastReads).
 	LastReads []LastReadOf
+	// Acknowledged are tvt.yaml gaps.acknowledge entries.
+	Acknowledged []Acknowledgement
 	// Now stamps GeneratedAt; zero means the scan's start.
 	Now time.Time
 }
@@ -259,18 +269,16 @@ type LastReadOf struct {
 // and so is the every-stream signal. Recommendations come highest savings
 // per minute of checking first; limit > 0 keeps that many.
 func Build(in Input, limit int) Report {
-	r := Report{Version: Version, GeneratedAt: in.Now, Scan: in.Scan, Sources: []Source{}, Gaps: []string{}, Recommendations: []Recommendation{}, Confirm: []Confirm{}}
+	r := Report{Version: Version, GeneratedAt: in.Now, Scan: in.Scan, Sources: []Source{}, Gaps: []Gap{}, Recommendations: []Recommendation{}, Confirm: []Confirm{}}
 	if r.GeneratedAt.IsZero() {
 		r.GeneratedAt = in.Scan.StartedAt
 	}
-	sources := map[string]graph.SourceCoverage{}
+	listed := map[string]bool{}
 	for _, s := range in.Sources {
-		sources[s.Source] = s
+		listed[s.Source] = true
 		r.Sources = append(r.Sources, Source{Name: s.Source, Configured: s.Configured, Coverage: s.Coverage, Gap: s.Gap})
-		if g := gapText(s); g != "" {
-			r.Gaps = append(r.Gaps, g)
-		}
 	}
+	gs := newGaps(in.Sources, in.Acknowledged)
 	signals := map[string]graph.Signal{}
 	for _, s := range in.Signals {
 		signals[s.ID] = s
@@ -312,7 +320,7 @@ func Build(in Input, limit int) Report {
 		if s.Kind == graph.KindStream && s.Name == scan.AllStreams {
 			continue
 		}
-		rec := recommend(s, sc, refs[s.ID], consumers, costs[s.ID], lastRead, sources, in.Scan)
+		rec := recommend(s, sc, refs[s.ID], consumers, costs[s.ID], lastRead, gs, listed, in.Scan)
 		if rec.Action == ActionDrop {
 			dropped[s.Name] = true
 		}
@@ -334,7 +342,9 @@ func Build(in Input, limit int) Report {
 	if limit > 0 && len(r.Recommendations) > limit {
 		r.Recommendations = r.Recommendations[:limit]
 	}
-	r.Confirm = confirmRows(in.Signals, costs, sources, in.Scan, limit)
+	r.Confirm = confirmRows(in.Signals, costs, gs, listed, in.Scan, limit)
+	r.Gaps = gs.all(in.Sources, gs.assumedGaps(in.References, consumers))
+	r.UnmatchedAcknowledgements = gs.unmatched()
 	for _, s := range in.Signals {
 		if s.Class == string(score.ClassDormant) {
 			r.Totals.Dormant++
@@ -354,7 +364,7 @@ func Build(in Input, limit int) Report {
 // confirmRows are the dormant signals as questions for their owners,
 // highest saving first. A label whose metric is dormant too is left out:
 // the metric's question covers it.
-func confirmRows(signals []graph.Signal, costs map[string]graph.Cost, sources map[string]graph.SourceCoverage, meta Scan, limit int) []Confirm {
+func confirmRows(signals []graph.Signal, costs map[string]graph.Cost, gs *gaps, listed map[string]bool, meta Scan, limit int) []Confirm {
 	dormantMetric := map[string]bool{}
 	for _, s := range signals {
 		if s.Class == string(score.ClassDormant) && s.Kind == graph.KindMetric {
@@ -373,8 +383,8 @@ func confirmRows(signals []graph.Signal, costs map[string]graph.Cost, sources ma
 			Reason: s.Dormant, Owner: s.Owner, Tier: s.Tier,
 			Savings: Savings{Monthly: c.MonthlyCost, Currency: meta.Currency, DiskBytes: c.DiskBytes,
 				Approximate: meta.Approximate || s.Kind == graph.KindStream},
-			Gaps: signalGaps(s, sources),
 		}
+		row.Gaps, row.Acknowledged = split(gs.forSignal(s, listed))
 		row.Question = question(s, row, meta)
 		out = append(out, row)
 	}
@@ -419,12 +429,12 @@ func heldReason(sc graph.Score) string {
 }
 
 func recommend(s graph.Signal, sc graph.Score, refs []graph.Reference, consumers map[string]graph.Consumer,
-	c graph.Cost, lastRead map[string]LastRead, sources map[string]graph.SourceCoverage, meta Scan) Recommendation {
+	c graph.Cost, lastRead map[string]LastRead, gs *gaps, listed map[string]bool, meta Scan) Recommendation {
 	rec := Recommendation{
 		Action: actionFor(s.Kind),
 		Signal: SignalRef{ID: s.ID, Kind: string(s.Kind), Name: s.Name, Parent: s.Parent, Source: s.Source},
 		Evidence: Evidence{
-			References: []string{}, QueryLog: []LoggedQuery{}, Gaps: signalGaps(s, sources),
+			References: []string{}, QueryLog: []LoggedQuery{},
 		},
 		Downstream:  []Reader{},
 		Assumptions: []string{},
@@ -438,7 +448,7 @@ func recommend(s graph.Signal, sc graph.Score, refs []graph.Reference, consumers
 		Score:       Score{UsageWeight: sc.UsageWeight, Strongest: sc.Strongest, Confidence: sc.Confidence, Priority: sc.Priority},
 	}
 	rec.ID = rec.Action + ":" + s.ID
-	rec.Assumptions = append(rec.Assumptions, rec.Evidence.Gaps...)
+	rowGaps := gs.forSignal(s, listed)
 	if s.Kind == graph.KindStream {
 		rec.Assumptions = append(rec.Assumptions,
 			"stream selectors overlap, so this saving may count bytes another stream row also counts",
@@ -461,11 +471,7 @@ func recommend(s graph.Signal, sc graph.Score, refs []graph.Reference, consumers
 			})
 		}
 		if ref.Assumed {
-			why := strings.Join(ref.Reasons, "; ")
-			if why == "" {
-				why = "unresolved"
-			}
-			rec.Assumptions = append(rec.Assumptions, fmt.Sprintf("%s is assumed to read it (%s)", readerName(con, ref.ConsumerID), why))
+			rowGaps = append(rowGaps, gs.rowGap(con, ref.ConsumerID, ref.Reasons))
 		}
 		if !ref.Sweep && stronger(string(ref.Evidence), strongest) {
 			strongest = string(ref.Evidence)
@@ -473,6 +479,10 @@ func recommend(s graph.Signal, sc graph.Score, refs []graph.Reference, consumers
 	}
 	if strongest != "" {
 		rec.RiskIfWrong.Evidence = strongest
+	}
+	rec.Evidence.Gaps, rec.Evidence.Acknowledged = split(rowGaps)
+	for _, g := range rowGaps {
+		rec.Assumptions = append(rec.Assumptions, g.Text)
 	}
 	if l, ok := lastRead[s.ID]; ok {
 		l := l
@@ -525,40 +535,6 @@ func readerName(c graph.Consumer, id string) string {
 		return c.Name
 	}
 	return id
-}
-
-// gapText describes a source that falls short, or "" when it doesn't.
-func gapText(s graph.SourceCoverage) string {
-	switch {
-	case !s.Configured:
-		return s.Source + " not configured"
-	case s.Gap != "":
-		return s.Source + ": " + s.Gap
-	case s.Coverage < 1:
-		return fmt.Sprintf("%s covers %s of the window", s.Source, pct(s.Coverage))
-	}
-	return ""
-}
-
-// signalGaps are the gaps in the sources that could have shown the signal
-// read: its backend's query log, Grafana's router log, and the definition
-// sources (datasources tvt can't parse, SLO files, runbooks).
-func signalGaps(s graph.Signal, sources map[string]graph.SourceCoverage) []string {
-	names := []string{queryLog(s.Source), scan.SourceGrafanaLog, scan.SourceDatasources, scan.SourceSLOs, scan.SourceRunbooks}
-	out := []string{}
-	for _, n := range names {
-		src, ok := sources[n]
-		if !ok {
-			if n == queryLog(s.Source) && n != "" {
-				out = append(out, n+" not configured")
-			}
-			continue
-		}
-		if g := gapText(src); g != "" {
-			out = append(out, g)
-		}
-	}
-	return out
 }
 
 func queryLog(signalSource string) string {
