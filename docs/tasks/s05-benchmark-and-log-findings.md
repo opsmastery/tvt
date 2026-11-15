@@ -20,3 +20,4 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADR 0006 fi
 ## Should have
 
 7. **Scale test.** Synthetic cardinality (Prometheus `avalanche`) at a few million series: record scan time and peak memory in `docs/architecture.md`, and add a benchmark that fails on a large regression.
+8. **Selected monitors only.** With kube-prometheus-stack's default `serviceMonitorSelectorNilUsesHelmValues: true`, Prometheus only selects monitors that carry the release label. Resolve which `ServiceMonitor`/`PodMonitor` objects the Prometheus selectors actually match, and never attribute series or savings to one it doesn't. Test on the pinned chart fixtures (see `lab-backlog.md`).
