@@ -14,7 +14,7 @@ import (
 
 // Version is the JSON report's schema version. Readers (the HTML report,
 // propose, check) refuse a version they don't know.
-const Version = 6
+const Version = 7
 
 // Actions a recommendation can propose.
 const (
@@ -73,6 +73,9 @@ type Report struct {
 	// version 6), rules with findings first. Report only: tvt never edits
 	// rules.
 	Rules []Rule `json:"rules"`
+	// QueryLoad is the measured query load by client and consumer (S6
+	// item 2, version 7).
+	QueryLoad QueryLoad `json:"query_load"`
 	// Held are candidates tvt can't recommend yet, by reason
 	// (score.Held*): a short window, no coverage, a new signal.
 	Held map[string]int `json:"held,omitempty"`
@@ -268,6 +271,8 @@ type Input struct {
 	// store.RuleFindings).
 	RuleCosts    []graph.RuleCost
 	RuleFindings []graph.RuleFinding
+	// QueryCosts are the scan's measured query costs (store.QueryCosts).
+	QueryCosts []graph.QueryCost
 	// StreamVolumes are the scan's streams (store.StreamVolumes): tvt why
 	// uses them to find readers of a stream signal's streams through an
 	// overlapping selector.
@@ -373,6 +378,7 @@ func Build(in Input, limit int) Report {
 	r.Confirm = confirmRows(in.Signals, costs, gs, listed, in.Scan, limit)
 	r.LineFindings = lineFindings(in.LineFindings, in.Scan.Currency)
 	r.Rules, r.Totals.RuleFindings = rules(consumers, in.RuleCosts, in.RuleFindings)
+	r.QueryLoad = queryLoad(consumers, in.QueryCosts)
 	r.Gaps = gs.all(in.Sources, gs.assumedGaps(in.References, consumers))
 	r.UnmatchedAcknowledgements = gs.unmatched()
 	for _, s := range in.Signals {

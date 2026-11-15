@@ -212,7 +212,7 @@ func TestReportGapsAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"version":6`, `"line_findings":[]`, `"rules":[]`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
+	for _, key := range []string{`"version":7`, `"line_findings":[]`, `"rules":[]`, `"query_load":{"queries":0,"samples":0,"bytes":0,"clients":[],"top":[]}`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
 		`"savings"`, `"risk_if_wrong"`, `"assumptions"`, `"status":"open"`, `"savings_per_minute"`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("JSON has no %s", key)
@@ -455,6 +455,49 @@ func TestRules(t *testing.T) {
 	html := page.String()
 	for _, s := range []string{"Logs &lt;alert&gt;", "grafana_managed_alert", "Fix: move it to the Loki ruler", "19.9 MB", "unknown: mimir doesn"} {
 		if !strings.Contains(html, s) {
+			t.Errorf("HTML lacks %q", s)
+		}
+	}
+}
+
+// TestQueryLoad (S6 item 2): load by client with shares, and the most
+// expensive consumers ranked by samples and bytes on one scale.
+func TestQueryLoad(t *testing.T) {
+	in := Input{
+		Scan: Scan{ID: 1, StartedAt: time.Date(2026, 11, 15, 21, 0, 0, 0, time.UTC)},
+		Consumers: []graph.Consumer{
+			{ID: "qlog:prometheus:match:panel:1:shop:1:0:a", Kind: graph.ConsumerDashboardPanel, Name: "Shop / <Requests>", Client: "dashboard"},
+			{ID: "qlog:prometheus:agent:finance:b", Kind: graph.ConsumerAgentQuery, Name: "agent finance", Client: "agent"},
+			{ID: "qlog:loki:c", Kind: graph.ConsumerAdhocQuery, Name: "ad hoc", Client: "api"},
+		},
+		QueryCosts: []graph.QueryCost{
+			{ConsumerID: "qlog:prometheus:match:panel:1:shop:1:0:a", Queries: 10, Samples: 100},
+			{ConsumerID: "qlog:prometheus:agent:finance:b", Queries: 30, Samples: 300},
+			{ConsumerID: "qlog:loki:c", Queries: 2, Bytes: 2_000_000},
+		},
+	}
+	r := Build(in, 0)
+	ql := r.QueryLoad
+	if ql.Queries != 42 || ql.Samples != 400 || ql.Bytes != 2_000_000 || len(ql.Clients) != 3 || len(ql.Top) != 3 {
+		t.Fatalf("query load %+v", ql)
+	}
+	// api holds all the bytes (weight 1), agent 3/4 of the samples.
+	if ql.Clients[0].Client != "api" || ql.Clients[1].Client != "agent" || ql.Clients[1].SampleShare != 0.75 || ql.Clients[1].QueryShare != 30.0/42 {
+		t.Errorf("clients %+v", ql.Clients)
+	}
+	if ql.Top[0].Name != "ad hoc" || ql.Top[1].Name != "agent finance" || ql.Top[2].Kind != string(graph.ConsumerDashboardPanel) {
+		t.Errorf("top %+v", ql.Top)
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page strings.Builder
+	if err := RenderHTMLFromJSON(&page, b); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{"Query load", "Shop / &lt;Requests&gt;", "75%", "2.0 MB"} {
+		if !strings.Contains(page.String(), s) {
 			t.Errorf("HTML lacks %q", s)
 		}
 	}

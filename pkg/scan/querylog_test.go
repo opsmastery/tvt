@@ -241,6 +241,53 @@ func TestLoggedClients(t *testing.T) {
 	}
 }
 
+// TestQueryCosts (S6 item 2): each logged query's measured cost goes to
+// the consumer it was attributed to; a query matching several panels or
+// rules is split evenly among them, so the totals add up to the log's.
+func TestQueryCosts(t *testing.T) {
+	at := start.Add(-time.Hour)
+	in := baseInputs()
+	same := `sum(rate(shop_http_requests_total[$__rate_interval]))`
+	in.Dashboards = []collect.Dashboard{{UID: "shop", Title: "Shop", Panels: []collect.Panel{
+		{ID: 1, Title: "A", Queries: []collect.PanelQuery{{DatasourceType: "prometheus", Expr: same}}},
+		{ID: 2, Title: "B", Queries: []collect.PanelQuery{{DatasourceType: "prometheus", Expr: same}}},
+	}}}
+	in.Clients = config.Clients{Grafana: []string{"10.0.0.6"}, Agents: []config.Agent{{Name: "finance", Addresses: []string{"10.0.0.23"}}}}
+	in.Queries = []collect.LoggedQuery{
+		{Source: "prometheus", Language: "promql", Expr: `sum(rate(shop_http_requests_total[1m]))`, At: at, Client: "10.0.0.6", Samples: 100},
+		{Source: "prometheus", Language: "promql", Expr: `sum(rate(shop_http_requests_total[5m]))`, At: at, Client: "10.0.0.6", Samples: 300},
+		{Source: "prometheus", Language: "promql", Expr: "node_load1", At: at, Client: "10.0.0.23", Samples: 50},
+		{Source: "prometheus", Language: "promql", Expr: "node_load1", At: at.Add(time.Minute), Client: "10.0.0.23", Samples: 70},
+		{Source: "loki", Language: "logql", Expr: `{app="shop"}`, At: at, Bytes: 4096},
+	}
+	out, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := map[string]string{}
+	for _, c := range out.Consumers {
+		client[c.ID] = c.Client
+	}
+	type load struct{ queries, samples, bytes float64 }
+	byClient := map[string]load{}
+	var total load
+	for _, c := range out.QueryCosts {
+		l := byClient[client[c.ConsumerID]]
+		l.queries, l.samples, l.bytes = l.queries+c.Queries, l.samples+c.Samples, l.bytes+c.Bytes
+		byClient[client[c.ConsumerID]] = l
+		total.queries, total.samples, total.bytes = total.queries+c.Queries, total.samples+c.Samples, total.bytes+c.Bytes
+		if strings.Contains(c.ConsumerID, ":match:panel:") && (c.Queries != 1 || c.Samples != 200) {
+			t.Errorf("%s: %+v, want half of both panel queries (1 query, 200 samples)", c.ConsumerID, c)
+		}
+	}
+	if total != (load{5, 520, 4096}) {
+		t.Errorf("total %+v, want the log's 5 queries, 520 samples, 4096 bytes", total)
+	}
+	if byClient[ClientAgent] != (load{2, 120, 0}) || byClient[ClientDashboard] != (load{2, 400, 0}) || byClient[ClientAPI] != (load{1, 0, 4096}) {
+		t.Errorf("by client %+v", byClient)
+	}
+}
+
 func TestTemplates(t *testing.T) {
 	for _, c := range []struct {
 		tmpl, logged string
