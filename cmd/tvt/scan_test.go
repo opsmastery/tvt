@@ -682,7 +682,13 @@ func TestScanLab(t *testing.T) {
 	for _, s := range srcs {
 		// Every lab dashboard and Grafana rule query is Prometheus or Loki.
 		if s.Source == scan.SourceSLOs || s.Source == scan.SourceRunbooks || s.Source == scan.SourceDatasources || s.Source == scan.SourceStorage {
-			if !s.Configured || s.Coverage != 1 || s.Gap != "" {
+			// The lab config names no owners, so SLO coverage can't list
+			// services without an SLO (S6 item 3).
+			gap := s.Gap
+			if s.Source == scan.SourceSLOs {
+				gap = strings.TrimPrefix(gap, "no ownership.owners in tvt.yaml: services without an SLO can't be listed")
+			}
+			if !s.Configured || s.Coverage != 1 || gap != "" {
 				t.Errorf("source %+v", s)
 			}
 			continue

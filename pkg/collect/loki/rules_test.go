@@ -66,6 +66,7 @@ func TestRulesFixture(t *testing.T) {
 		Interval:  time.Minute, // no interval in the YAML: the effective one
 
 		Annotations: map[string]string{"summary": "Spike in denied actions in the shop audit log"},
+		Labels:      map[string]string{"severity": "warning"},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("rules:\n got %+v\nwant %+v", got, want)

@@ -14,6 +14,7 @@ package slo
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -212,8 +213,29 @@ type slothSLI struct {
 }
 
 type slothSLO struct {
-	Name string   `yaml:"name"`
-	SLI  slothSLI `yaml:"sli"`
+	Name     string   `yaml:"name"`
+	SLI      slothSLI `yaml:"sli"`
+	Alerting struct {
+		Name        string     `yaml:"name"`
+		PageAlert   slothAlert `yaml:"page_alert"`
+		PageCamel   slothAlert `yaml:"pageAlert"`
+		TicketAlert slothAlert `yaml:"ticket_alert"`
+		TicketCamel slothAlert `yaml:"ticketAlert"`
+	} `yaml:"alerting"`
+}
+
+type slothAlert struct {
+	Disable bool `yaml:"disable"`
+}
+
+// alert is the name Sloth gives the SLO's generated alerts; empty when it
+// names none or disables both.
+func (s slothSLO) alert() string {
+	a := s.Alerting
+	if (a.PageAlert.Disable || a.PageCamel.Disable) && (a.TicketAlert.Disable || a.TicketCamel.Disable) {
+		return ""
+	}
+	return a.Name
 }
 
 // sloth reads a prometheus/v1 spec, or (k8s) a PrometheusServiceLevel
@@ -240,7 +262,7 @@ func sloth(n *yaml.Node, k8s bool) ([]collect.SLO, error) {
 	}
 	var out []collect.SLO
 	for _, s := range spec.SLOs {
-		slo := collect.SLO{Format: "sloth", Name: joinName(spec.Service, s.Name)}
+		slo := collect.SLO{Format: "sloth", Name: joinName(spec.Service, s.Name), Service: spec.Service, Short: s.Name, Alert: s.alert()}
 		var exprs []string
 		switch {
 		case s.SLI.Events != nil:
@@ -271,6 +293,12 @@ type pyrraMetric struct {
 }
 
 type pyrraSpec struct {
+	// Alerting: Pyrra generates burn-rate alerts named ErrorBudgetBurn
+	// (or alerting.name) with an slo label, unless disabled.
+	Alerting struct {
+		Name     string `yaml:"name"`
+		Disabled bool   `yaml:"disabled"`
+	} `yaml:"alerting"`
 	Indicator struct {
 		Ratio *struct {
 			Errors   pyrraMetric `yaml:"errors"`
@@ -309,7 +337,10 @@ func pyrra(n *yaml.Node) ([]collect.SLO, error) {
 	if err := n.Decode(&d); err != nil {
 		return nil, fmt.Errorf("pyrra: %w", err)
 	}
-	slo := collect.SLO{Format: "pyrra", Name: joinName(d.Metadata.Namespace, d.Metadata.Name)}
+	slo := collect.SLO{Format: "pyrra", Name: joinName(d.Metadata.Namespace, d.Metadata.Name), Short: d.Metadata.Name}
+	if !d.Spec.Alerting.Disabled {
+		slo.Alert = cmp.Or(d.Spec.Alerting.Name, "ErrorBudgetBurn")
+	}
 	in := d.Spec.Indicator
 	add := func(tmpl string, grouping []string, metrics ...string) {
 		for _, m := range metrics {
@@ -371,7 +402,7 @@ func openSLO(n *yaml.Node, h header, slis map[string]openSLISpec) ([]collect.SLO
 			IndicatorRef string `yaml:"indicatorRef"`
 		} `yaml:"spec"`
 	}
-	slo := collect.SLO{Format: "openslo", Name: joinName("", h.Metadata.Name)}
+	slo := collect.SLO{Format: "openslo", Name: joinName("", h.Metadata.Name), Short: h.Metadata.Name}
 	if h.APIVersion != "openslo/v1" {
 		slo.Unreadable = fmt.Sprintf("OpenSLO %s: tvt reads openslo/v1", h.APIVersion)
 		return []collect.SLO{slo}, nil
@@ -380,6 +411,7 @@ func openSLO(n *yaml.Node, h header, slis map[string]openSLISpec) ([]collect.SLO
 		return nil, fmt.Errorf("OpenSLO SLO %q: %w", h.Metadata.Name, err)
 	}
 	slo.Name = joinName(d.Spec.Service, h.Metadata.Name)
+	slo.Service = d.Spec.Service
 	var spec openSLISpec
 	switch {
 	case d.Spec.Indicator != nil:

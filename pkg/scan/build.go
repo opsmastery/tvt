@@ -190,6 +190,8 @@ type Output struct {
 	// QueryCosts are each query-log consumer's measured query cost (S6
 	// item 2), for the report's query load by client.
 	QueryCosts []graph.QueryCost
+	// SLOFindings are the SLO coverage findings (S6 item 3). Report only.
+	SLOFindings []graph.SLOFinding
 }
 
 // Build maps inputs to graph rows. It rejects inputs a scan should never
@@ -301,7 +303,12 @@ func Build(in Inputs) (Output, error) {
 	}
 
 	// SLOs: each SLI query is read like a rule's.
-	sloGaps := sloConsumers(in.SLOs, ids, &out, &queries)
+	sloGaps, sloIDs := sloConsumers(in.SLOs, ids, &out, &queries)
+	sloBad := len(sloGaps)
+	if in.SLOsConfigured && len(in.Owners) == 0 {
+		// SLO coverage (S6 item 3) needs to know the services.
+		sloGaps = append(sloGaps, "no ownership.owners in tvt.yaml: services without an SLO can't be listed")
+	}
 
 	// Runbooks: code blocks and Explore links are queries; a dashboard
 	// link stands for every query on that dashboard.
@@ -444,7 +451,7 @@ func Build(in Inputs) (Output, error) {
 	// LogCoverage, which is about usage logs.
 	sources := slices.Clone(in.Sources)
 	sources = append(sources,
-		definitionSource(SourceSLOs, in.SLOsConfigured, len(in.SLOs), len(sloGaps), sloGaps),
+		definitionSource(SourceSLOs, in.SLOsConfigured, len(in.SLOs), sloBad, sloGaps),
 		definitionSource(SourceRunbooks, len(in.Runbooks) > 0, len(in.Runbooks), rbBad, rbGaps),
 		definitionSource(SourceDatasources, dsq.total > 0, dsq.total, dsq.unknown, dsq.gaps()))
 	sources = append(sources, seasonSources...)
@@ -493,6 +500,7 @@ func Build(in Inputs) (Output, error) {
 	}
 	out.PriceCard, out.Storage, out.TSDB = in.PriceCard, st, in.Storage
 	out.RuleCosts, out.RuleFindings = ruleAnalysis(in, ruleIDs, out.References)
+	out.SLOFindings = sloCoverage(in, ruleIDs, sloIDs, out.Signals, out.References)
 	readers := newStreamReaders(out.Signals, out.Consumers, out.References)
 	if out.LineFindings, err = lineFindings(in.Patterns, out.StreamVolumes, in.Owners, in.PriceCard, readers); err != nil {
 		return Output{}, err

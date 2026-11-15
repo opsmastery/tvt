@@ -53,6 +53,14 @@ type groundTruth struct {
 	} `yaml:"mimir"`
 	// Rule-efficiency findings (S6 item 1): per rule name, or no_findings.
 	RuleFindings map[string]yaml.Node `yaml:"rule_findings"`
+	// SLOCoverage is the expected SLO coverage report (S6 item 3).
+	SLOCoverage struct {
+		Services           map[string]yaml.Node `yaml:"services"`
+		ServicesWithoutSLO []string             `yaml:"services_without_slo"`
+		PagingNotBurnRate  []string             `yaml:"paging_not_burn_rate"`
+		BurnRate           []string             `yaml:"burn_rate"`
+		SLOsWithoutAlert   []string             `yaml:"slos_without_alert"`
+	} `yaml:"slo_coverage"`
 }
 
 // gtRuleFindings is one rule's expected findings.
