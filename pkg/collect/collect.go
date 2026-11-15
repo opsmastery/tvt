@@ -108,6 +108,10 @@ type Scrape struct {
 	Types map[string]string
 	// JobIntervals is each job's scrape interval.
 	JobIntervals map[string]time.Duration
+	// Pools are the scrape pools of the active targets, sorted.
+	// prometheus-operator names a monitor's pools
+	// serviceMonitor/<ns>/<name>/<endpoint> (podMonitor/... likewise).
+	Pools []string
 	// Exemplars is true when exemplar storage is on: histogram series then
 	// carry exemplars, which cost extra on most backends.
 	Exemplars bool

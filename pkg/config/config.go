@@ -61,6 +61,10 @@ type Config struct {
 	// Storage describes the metrics backend's disk, for storage hygiene
 	// warnings (S5 item 6).
 	Storage Storage `yaml:"storage"`
+	// Kubernetes points at manifests (helm template output, a GitOps
+	// checkout) so tvt knows which ServiceMonitors and PodMonitors a
+	// prometheus-operator Prometheus selects (S5 item 8).
+	Kubernetes Kubernetes `yaml:"kubernetes"`
 	// WindowDays is the shortest observation window anything is
 	// recommended from: a scan with a shorter --window scores every
 	// candidate with confidence 0. 0 means the default, 30.
@@ -137,6 +141,17 @@ type GapAck struct {
 	Source string `yaml:"source"`
 	Match  string `yaml:"match"`
 	Reason string `yaml:"reason"`
+}
+
+// Kubernetes lists manifests tvt reads from disk; it never talks to a
+// cluster.
+type Kubernetes struct {
+	// Manifests are files or directories (.yaml, .yml, .json), relative to
+	// tvt.yaml.
+	Manifests []string `yaml:"manifests"`
+	// Namespace is the namespace of objects that don't name one (helm
+	// template's --namespace); empty means "default".
+	Namespace string `yaml:"namespace"`
 }
 
 // Storage describes the disk under the Prometheus TSDB.
@@ -243,6 +258,9 @@ func Load(path string) (*Config, error) {
 	}
 	for i, p := range c.Postmortems.Paths {
 		c.Postmortems.Paths[i] = relTo(dir, p)
+	}
+	for i, p := range c.Kubernetes.Manifests {
+		c.Kubernetes.Manifests[i] = relTo(dir, p)
 	}
 	if isPath(c.PriceCard) {
 		c.PriceCard = relTo(dir, c.PriceCard)

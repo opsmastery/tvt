@@ -64,8 +64,8 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack) is how most teams run Prometheus on Kubernetes. Render it with `helm template` at a pinned chart version (93.3.0 when this was written) so CI can test readers and writers without a cluster. SnowOps Labs below is the live run.
 
-- A `make kps-fixtures` target that renders the pinned chart into `fixtures/kube-prometheus-stack/` (rules, ServiceMonitors, PodMonitors, dashboards, the default values) plus a hand-checked golden list of declared readers. Bump the pin only on purpose, with the golden diff reviewed in the PR.
-- S5: monitor selection (`serviceMonitorSelectorNilUsesHelmValues`), including a monitor without the release label that must not count.
+- A `make kps-fixtures` target that renders the pinned chart into `testdata/kube-prometheus-stack/` (rules, ServiceMonitors, PodMonitors, dashboards, the default values) plus a hand-checked golden list of declared readers. Bump the pin only on purpose, with the golden diff reviewed in the PR.
+- S5 (done Nov 15): monitor selection (`serviceMonitorSelectorNilUsesHelmValues`), including a monitor without the release label that must not count.
 - S6: the chart's 41 rule files and dashboards as declared evidence; its default kubelet drops as ground truth (dropped series have no consumers, `container_memory_swap` protected).
 - S7 and S8: an overlay that sets `cAdvisorMetricRelabelings` with only tvt's rules must fail `check`; the writer's overlay must keep the chart's defaults.
 - S10: the default kubelet drop of some `le` buckets on `csi_operations` and `storage_operation_duration` as a bucket-reduction case.
