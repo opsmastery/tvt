@@ -416,7 +416,8 @@ func Build(in Inputs) (Output, error) {
 		}
 	}
 	seasonSources, missed := seasons(in.Seasons, since, in.Start)
-	if err := classify(out.Signals, out.Consumers, out.References, in.Owners, mentioned(in), missed, since, in.Start); err != nil {
+	overlaps := StreamOverlaps(out.Signals, streamLabelSets(in.StreamVolumes))
+	if err := classify(out.Signals, out.Consumers, out.References, overlaps, in.Owners, mentioned(in), missed, since, in.Start); err != nil {
 		return Output{}, err
 	}
 

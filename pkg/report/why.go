@@ -181,6 +181,31 @@ func Explain(in Input, id string) (Why, error) {
 			})
 		}
 	}
+	// A stream signal's streams are also read through every overlapping
+	// selector (scan.StreamOverlaps), and those readers protect it.
+	if s.Kind == graph.KindStream {
+		names := map[string]string{}
+		for _, o := range in.Signals {
+			names[o.ID] = o.Name
+		}
+		for _, o := range scan.StreamOverlaps(in.Signals, scan.StoredStreamLabels(in.StreamVolumes))[s.ID] {
+			for _, ref := range in.References {
+				if ref.SignalID != o || ref.Sweep {
+					continue
+				}
+				con := consumers[ref.ConsumerID]
+				w.Readers = append(w.Readers, WhyReader{
+					Reader: Reader{
+						Consumer: ref.ConsumerID, Kind: string(con.Kind), Name: con.Name,
+						Evidence: string(ref.Evidence), Source: readerSource(ref, con), Client: con.Client,
+						Via: ref.Via, LastSeen: ref.LastSeen, Actor: ref.Actor, Exact: false,
+					},
+					FirstSeen: ref.FirstSeen, Expr: con.Expr,
+					Inferred: []string{"reads the same streams through " + names[o]},
+				})
+			}
+		}
+	}
 	sort.SliceStable(w.Readers, func(i, j int) bool {
 		a, b := w.Readers[i], w.Readers[j]
 		if a.Sweep != b.Sweep {

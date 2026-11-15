@@ -178,7 +178,7 @@ func TestClassifyMentions(t *testing.T) {
 		Mentions: []Mention{{Source: "postmortem pm/2026-10.md", Names: []string{"node_forks_total", "node_load15"}}},
 		Runbooks: []collect.Runbook{{URL: "https://r/backlog", Mentions: []string{"node_load15"}}},
 	}
-	if err := classify(signals, nil, nil, nil, mentioned(in), nil, time.Time{}, time.Now()); err != nil {
+	if err := classify(signals, nil, nil, nil, nil, mentioned(in), nil, time.Time{}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
@@ -227,7 +227,7 @@ func TestSeasons(t *testing.T) {
 	}
 	consumers := []graph.Consumer{{ID: "q", Kind: graph.ConsumerAdhocQuery}}
 	refs := []graph.Reference{{SignalID: "prom:metric:shop_read_total", ConsumerID: "q", Evidence: graph.EvidenceObserved}}
-	if err := classify(signals, consumers, refs, owners, nil, missed, since, until); err != nil {
+	if err := classify(signals, consumers, refs, nil, owners, nil, missed, since, until); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string][2]string{
