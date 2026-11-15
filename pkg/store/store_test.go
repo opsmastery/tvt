@@ -95,6 +95,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 	refs, err := s.References(ctx, id)
 	must(t, err)
+	ref.FirstSeen = t0
 	if !reflect.DeepEqual(refs, []graph.Reference{ref}) {
 		t.Errorf("refs = %+v", refs)
 	}
@@ -509,7 +510,7 @@ func TestReferenceLabelDetail(t *testing.T) {
 		Labels: []graph.LabelRef{
 			{Name: "instance", Use: graph.LabelLegend}, {Name: "job", Use: graph.LabelMatch}, {Name: "odd\nname", Use: graph.LabelWithout}, {Name: "route", Use: graph.LabelGroup}},
 		AllLabels: true, Assumed: true, ResultLabels: true,
-		Reasons: []string{"matcher value from $x", "query did not parse: line 2"}}
+		Reasons: []string{"matcher value from $x", "query did not parse: line 2"}, FirstSeen: t0}
 	if len(refs) != 1 || !reflect.DeepEqual(refs[0], want) {
 		t.Errorf("merged ref\n got  %+v\n want %+v", refs, want)
 	}
@@ -796,10 +797,16 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 	sc.Abort()
 }
 
-// v14Drops turns a current database's tables back into version 13's.
-var v14Drops = []string{
-	`DROP TABLE scores`,
+// v15Drops turns a current database's tables back into version 14's.
+var v15Drops = []string{
+	`ALTER TABLE refs DROP COLUMN first_scan`,
 }
+
+// v14Drops turns a current database's tables back into version 13's
+// (v15Drops first).
+var v14Drops = append(append([]string{}, v15Drops...),
+	`DROP TABLE scores`,
+)
 
 // v13Drops turns a current database's tables back into version 12's
 // (v14Drops first).
@@ -1209,5 +1216,26 @@ func TestLastReadsSkipSweeps(t *testing.T) {
 	must(t, err)
 	if len(reads) != 1 || reads[0].ConsumerID != named.ID || !reads[0].At.Equal(t0.Add(-48*time.Hour)) {
 		t.Errorf("LastReads = %+v", reads)
+	}
+}
+
+// A reference's first sighting stays the scan that first stored it, however
+// often later scans see it again.
+func TestReferenceFirstSeen(t *testing.T) {
+	s, _ := open(t)
+	sig := graph.Signal{ID: "m", Kind: graph.KindMetric, Name: "m", Source: "prom"}
+	con := graph.Consumer{ID: "c", Kind: graph.ConsumerAlertRule, Name: "c"}
+	ref := graph.Reference{SignalID: "m", ConsumerID: "c", Evidence: graph.EvidenceDeclared}
+	put := func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, sig))
+		must(t, sc.PutConsumer(ctx, con))
+		must(t, sc.PutReference(ctx, ref))
+	}
+	scan(t, s, t0, put)
+	id := scan(t, s, t0.Add(48*time.Hour), put)
+	refs, err := s.References(ctx, id)
+	must(t, err)
+	if len(refs) != 1 || !refs[0].FirstSeen.Equal(t0) {
+		t.Errorf("refs = %+v, want first seen %v", refs, t0)
 	}
 }

@@ -31,6 +31,7 @@ var page = template.Must(template.New("report.html.tmpl").Funcs(template.FuncMap
 	},
 	"inc":  func(i int) int { return i + 1 },
 	"join": strings.Join,
+	"why":  WhyCommand,
 }).ParseFS(templates, "templates/report.html.tmpl"))
 
 // RenderHTML writes the HTML report. It reads only the JSON report, like
@@ -55,4 +56,11 @@ func RenderHTMLFromJSON(w io.Writer, b []byte) error {
 		return fmt.Errorf("report: version %d, this tvt reads %d", r.Version, Version)
 	}
 	return page.Execute(w, r)
+}
+
+// WhyCommand is the shell command that explains signal id: the report's
+// link from a row to the same view. The ID is single-quoted for a POSIX
+// shell.
+func WhyCommand(id string) string {
+	return "tvt why '" + strings.ReplaceAll(id, "'", `'\''`) + "'"
 }
