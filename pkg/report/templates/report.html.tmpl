@@ -157,6 +157,33 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </table>
 </div>
 
+<h2>Query load</h2>
+<p class="muted">What the logged queries read in the window, as the backends report it (samples for PromQL, bytes for LogQL), by who sent them. A query matching several panels or rules is split evenly among them.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Client</th><th class="num">Queries</th><th class="num">Samples</th><th class="num">Bytes</th></tr></thead>
+<tbody>
+{{range .QueryLoad.Clients}}
+<tr><td>{{.Client}}</td><td class="num">{{printf "%.0f" .Queries}}<br><span class="muted">{{pct .QueryShare}}</span></td><td class="num">{{printf "%.0f" .Samples}}<br><span class="muted">{{pct .SampleShare}}</span></td><td class="num">{{bytes .Bytes}}<br><span class="muted">{{pct .ByteShare}}</span></td></tr>
+{{else}}
+<tr><td colspan="4" class="muted">No query log read.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{if .QueryLoad.Top}}
+<div class="table-wrap">
+<table>
+<thead><tr><th>Most expensive to run</th><th>Client</th><th class="num">Queries</th><th class="num">Samples</th><th class="num">Bytes</th></tr></thead>
+<tbody>
+{{range .QueryLoad.Top}}
+<tr><td>{{.Name}}</td><td>{{.Client}}</td><td class="num">{{printf "%.0f" .Queries}}</td><td class="num">{{printf "%.0f" .Samples}}</td><td class="num">{{bytes .Bytes}}</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{end}}
+
 <h2>Evidence sources</h2>
 <div class="table-wrap">
 <table>

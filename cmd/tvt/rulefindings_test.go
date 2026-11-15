@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
 
@@ -201,4 +202,55 @@ func ruleResults(t *testing.T, db string) ([]graph.RuleCost, []graph.RuleFinding
 		t.Fatal(err)
 	}
 	return costs, findings
+}
+
+// TestQueryLoadRuleEfficiency (S6 item 2) scans the rule-efficiency state:
+// the logged queries' measured cost lands on their consumers, adds up to
+// what the query logs recorded, and the report splits it by client with
+// the agents' share.
+func TestQueryLoadRuleEfficiency(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "rule-efficiency" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := loadReport(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.QueryCosts) == 0 {
+		t.Fatal("no query costs stored")
+	}
+	r := report.Build(in, 50)
+	ql := r.QueryLoad
+	t.Logf("query load: %.0f queries, %.0f samples, %.0f bytes", ql.Queries, ql.Samples, ql.Bytes)
+	clients := map[string]report.ClientLoad{}
+	var shares float64
+	for _, c := range ql.Clients {
+		t.Logf("  %-10s %6.0f queries %12.0f samples (%.1f%%) %12.0f bytes (%.1f%%)", c.Client, c.Queries, c.Samples, 100*c.SampleShare, c.Bytes, 100*c.ByteShare)
+		clients[c.Client] = c
+		shares += c.SampleShare
+	}
+	if ql.Samples <= 0 || ql.Bytes <= 0 {
+		t.Errorf("samples %v, bytes %v: the lab logs both", ql.Samples, ql.Bytes)
+	}
+	if shares < 0.999 || shares > 1.001 {
+		t.Errorf("sample shares sum to %v", shares)
+	}
+	// The lab runs two agents and a viewed dashboard; Grafana evaluates
+	// its managed alerts through the datasources (client rule).
+	for _, want := range []string{"agent", "dashboard", "rule"} {
+		if clients[want].Queries == 0 {
+			t.Errorf("no %s queries in the load: %+v", want, ql.Clients)
+		}
+	}
+	if clients["agent"].Samples == 0 {
+		t.Errorf("agents drove no samples: %+v", clients["agent"])
+	}
+	if len(ql.Top) == 0 || len(ql.Top) > report.TopQueryRunners {
+		t.Errorf("top %d", len(ql.Top))
+	}
 }
