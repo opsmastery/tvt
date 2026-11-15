@@ -165,3 +165,31 @@ func TestParseSize(t *testing.T) {
 		t.Errorf("unset volume_size = %d, %v; want 0", v, err)
 	}
 }
+
+// Pipelines (S6 item 4, ADR 0007): the example's three load; each
+// malformed one is an error naming it.
+func TestPipelines(t *testing.T) {
+	c, err := Load(filepath.Join("..", "..", "examples", "tvt.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Pipelines) != 3 || c.Pipelines[1].Name != "alloy-apps" || c.Pipelines[1].Kind != "alloy" ||
+		len(c.Pipelines[1].Handles) != 2 || c.Pipelines[2].HelmValues == nil || c.Pipelines[2].HelmValues.Path != "config" {
+		t.Errorf("pipelines %+v", c.Pipelines)
+	}
+	for doc, want := range map[string]string{
+		"pipelines: [{kind: alloy, handles: ['{job=\"a\"}']}]":                                                             "name is required",
+		"pipelines: [{name: a, kind: vector, handles: ['{job=\"a\"}']}]":                                                   `kind "vector"`,
+		"pipelines: [{name: a, kind: alloy}]":                                                                              "handles is required",
+		"pipelines: [{name: a, kind: alloy, handles: ['job=a']}]":                                                          `handles "job=a"`,
+		"pipelines: [{name: a, kind: alloy, handles: ['{job=~\"(\"}']}]":                                                   `handles`,
+		"pipelines: [{name: a, kind: alloy, handles: ['{a=\"1\"}']}, {name: a, kind: prometheus, handles: ['{a=\"2\"}']}]": "appears twice",
+		"pipelines: [{name: a, kind: otelcol, handles: ['{a=\"1\"}'], helm_values: {file: v.yaml}}]":                       "file and path",
+		"pipelines: [{name: a, kind: otelcol, handles: ['{a=\"1\"}'], files: [x], helm_values: {file: v, path: p}}]":       "not both",
+		"pipelines: [{name: a, kind: alloy, handles: ['{a=\"1\"}'], owner: x}]":                                            "owner",
+	} {
+		if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want an error with %q", doc, err, want)
+		}
+	}
+}

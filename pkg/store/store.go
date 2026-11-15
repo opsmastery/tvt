@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 19
+const SchemaVersion = 20
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -392,6 +392,22 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			    PRIMARY KEY (scan_id, kind, subject)
 			)`,
 			`UPDATE meta SET value = '19' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
+	if from < 20 {
+		for _, q := range []string{
+			`CREATE TABLE IF NOT EXISTS pipeline_targets (
+			    scan_id  INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+			    subject  TEXT NOT NULL,
+			    pipeline TEXT NOT NULL,
+			    note     TEXT NOT NULL,
+			    PRIMARY KEY (scan_id, subject)
+			)`,
+			`UPDATE meta SET value = '20' WHERE key = 'schema_version'`,
 		} {
 			if _, err := tx.ExecContext(ctx, q); err != nil {
 				return err
@@ -795,6 +811,25 @@ func (s *Store) QueryCosts(ctx context.Context, scanID int64) ([]graph.QueryCost
 	return out, rows.Err()
 }
 
+// PipelineTargets returns the pipeline targets of scan scanID, by subject.
+func (s *Store) PipelineTargets(ctx context.Context, scanID int64) ([]graph.PipelineTarget, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT subject, pipeline, note FROM pipeline_targets WHERE scan_id = ? ORDER BY subject`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.PipelineTarget
+	for rows.Next() {
+		var t graph.PipelineTarget
+		if err := rows.Scan(&t.Subject, &t.Pipeline, &t.Note); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // SLOFindings returns the SLO coverage findings of scan scanID, by kind
 // and subject.
 func (s *Store) SLOFindings(ctx context.Context, scanID int64) ([]graph.SLOFinding, error) {
@@ -898,6 +933,7 @@ type Scan struct {
 	ruleFinding *sql.Stmt
 	queryCost   *sql.Stmt
 	sloFinding  *sql.Stmt
+	pipeline    *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -1003,6 +1039,7 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		{&sc.ruleFinding, `INSERT INTO rule_findings (scan_id, consumer_id, kind, detail, fix) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.queryCost, `INSERT INTO query_costs (scan_id, consumer_id, queries, samples, bytes) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.sloFinding, `INSERT INTO slo_findings (scan_id, kind, subject, name, detail, fix) VALUES (?, ?, ?, ?, ?, ?)`},
+		{&sc.pipeline, `INSERT INTO pipeline_targets (scan_id, subject, pipeline, note) VALUES (?, ?, ?, ?)`},
 		{&sc.score, `INSERT INTO scores (scan_id, signal_id, monthly_cost, usage_weight, strongest, confidence, priority, held)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
@@ -1194,6 +1231,19 @@ func (sc *Scan) PutQueryCost(ctx context.Context, c graph.QueryCost) error {
 	}
 	_, err := sc.queryCost.ExecContext(ctx, sc.ID, c.ConsumerID, c.Queries, c.Samples, c.Bytes)
 	return wrap("query cost", c.ConsumerID, err)
+}
+
+// PutPipelineTarget records one subject's pipeline target, once per
+// subject. Unmapped (empty Pipeline) needs a Note saying why.
+func (sc *Scan) PutPipelineTarget(ctx context.Context, t graph.PipelineTarget) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if t.Subject == "" || (t.Pipeline == "" && t.Note == "") {
+		return errors.New("store: pipeline target: Subject is required, and Note when unmapped")
+	}
+	_, err := sc.pipeline.ExecContext(ctx, sc.ID, t.Subject, t.Pipeline, t.Note)
+	return wrap("pipeline target", t.Subject, err)
 }
 
 // PutSLOFinding records one SLO coverage finding, once per kind and

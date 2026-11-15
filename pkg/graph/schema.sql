@@ -255,6 +255,18 @@ CREATE TABLE IF NOT EXISTS slo_findings (
     PRIMARY KEY (scan_id, kind, subject)
 );
 
+-- Pipeline targets (graph.PipelineTarget, S6 item 4, ADR 0007): the
+-- pipeline each signal maps to, '' when unmapped (note says why). subject:
+-- a signal ID, or stream:<labels> for a stream the volume API listed (not
+-- a signal, so no foreign key).
+CREATE TABLE IF NOT EXISTS pipeline_targets (
+    scan_id  INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    subject  TEXT NOT NULL,
+    pipeline TEXT NOT NULL,
+    note     TEXT NOT NULL,
+    PRIMARY KEY (scan_id, subject)
+);
+
 -- Dashboard loads in a scan's window, per login and kind. browser = 1 is a
 -- view from the dashboard page; 0 is an API client other than tvt.
 CREATE TABLE IF NOT EXISTS dashboard_loads (

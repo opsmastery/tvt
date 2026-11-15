@@ -1,0 +1,281 @@
+-- Usage graph store (SQLite for the CLI, Postgres for continuous mode).
+-- Keep this DDL portable between the two.
+--
+-- Times are INTEGER Unix milliseconds (UTC), NULL when unknown. Integers
+-- compare and aggregate exactly in both databases; text timestamps don't.
+--
+-- Each scan rewrites the current graph inside one transaction. Rows keep
+-- the id of the last scan that saw them (last_scan), so the graph "as of
+-- scan N" is the rows with last_scan = N, and a dashboard deleted since an
+-- earlier scan stops protecting signals. first_seen survives across scans.
+-- Foreign keys are checked at commit, so a scan can write rows in any order.
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+-- One row per completed scan. A scan's rows are written in the same
+-- transaction as its finished_at, so an interrupted scan leaves nothing.
+CREATE TABLE IF NOT EXISTS scans (
+    id           INTEGER PRIMARY KEY,
+    started_at   INTEGER NOT NULL,
+    finished_at  INTEGER NOT NULL,
+    window_days  INTEGER NOT NULL,
+    log_coverage REAL NOT NULL DEFAULT 0, -- 0..1, share of sources with usable query logs
+    -- The price card monthly_cost uses (name, its currency, 1 for a vendor
+    -- preset: approximate, its kind). Empty when no card was configured.
+    pricecard    TEXT NOT NULL DEFAULT '',
+    currency     TEXT NOT NULL DEFAULT '',
+    price_preset INTEGER NOT NULL DEFAULT 0,
+    price_kind   TEXT NOT NULL DEFAULT '',
+    -- A self_hosted card's model inputs and where each came from (the card,
+    -- the server's /metrics, or an assumption).
+    bytes_per_sample      REAL NOT NULL DEFAULT 0,
+    bytes_per_sample_from TEXT NOT NULL DEFAULT '',
+    retention_ms          INTEGER NOT NULL DEFAULT 0,
+    retention_from        TEXT NOT NULL DEFAULT '',
+    head_bytes_per_series REAL NOT NULL DEFAULT 0,
+    -- 1 when Loki's volume API hit its series limit: stream bytes are low.
+    volume_truncated      INTEGER NOT NULL DEFAULT 0,
+    -- What the Prometheus server reported about its TSDB on /metrics, with
+    -- any card (tsdb_measured = 1), so a stored scan can be repriced at a
+    -- self_hosted card. Zero values are unknown.
+    tsdb_measured         INTEGER NOT NULL DEFAULT 0,
+    tsdb_bytes_per_sample REAL NOT NULL DEFAULT 0,
+    tsdb_head_series      INTEGER NOT NULL DEFAULT 0,
+    tsdb_head_bytes       INTEGER NOT NULL DEFAULT 0,
+    tsdb_blocks_bytes     INTEGER NOT NULL DEFAULT 0,
+    tsdb_retention_ms     INTEGER NOT NULL DEFAULT 0,
+    tsdb_retention_bytes  INTEGER NOT NULL DEFAULT 0
+);
+
+-- Coverage of each usage-evidence source for a scan, configured or not.
+CREATE TABLE IF NOT EXISTS scan_sources (
+    scan_id      INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    source       TEXT NOT NULL,
+    configured   INTEGER NOT NULL CHECK (configured IN (0, 1)),
+    coverage     REAL NOT NULL CHECK (coverage >= 0 AND coverage <= 1),
+    window_start INTEGER NOT NULL,
+    -- Schema version 4: why the source can't be trusted (a query log
+    -- whose probe never appeared), '' when it can.
+    gap          TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (scan_id, source)
+);
+
+CREATE TABLE IF NOT EXISTS signals (
+    id         TEXT PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK (kind IN ('metric', 'label', 'stream', 'span_attribute')),
+    name       TEXT NOT NULL,
+    parent     TEXT NOT NULL DEFAULT '',
+    source     TEXT NOT NULL,
+    first_seen INTEGER NOT NULL,
+    last_scan  INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    -- Schema version 6. class: hard_keep, keep_high, dormant or candidate
+    -- ('' before version 6). dormant: why an unread signal looks
+    -- incident-critical. owner and tier: from tvt.yaml ownership.
+    class      TEXT NOT NULL DEFAULT '' CHECK (class IN ('', 'hard_keep', 'keep_high', 'dormant', 'candidate')),
+    dormant    TEXT NOT NULL DEFAULT '',
+    owner      TEXT NOT NULL DEFAULT '',
+    tier       INTEGER
+);
+CREATE INDEX IF NOT EXISTS signals_name ON signals (kind, name);
+CREATE INDEX IF NOT EXISTS signals_scan ON signals (last_scan);
+
+CREATE TABLE IF NOT EXISTS consumers (
+    id          TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    expr        TEXT NOT NULL DEFAULT '',  -- the query, for evidence in reports
+    team        TEXT NOT NULL DEFAULT '',
+    last_viewed INTEGER,
+    last_scan   INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    -- Schema version 5, rules only. evaluated_by: 'grafana' when Grafana
+    -- evaluates the rule and queries the datasource every interval, '' when
+    -- the datasource's ruler does. interval_ms: evaluation interval (NULL
+    -- if unknown). datasources: the UIDs it queries, one per line.
+    evaluated_by TEXT NOT NULL DEFAULT '',
+    interval_ms  INTEGER,
+    datasources  TEXT NOT NULL DEFAULT '',
+    -- Schema version 7: why tvt couldn't read what the consumer queries
+    -- (a datasource type it doesn't parse), '' when it could. Such a
+    -- consumer reads unknown signals: never "reads nothing".
+    unparsed     TEXT NOT NULL DEFAULT '',
+    -- Query-log consumers: who sent the query (dashboard, rule, explore,
+    -- agent, api); '' for collected consumers.
+    client       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS consumers_scan ON consumers (last_scan);
+
+CREATE TABLE IF NOT EXISTS refs (
+    signal_id   TEXT NOT NULL REFERENCES signals (id) DEFERRABLE INITIALLY DEFERRED,
+    consumer_id TEXT NOT NULL REFERENCES consumers (id) DEFERRABLE INITIALLY DEFERRED,
+    via         TEXT NOT NULL DEFAULT '',
+    last_seen   INTEGER,
+    actor       TEXT NOT NULL DEFAULT '',
+    -- 1 when the reference is a guess (a variable, an unresolved pattern,
+    -- a query that didn't parse); reason says why (schema version 2).
+    assumed     INTEGER NOT NULL DEFAULT 0 CHECK (assumed IN (0, 1)),
+    -- Schema version 3. evidence: declared, incident or observed ('' for
+    -- rows from before version 3). labels: one "use:name" per line, the
+    -- labels the consumer reads. all_labels: it may depend on every label.
+    -- reason: why it is assumed, one reason per line. result_labels: the
+    -- signal's labels survive into the consumer's result (not a read).
+    evidence    TEXT NOT NULL DEFAULT '' CHECK (evidence IN ('', 'declared', 'incident', 'observed')),
+    labels      TEXT NOT NULL DEFAULT '',
+    all_labels  INTEGER NOT NULL DEFAULT 0 CHECK (all_labels IN (0, 1)),
+    reason      TEXT NOT NULL DEFAULT '',
+    result_labels INTEGER NOT NULL DEFAULT 0 CHECK (result_labels IN (0, 1)),
+    last_scan   INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    -- Schema version 13: the consumer only swept the signal (a query over
+    -- every metric name): weak evidence that keeps nothing on its own.
+    sweep       INTEGER NOT NULL DEFAULT 0 CHECK (sweep IN (0, 1)),
+    -- Schema version 15: the first scan that saw the reference (never
+    -- updated), for tvt why's "first seen". Rows from before version 15
+    -- carry their last_scan, the earliest scan still known.
+    first_scan  INTEGER REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    PRIMARY KEY (signal_id, consumer_id, via)
+);
+CREATE INDEX IF NOT EXISTS refs_consumer ON refs (consumer_id);
+CREATE INDEX IF NOT EXISTS refs_scan ON refs (last_scan);
+
+-- One row per signal per scan: the history savings are measured from.
+CREATE TABLE IF NOT EXISTS costs (
+    signal_id     TEXT NOT NULL REFERENCES signals (id) DEFERRABLE INITIALLY DEFERRED,
+    scan_id       INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    observed_at   INTEGER NOT NULL,
+    active_series INTEGER NOT NULL DEFAULT 0,
+    distinct_values INTEGER NOT NULL DEFAULT 0, -- labels only
+    bytes_per_day INTEGER NOT NULL DEFAULT 0,
+    spans_per_day INTEGER NOT NULL DEFAULT 0,
+    monthly_cost  REAL NOT NULL DEFAULT 0,
+    -- Metrics: the scrape interval samples are counted at, and why it was
+    -- assumed when no API gave it (empty when measured).
+    interval_ms   INTEGER NOT NULL DEFAULT 0,
+    interval_assumed TEXT NOT NULL DEFAULT '',
+    -- Histogram _bucket series: the bucket count multiplying the series,
+    -- and whether exemplar storage is on.
+    buckets       INTEGER NOT NULL DEFAULT 0,
+    exemplars     INTEGER NOT NULL DEFAULT 0,
+    -- Self-hosted: bytes on disk over retention, replicas included.
+    disk_bytes    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (signal_id, scan_id)
+);
+
+-- Every Loki stream's ingest in a scan (the volume API), by its full label
+-- set as a canonical selector. Stream signals' costs.bytes_per_day sum the
+-- streams their selector matches; these rows let any selector or label drop
+-- be priced without rescanning.
+CREATE TABLE IF NOT EXISTS stream_volumes (
+    scan_id       INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    selector      TEXT NOT NULL,
+    bytes_per_day INTEGER NOT NULL,
+    PRIMARY KEY (scan_id, selector)
+);
+
+-- Schema version 14: each candidate signal's rank in a scan (graph.Score).
+-- strongest names the evidence the usage weight came from; held says why
+-- confidence is 0 ('window', 'coverage', 'new'), '' when it isn't.
+CREATE TABLE IF NOT EXISTS scores (
+    scan_id      INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    signal_id    TEXT NOT NULL REFERENCES signals (id) DEFERRABLE INITIALLY DEFERRED,
+    monthly_cost REAL NOT NULL,
+    usage_weight REAL NOT NULL CHECK (usage_weight >= 0),
+    strongest    TEXT NOT NULL,
+    confidence   REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+    priority     REAL NOT NULL,
+    held         TEXT NOT NULL DEFAULT '' CHECK (held IN ('', 'window', 'coverage', 'new')),
+    PRIMARY KEY (scan_id, signal_id)
+);
+
+-- Schema version 16: line patterns worth cutting inside a stream
+-- (graph.LineFinding, S5 items 3-4): its full label set, Loki's pattern,
+-- the line count over window_ms, the estimated share of the stream's bytes,
+-- and those bytes per day and their monthly cost.
+CREATE TABLE IF NOT EXISTS line_findings (
+    scan_id       INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    stream        TEXT NOT NULL,
+    pattern       TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('repeated_line', 'line_handoff')),
+    lines         INTEGER NOT NULL CHECK (lines >= 0),
+    window_ms     INTEGER NOT NULL CHECK (window_ms >= 0),
+    share         REAL NOT NULL CHECK (share >= 0 AND share <= 1),
+    bytes_per_day INTEGER NOT NULL CHECK (bytes_per_day >= 0),
+    monthly_cost  REAL NOT NULL,
+    PRIMARY KEY (scan_id, stream, pattern)
+);
+
+-- Schema version 17: what each rule's evaluations cost and what's wrong
+-- with it (graph.RuleCost, graph.RuleFinding; S6 item 1). Report only.
+CREATE TABLE IF NOT EXISTS rule_costs (
+    scan_id          INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    consumer_id      TEXT NOT NULL REFERENCES consumers (id) DEFERRABLE INITIALLY DEFERRED,
+    evals_per_day    REAL NOT NULL CHECK (evals_per_day >= 0),
+    samples_per_eval REAL NOT NULL CHECK (samples_per_eval >= 0),
+    bytes_per_eval   REAL NOT NULL CHECK (bytes_per_eval >= 0),
+    evaluations      INTEGER NOT NULL CHECK (evaluations >= 0),
+    unknown          TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (scan_id, consumer_id)
+);
+
+CREATE TABLE IF NOT EXISTS rule_findings (
+    scan_id     INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    consumer_id TEXT NOT NULL REFERENCES consumers (id) DEFERRABLE INITIALLY DEFERRED,
+    kind        TEXT NOT NULL CHECK (kind IN ('grafana_managed_alert', 'logql_parses_raw_logs', 'no_line_filter_before_parser',
+                    'long_range_window', 'interval_below_scrape', 'duplicate_rule', 'unread_recording_rule', 'no_series',
+                    'group_slower_than_interval')),
+    detail      TEXT NOT NULL DEFAULT '',
+    fix         TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (scan_id, consumer_id, kind)
+);
+
+-- Schema version 18: the measured cost of each query-log consumer's
+-- queries in a scan's window (graph.QueryCost, S6 item 2): queries logged
+-- and the samples (PromQL) and bytes (LogQL) they read; a query matching
+-- several panels or rules is split evenly among them.
+CREATE TABLE IF NOT EXISTS query_costs (
+    scan_id     INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    consumer_id TEXT NOT NULL REFERENCES consumers (id) DEFERRABLE INITIALLY DEFERRED,
+    queries     REAL NOT NULL CHECK (queries >= 0),
+    samples     REAL NOT NULL CHECK (samples >= 0),
+    bytes       REAL NOT NULL CHECK (bytes >= 0),
+    PRIMARY KEY (scan_id, consumer_id)
+);
+
+-- SLO coverage findings (graph.SLOFinding, S6 item 3; report only).
+-- subject: the alert's or SLO's consumer ID, or service:<owner> (not a
+-- consumer, so no foreign key).
+CREATE TABLE IF NOT EXISTS slo_findings (
+    scan_id INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    kind    TEXT NOT NULL CHECK (kind IN ('service_without_slo', 'paging_not_burn_rate', 'slo_without_alert')),
+    subject TEXT NOT NULL,
+    name    TEXT NOT NULL,
+    detail  TEXT NOT NULL,
+    fix     TEXT NOT NULL,
+    PRIMARY KEY (scan_id, kind, subject)
+);
+
+-- Pipeline targets (graph.PipelineTarget, S6 item 4, ADR 0007): the
+-- pipeline each signal maps to, '' when unmapped (note says why). subject:
+-- a signal ID, or stream:<labels> for a stream the volume API listed (not
+-- a signal, so no foreign key).
+CREATE TABLE IF NOT EXISTS pipeline_targets (
+    scan_id  INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    subject  TEXT NOT NULL,
+    pipeline TEXT NOT NULL,
+    note     TEXT NOT NULL,
+    PRIMARY KEY (scan_id, subject)
+);
+
+-- Dashboard loads in a scan's window, per login and kind. browser = 1 is a
+-- view from the dashboard page; 0 is an API client other than tvt.
+CREATE TABLE IF NOT EXISTS dashboard_loads (
+    scan_id       INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    org_id        INTEGER NOT NULL,
+    dashboard_uid TEXT NOT NULL,
+    login         TEXT NOT NULL,
+    browser       INTEGER NOT NULL CHECK (browser IN (0, 1)),
+    loads         INTEGER NOT NULL,
+    last_at       INTEGER NOT NULL,
+    PRIMARY KEY (scan_id, org_id, dashboard_uid, login, browser)
+);

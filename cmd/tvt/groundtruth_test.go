@@ -61,6 +61,20 @@ type groundTruth struct {
 		BurnRate           []string             `yaml:"burn_rate"`
 		SLOsWithoutAlert   []string             `yaml:"slos_without_alert"`
 	} `yaml:"slo_coverage"`
+	// Pipelines maps signals to the pipeline that ingests them (S6 item 4):
+	// per pipeline name, plus the special keys unmapped and rule_outputs.
+	Pipelines map[string]yaml.Node `yaml:"pipelines"`
+}
+
+// gtPipeline is one pipeline's expected targets, or ground truth's
+// unmapped entry.
+type gtPipeline struct {
+	Kind     string   `yaml:"kind"`
+	Files    []string `yaml:"files"`
+	Handles  []string `yaml:"handles"`
+	Jobs     []string `yaml:"jobs"`
+	Streams  []string `yaml:"streams"`
+	Examples []string `yaml:"examples"`
 }
 
 // gtRuleFindings is one rule's expected findings.
