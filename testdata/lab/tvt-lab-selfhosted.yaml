@@ -5,6 +5,8 @@
 pricecard: pricecard-selfhosted.yaml
 slos:
   paths: [slos]
+postmortems:
+  paths: [postmortems]
 runbooks:
   fetch: false
   mirrors:

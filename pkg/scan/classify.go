@@ -3,6 +3,8 @@ package scan
 import (
 	"fmt"
 	"regexp"
+	"slices"
+	"sort"
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
@@ -17,13 +19,14 @@ import (
 //     SLO, runbook step, external consumer) references it, directly or through a
 //     recording rule (chains give the alert a reference with Via set).
 //   - keep_high: a dashboard viewed in the window references it.
-//   - dormant: no consumer references it, and its name or its owner's
-//     tier says it may be needed in an incident.
+//   - dormant: no consumer references it, and its name, its owner's
+//     tier, or a runbook or postmortem that names it says it may be
+//     needed in an incident.
 //   - candidate: everything else, ranked by score.Score.
 //
 // A label signal takes its metric's owner, tier and name rules; a stream
 // signal's name rules run over its selector.
-func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.Reference, owners []config.Owner, since, until time.Time) error {
+func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.Reference, owners []config.Owner, mentions map[string]string, since, until time.Time) error {
 	om, err := newOwnerMatcher(owners)
 	if err != nil {
 		return err
@@ -59,6 +62,9 @@ func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.R
 		f.Name = s.Name
 		if s.Kind == graph.KindLabel {
 			f.Name = s.Parent
+		}
+		if s.Kind == graph.KindMetric || s.Kind == graph.KindLabel {
+			f.Mentioned = mentions[f.Name]
 		}
 		f.Tier = -1
 		if o := om.match(*s); o != nil {
@@ -183,4 +189,33 @@ func matcherMatches(m parse.Matcher, value string) bool {
 	default:
 		return false
 	}
+}
+
+// Mention is an incident write-up's metric-shaped names (parse.Mentions).
+type Mention struct {
+	// Source says where, as the dormant reason shows it: "postmortem
+	// <path>" or "runbook <url>".
+	Source string
+	Names  []string
+}
+
+// mentioned maps each metric name a runbook or postmortem names to the
+// first (sorted) source naming it.
+func mentioned(in Inputs) map[string]string {
+	all := slices.Clone(in.Mentions)
+	for _, rb := range in.Runbooks {
+		if len(rb.Mentions) > 0 {
+			all = append(all, Mention{Source: "runbook " + rb.URL, Names: rb.Mentions})
+		}
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].Source < all[j].Source })
+	out := map[string]string{}
+	for _, m := range all {
+		for _, n := range m.Names {
+			if _, ok := out[n]; !ok {
+				out[n] = m.Source
+			}
+		}
+	}
+	return out
 }

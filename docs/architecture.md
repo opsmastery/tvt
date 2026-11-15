@@ -23,7 +23,7 @@ Every scan stores a class on every signal (`score.Classify`, applied in `scan.Bu
 | --- | --- | --- |
 | `hard_keep` | An alert (Prometheus, Mimir, Loki or Grafana-managed), a recording rule feeding one, an SLO or runbook query, or an external consumer declared in `tvt.yaml` reads it | Never recommend |
 | `keep_high` | A dashboard viewed in the window shows it | Never recommend; `check` protects it like a hard keep |
-| `dormant` | Nothing reads it, but its name says error, latency, saturation or queue depth, or its owner's tier is 0 or 1 | Ask the owner; never a drop candidate |
+| `dormant` | Nothing reads it, but its name says error, latency, saturation or queue depth, its owner's tier is 0 or 1, or a runbook or postmortem names it without querying it | Ask the owner ("dormant: confirm" in the report); never a drop candidate |
 | `candidate` | Everything else | Ranked by the weights below |
 
 `hard_keep` and `keep_high` are both protected; they stay separate so the report can tell a declared dependency from "people look at it". Owners and tiers come from `ownership.owners` in `tvt.yaml` (first match; a label takes its metric's owner).
