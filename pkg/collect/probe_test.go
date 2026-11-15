@@ -67,3 +67,29 @@ func TestNewProbeNonce(t *testing.T) {
 		}
 	}
 }
+
+func TestLokiProbeQueryRoundTrip(t *testing.T) {
+	q := LokiProbeQuery("0f1e2d3c4b5a6978")
+	if want := `count_over_time({tvt_query_log_probe="0f1e2d3c4b5a6978"}[1m])`; q != want {
+		t.Fatalf("LokiProbeQuery = %q, want %q", q, want)
+	}
+	if n, ok := LokiProbeNonce(q); !ok || n != "0f1e2d3c4b5a6978" {
+		t.Fatalf("LokiProbeNonce(%q) = %q, %v", q, n, ok)
+	}
+	for _, expr := range []string{
+		ProbeQuery("ab12"),
+		`count_over_time({tvt_query_log_probe="ab12", app="shop"}[1m])`,
+		`count_over_time({tvt_query_log_probe=~"ab12"}[1m])`,
+		`sum(count_over_time({tvt_query_log_probe="ab12"}[1m]))`,
+		`count_over_time({tvt_query_log_probe="ab12"}[1m]) or count_over_time({app="shop"}[1m])`,
+		`count_over_time({tvt_query_log_probe="AB12"}[1m])`,
+		LokiProbeQuery(strings.Repeat("a", 65)),
+	} {
+		if n, ok := LokiProbeNonce(expr); ok {
+			t.Errorf("LokiProbeNonce(%q) = %q, true; want false", expr, n)
+		}
+	}
+	if _, ok := ProbeNonce(q); ok {
+		t.Error("ProbeNonce accepts the Loki marker")
+	}
+}
