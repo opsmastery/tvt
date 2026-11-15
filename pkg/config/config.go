@@ -33,6 +33,10 @@ type Config struct {
 	SLOs SLOs `yaml:"slos"`
 	// Runbooks says how to read the runbooks alerts link to.
 	Runbooks Runbooks `yaml:"runbooks"`
+	// Postmortems are incident write-ups: a metric one names is expected
+	// in incidents, so if nothing reads it, it is dormant (ask the owner),
+	// never a drop candidate.
+	Postmortems Postmortems `yaml:"postmortems"`
 	// PriceCard is a price card file (docs/pricecard.md), relative to
 	// tvt.yaml, or the name of a shipped preset such as grafana-cloud.
 	PriceCard string `yaml:"pricecard"`
@@ -97,6 +101,14 @@ type SLOs struct {
 	Paths []string `yaml:"paths"`
 }
 
+// Postmortems lists where incident write-ups live.
+type Postmortems struct {
+	// Paths are files or directories (walked recursively; .md, .markdown,
+	// .txt, .html and .htm files are read). Relative paths are relative
+	// to tvt.yaml.
+	Paths []string `yaml:"paths"`
+}
+
 // Runbooks says how tvt reads alert runbooks. A link is read from the
 // first mirror whose url_prefix it starts with, else fetched over HTTP GET
 // when Fetch is true; anything else is a recorded gap.
@@ -147,6 +159,9 @@ func Load(path string) (*Config, error) {
 	}
 	for i, m := range c.Runbooks.Mirrors {
 		c.Runbooks.Mirrors[i].Path = relTo(dir, m.Path)
+	}
+	for i, p := range c.Postmortems.Paths {
+		c.Postmortems.Paths[i] = relTo(dir, p)
 	}
 	if isPath(c.PriceCard) {
 		c.PriceCard = relTo(dir, c.PriceCard)
@@ -206,6 +221,11 @@ func (c *Config) validate() error {
 	for i, p := range c.SLOs.Paths {
 		if p == "" {
 			return fmt.Errorf("slos.paths[%d]: empty path", i)
+		}
+	}
+	for i, p := range c.Postmortems.Paths {
+		if p == "" {
+			return fmt.Errorf("postmortems.paths[%d]: empty path", i)
 		}
 	}
 	for i, m := range c.Runbooks.Mirrors {

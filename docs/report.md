@@ -24,6 +24,12 @@ Only `candidate` signals with a score above zero confidence. Hard keeps, keep_hi
 
 `downsample` and `finding` are reserved for S5 and S6.
 
+## Dormant: confirm
+
+A dormant signal is unread but looks incident-critical: its name says error, latency, saturation or queue depth, its owner's tier is 0 or 1, or a runbook or postmortem names it without querying it. Runbook mentions come from the runbooks alerts link to; postmortems from `postmortems.paths` in `tvt.yaml` (files or directories of `.md`, `.markdown`, `.txt`, `.html`). A mention is any metric-shaped word (it has `_` or `:`) that names a collected metric.
+
+Dormant signals are never recommendations. Each becomes a `confirm` row: `id` (`confirm:<signal id>`), `signal`, `reason`, `question` (for the owner: nothing read it in the window, it looks incident-critical because of the reason, will they need it in an incident, and what dropping it would save), `owner`, `tier`, `savings` and `gaps`. Rows come highest saving first, limited by `--top`; a label whose metric is also dormant is left out, since the metric's question covers it. `totals.dormant` counts every dormant signal. An owner's answer arrives with S9's owner workflow.
+
 Recommendations are ranked by **savings per minute of checking**: the score's priority (monthly cost ÷ (1 + usage weight) × confidence) divided by `check_minutes`. A cheap check of a moderate saving can outrank an expensive check of a larger one.
 
 ## Each recommendation
@@ -44,6 +50,6 @@ Recommendations are ranked by **savings per minute of checking**: the score's pr
 
 ## The header
 
-`scan` (ID, start, window, log coverage, price card), `sources` (every evidence source's coverage), `gaps` (every source that is unconfigured, partial or unproven), `totals` (candidates, recommendations, metric savings, and stream savings apart, since stream selectors overlap), `held`.
+`scan` (ID, start, window, log coverage, price card), `sources` (every evidence source's coverage), `gaps` (every source that is unconfigured, partial or unproven), `totals` (candidates, recommendations, dormant signals, metric savings, and stream savings apart, since stream selectors overlap), `held`.
 
 Readers check `version` (now 1) and refuse one they don't know.

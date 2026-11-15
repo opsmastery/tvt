@@ -124,6 +124,7 @@ func (r *Reader) Read(ctx context.Context, links map[string][]string) []collect.
 			rb.Err = err.Error()
 		} else {
 			rb.Steps = parse.RunbookSteps(text, isHTML)
+			rb.Mentions = parse.Mentions(text, isHTML)
 		}
 		out = append(out, rb)
 	}
