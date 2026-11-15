@@ -36,6 +36,7 @@ summary { cursor:pointer; color:var(--accent); }
 <main>
 <h1>Telemetry Value Tracker report</h1>
 <p class="muted">Scan {{.Scan.ID}}, {{.Scan.WindowDays}}-day window to {{date .Scan.StartedAt}}{{if .Scan.PriceCard}}, priced on {{.Scan.PriceCard}}{{if .Scan.Approximate}} (a vendor preset: approximate){{end}}{{end}}. Generated {{when .GeneratedAt}} UTC.</p>
+{{if .Scan.RepricedFrom}}<p class="rowgap"><b>What-if pricing</b>: the scan was priced on {{.Scan.RepricedFrom}}; every cost, saving and priority here is repriced on {{.Scan.PriceCard}} without rescanning. Evidence and confidence are the scan's.</p>{{end}}
 
 <div class="cards">
   <div class="card"><span class="muted">Recommendations</span><b>{{.Totals.Recommendations}}</b><span class="muted">of {{.Totals.Candidates}} candidates</span></div>
