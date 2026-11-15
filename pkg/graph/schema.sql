@@ -205,6 +205,30 @@ CREATE TABLE IF NOT EXISTS line_findings (
     PRIMARY KEY (scan_id, stream, pattern)
 );
 
+-- Schema version 17: what each rule's evaluations cost and what's wrong
+-- with it (graph.RuleCost, graph.RuleFinding; S6 item 1). Report only.
+CREATE TABLE IF NOT EXISTS rule_costs (
+    scan_id          INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    consumer_id      TEXT NOT NULL REFERENCES consumers (id) DEFERRABLE INITIALLY DEFERRED,
+    evals_per_day    REAL NOT NULL CHECK (evals_per_day >= 0),
+    samples_per_eval REAL NOT NULL CHECK (samples_per_eval >= 0),
+    bytes_per_eval   REAL NOT NULL CHECK (bytes_per_eval >= 0),
+    evaluations      INTEGER NOT NULL CHECK (evaluations >= 0),
+    unknown          TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (scan_id, consumer_id)
+);
+
+CREATE TABLE IF NOT EXISTS rule_findings (
+    scan_id     INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    consumer_id TEXT NOT NULL REFERENCES consumers (id) DEFERRABLE INITIALLY DEFERRED,
+    kind        TEXT NOT NULL CHECK (kind IN ('grafana_managed_alert', 'logql_parses_raw_logs', 'no_line_filter_before_parser',
+                    'long_range_window', 'interval_below_scrape', 'duplicate_rule', 'unread_recording_rule', 'no_series',
+                    'group_slower_than_interval')),
+    detail      TEXT NOT NULL DEFAULT '',
+    fix         TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (scan_id, consumer_id, kind)
+);
+
 -- Dashboard loads in a scan's window, per login and kind. browser = 1 is a
 -- view from the dashboard page; 0 is an API client other than tvt.
 CREATE TABLE IF NOT EXISTS dashboard_loads (

@@ -1,0 +1,16 @@
+shop-audit.yml:
+    - name: shop-audit
+      rules:
+        - alert: ShopAuditDenials
+          expr: sum(count_over_time({app="shop", component="audit"} |= "result=denied" [5m])) > 20
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Spike in denied actions in the shop audit log
+shop-checkout.yml:
+    - name: shop-checkout-recording
+      interval: 1m
+      rules:
+        - record: shop:checkout_errors:count5m
+          expr: sum(count_over_time({app="shop", component="api", level="error"} |= "route=/checkout" | logfmt | route="/checkout" [5m]))

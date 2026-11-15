@@ -291,6 +291,47 @@ func (f LineFinding) PerSecond() float64 {
 	return float64(f.Lines) / f.Window.Seconds()
 }
 
+// RuleCost is what one rule's evaluations cost (S6 item 1): evaluations
+// per day from its interval, and the samples (PromQL) or bytes (LogQL)
+// each evaluation read, measured from the query logs. EvalsPerDay is 0
+// when the interval is unknown; the per-evaluation figures are 0 when no
+// evaluation was logged. Unknown says why the daily cost is unknown, never
+// zero.
+type RuleCost struct {
+	ConsumerID     string
+	EvalsPerDay    float64
+	SamplesPerEval float64
+	BytesPerEval   float64
+	// Evaluations is how many logged evaluations the means come from.
+	Evaluations int64
+	Unknown     string
+}
+
+// SamplesPerDay and BytesPerDay are the daily cost; 0 when unknown.
+func (c RuleCost) SamplesPerDay() float64 { return c.EvalsPerDay * c.SamplesPerEval }
+func (c RuleCost) BytesPerDay() float64   { return c.EvalsPerDay * c.BytesPerEval }
+
+// Rule finding kinds (S6 item 1). Report only: tvt never edits rules.
+const (
+	RuleGrafanaManaged     = "grafana_managed_alert"        // Grafana evaluates an alert on Loki or Prometheus
+	RuleParsesRawLogs      = "logql_parses_raw_logs"        // a LogQL alert parses raw lines every interval
+	RuleNoLineFilter       = "no_line_filter_before_parser" // a parser runs on every line of the stream
+	RuleLongRange          = "long_range_window"            // a range far longer than the interval
+	RuleIntervalBelowScrap = "interval_below_scrape"        // evaluated more often than its metrics are scraped
+	RuleDuplicate          = "duplicate_rule"               // same expression as another rule of the ruler
+	RuleUnreadRecording    = "unread_recording_rule"        // a recording rule nothing reads
+	RuleNoSeries           = "no_series"                    // reads only metrics with no series: broken, not unused
+	RuleGroupSlow          = "group_slower_than_interval"   // its group takes longer than its interval
+)
+
+// RuleFinding is one inefficiency or fault of a rule, with its fix.
+type RuleFinding struct {
+	ConsumerID string
+	Kind       string
+	Detail     string
+	Fix        string
+}
+
 // DashboardLoad aggregates loads of one dashboard by one login in a scan's
 // window. Browser loads (from the dashboard page) are views; API loads by
 // anyone but tvt are recorded as evidence of use but not counted as views.

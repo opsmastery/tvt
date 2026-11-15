@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/internal/logfile"
@@ -34,6 +35,8 @@ type QueryLog struct {
 var (
 	_ collect.QueryLogSource = (*QueryLog)(nil)
 	_ collect.ProbeSource    = (*QueryLog)(nil)
+
+	_ collect.RuleEvaluationSource = (*QueryLog)(nil)
 )
 
 // queryLogLine is one query log entry. Prometheus 3.x (slog) writes the
@@ -42,8 +45,16 @@ type queryLogLine struct {
 	Time   time.Time `json:"time"`
 	TS     time.Time `json:"ts"`
 	Params struct {
-		Query string `json:"query"`
+		Query string          `json:"query"`
+		Start string          `json:"start"`
+		End   string          `json:"end"`
+		Step  json.RawMessage `json:"step"`
 	} `json:"params"`
+	Stats *struct {
+		Samples struct {
+			TotalQueryableSamples int64 `json:"totalQueryableSamples"`
+		} `json:"samples"`
+	} `json:"stats"`
 	RuleGroup *struct {
 		Name string `json:"name"`
 		File string `json:"file"`
@@ -69,6 +80,38 @@ func (l *queryLogLine) at() time.Time {
 		return l.Time
 	}
 	return l.TS
+}
+
+// samples is the entry's totalQueryableSamples; 0 when stats weren't logged.
+func (l *queryLogLine) samples() int64 {
+	if l.Stats == nil {
+		return 0
+	}
+	return l.Stats.Samples.TotalQueryableSamples
+}
+
+// instant is true for an instant query: start equals end and no step.
+func (l *queryLogLine) instant() bool {
+	step := strings.TrimSpace(string(l.Params.Step))
+	return l.Params.Start != "" && l.Params.Start == l.Params.End && (step == "" || step == "0")
+}
+
+// RuleEvaluations returns the rule evaluations (entries with ruleGroup)
+// logged at or after since, oldest first, with each one's group and
+// queryable samples.
+func (q *QueryLog) RuleEvaluations(ctx context.Context, since time.Time) ([]collect.RuleEvaluation, error) {
+	var out []collect.RuleEvaluation
+	err := q.scan(ctx, since, func(l *queryLogLine) {
+		if l.RuleGroup == nil {
+			return
+		}
+		out = append(out, collect.RuleEvaluation{Source: "prometheus", Group: l.RuleGroup.Name, Expr: l.Params.Query, At: l.at(), Samples: l.samples()})
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
+	return out, nil
 }
 
 func (q *QueryLog) now() time.Time {
@@ -99,6 +142,7 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 		if l.HTTPRequest != nil {
 			lq.Client = l.HTTPRequest.ClientIP
 		}
+		lq.Samples, lq.Instant = l.samples(), l.instant()
 		out = append(out, lq)
 	})
 	if err != nil {
