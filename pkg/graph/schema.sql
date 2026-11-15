@@ -188,6 +188,23 @@ CREATE TABLE IF NOT EXISTS scores (
     PRIMARY KEY (scan_id, signal_id)
 );
 
+-- Schema version 16: line patterns worth cutting inside a stream
+-- (graph.LineFinding, S5 items 3-4): its full label set, Loki's pattern,
+-- the line count over window_ms, the estimated share of the stream's bytes,
+-- and those bytes per day and their monthly cost.
+CREATE TABLE IF NOT EXISTS line_findings (
+    scan_id       INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    stream        TEXT NOT NULL,
+    pattern       TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('repeated_line', 'line_handoff')),
+    lines         INTEGER NOT NULL CHECK (lines >= 0),
+    window_ms     INTEGER NOT NULL CHECK (window_ms >= 0),
+    share         REAL NOT NULL CHECK (share >= 0 AND share <= 1),
+    bytes_per_day INTEGER NOT NULL CHECK (bytes_per_day >= 0),
+    monthly_cost  REAL NOT NULL,
+    PRIMARY KEY (scan_id, stream, pattern)
+);
+
 -- Dashboard loads in a scan's window, per login and kind. browser = 1 is a
 -- view from the dashboard page; 0 is an API client other than tvt.
 CREATE TABLE IF NOT EXISTS dashboard_loads (
