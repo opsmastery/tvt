@@ -23,6 +23,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
+	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 	"github.com/Opsmastery-Summit/tvt/pkg/score"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
@@ -648,17 +649,18 @@ func TestScanLab(t *testing.T) {
 	// query log, and each covers part of the window; Loki's query log is
 	// recorded as not configured. SLO definitions and runbooks are read in
 	// full: the Sloth SLO and the ShopPaymentQueueBacklog runbook. So are
-	// the datasources of every dashboard and Grafana rule query.
+	// the datasources of every dashboard and Grafana rule query. The lab's
+	// Prometheus has a retention.size, so its storage has no warning.
 	srcs, err := st.Sources(ctx, info.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(srcs) != 6 || l.probes.Load() != 1 {
+	if len(srcs) != 7 || l.probes.Load() != 1 {
 		t.Fatalf("sources = %+v, probes %d", srcs, l.probes.Load())
 	}
 	for _, s := range srcs {
 		// Every lab dashboard and Grafana rule query is Prometheus or Loki.
-		if s.Source == scan.SourceSLOs || s.Source == scan.SourceRunbooks || s.Source == scan.SourceDatasources {
+		if s.Source == scan.SourceSLOs || s.Source == scan.SourceRunbooks || s.Source == scan.SourceDatasources || s.Source == scan.SourceStorage {
 			if !s.Configured || s.Coverage != 1 || s.Gap != "" {
 				t.Errorf("source %+v", s)
 			}
@@ -1356,5 +1358,66 @@ func TestScanKeepsViewsAfterLogRotation(t *testing.T) {
 	}
 	if kept == 0 {
 		t.Fatal("the lab scan has no keep_high signal")
+	}
+}
+
+// Storage hygiene (S5 item 6) on the lab: its Prometheus caps retention at
+// 20 GiB, which fits an unknown volume quietly; on a declared 22 GiB
+// volume (91%) it's a warning, stored as a gap and listed in the report's
+// header, never on a row or as a saving.
+func TestScanStorageHygiene(t *testing.T) {
+	setNow(t)
+	for volume, want := range map[string]string{
+		"":     "retention.size 20 GiB (volume size unknown: storage.volume_size in tvt.yaml)",
+		"50Gi": "retention.size 20 GiB, 40% of the 50 GiB volume",
+		"22Gi": "retention.size 20 GiB, 91% of the 22 GiB volume (warning)",
+	} {
+		t.Run("volume "+volume, func(t *testing.T) {
+			l := newLab(t, nil)
+			dir := t.TempDir()
+			db := filepath.Join(dir, "tvt.db")
+			o := labOptions(l, db)
+			o.Config = filepath.Join(dir, "tvt.yaml")
+			cfg := ""
+			if volume != "" {
+				cfg = "storage:\n  volume_size: " + volume + "\n"
+			}
+			if err := os.WriteFile(o.Config, []byte(cfg), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			if err := runScan(context.Background(), o, env, &out); err != nil {
+				t.Fatalf("scan: %v\n%s", err, out.String())
+			}
+			if !strings.Contains(out.String(), "storage      "+want+"\n") {
+				t.Errorf("output lacks %q:\n%s", want, out.String())
+			}
+			in, _, err := loadReport(context.Background(), db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			in.Now = scanTime
+			r := report.Build(in, 0)
+			var gaps []string
+			for _, g := range r.Gaps {
+				if g.Kind == report.GapStorage {
+					gaps = append(gaps, g.Text)
+				}
+			}
+			if volume == "22Gi" {
+				if len(gaps) != 1 || !strings.Contains(gaps[0], "prometheus storage: retention.size 20 GiB is 91% of the 22 GiB volume") {
+					t.Errorf("storage gaps %q", gaps)
+				}
+			} else if len(gaps) != 0 {
+				t.Errorf("storage gaps %q, want none", gaps)
+			}
+			for _, rec := range r.Recommendations {
+				for _, g := range rec.Evidence.Gaps {
+					if strings.Contains(g, "retention.size") {
+						t.Errorf("%s lists the storage warning", rec.ID)
+					}
+				}
+			}
+		})
 	}
 }
