@@ -11,6 +11,7 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 - ADR 0009 (amends 0007): Fluent Bit and exporter/receiver pipeline kinds, and the source-first rule.
 - ADR 0010: reduce-before-drop actions (label removal, bucketing, stream aggregation, retention tiers, scrape interval, collapse with a count) and where each sits in the least-lossy order.
 - ADR 0011: records as a protected class, approvals bound to an evidence hash, and the expected end state on recommendations.
+- ADR 0012: reading existing OTTL. OTTL is v1 from opentelemetry-collector-contrib v0.164.0: the language reference (paths, literals, operators, function calls, `where` clauses), the standard functions and the Go API are frozen for 1.x. Decide between importing contrib's `pkg/ottl` parser (Apache 2.0; measure the dependency weight as spike 3 did for Loki) and a narrow extractor for paths and the editors that change them. Lambda functions, experimental `xottl` functions and `xprofile` are outside the guarantee.
 - tvt-lab: the pipeline repo and Fluent Bit container from `lab-backlog.md` (S7).
 
 ## S7: writers
@@ -23,6 +24,7 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 4. **The target build must contain what tvt writes.** Before writing a `filter`, `transform`, `logdedup` or `count` component, read the Collector distribution (the ocb manifest in the repo, or `components` output); if the component is missing, add it to the manifest in the same PR or report that it can't.
 5. **Validate before the PR.** Run the target's own validator on the changed config: `otelcol validate` with the user's distribution, `promtool check config`, `alloy fmt` plus a config load, `fluent-bit --dry-run`. A config that doesn't load never becomes a PR.
 6. **Generated OTTL follows safe defaults.** Stable OTTL v1 syntax and standard functions only (no experimental or lambda functions behind feature gates); `error_mode: ignore`; a `where` clause on every regex statement; explicit casts (`Int`, `String`) where an attribute's type varies between libraries; the narrowest correct context; new processors placed in the enrich, clean, parse, filter, cardinality order. Never write the deprecated `batch` processor: use exporter `sending_queue` batching.
+7. **Version-aware templates.** `tvt.yaml` records each pipeline's Collector version. From v0.164.0 (OTTL v1), templates use stable standard functions only. For an older Collector, use a conservative subset known to behave the same and say in the PR that the target predates OTTL v1. Never use a function promoted after the target's version.
 
 ## S8: check, the safety gate
 
@@ -35,6 +37,9 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 5. **Lookback and detection limits.** A shorter retention or downsampling tier is refused when any reader (dashboard, rule, agent) has queried further back on that signal. Each alert's worst-case detection delay (scrape interval + range window + rule-group interval + `for` + Alertmanager `group_wait`) is computed and shown in the report; a scrape interval change is refused when any rate or increase window would hold fewer than four samples, when an alert's `for` is shorter than the new interval, or when an alert would pass its severity's detection objective (set in `tvt.yaml`, for example critical 5m).
 6. **Collapsed logs keep their counts.** Collapsing repeats changes every `count_over_time`, `rate` or `bytes_over_time` over those lines, so `check` refuses the collapse unless each such query is rewritten to sum the count attribute; `propose` includes the rewrite in the PR.
 7. **Attributes must exist where a statement runs.** Refuse a generated filter or transform whose condition reads an attribute no earlier processor or the source provides at that point, and a statement that reads an attribute an earlier statement deleted.
+8. **Model existing OTTL instead of failing closed on it** (ADR 0012). Parse the OTTL already in a pipeline so `check` knows what each existing filter drops and each transform deletes, renames or sets. Statements that use lambda or experimental functions, or functions tvt doesn't model, stay fail-closed for the signals they touch.
+9. **OTTL conditions in the pipeline are readers.** A routing connector condition, a tail sampling or adaptive tail sampling OTTL policy, a filter condition or a lookup key reads the attributes and streams it names. Each becomes a declared `pipeline_rule` consumer, so dropping or renaming one of those attributes is refused like any hard-keep change.
+10. **Connectors chain like recording rules.** The count, sum, signal-to-metrics and spanmetrics connectors turn spans and logs into metrics. A reader of the produced metric also reads the connector's inputs (the stream, and the attributes in its conditions and dimensions), so a log drop that would empty an alerted count metric fails `check`.
 
 ## S9: owner workflow
 
