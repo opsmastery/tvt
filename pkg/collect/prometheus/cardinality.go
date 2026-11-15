@@ -101,8 +101,9 @@ func (c *Client) LabelCardinality(ctx context.Context, metric string) ([]collect
 	series := map[string]int64{}
 	var warnings []string
 	var status string
+	s := map[string]string{} // reused: one map per series was most of the decode's garbage
 	err = decodeEnvelopeStream(json.NewDecoder(body), &status, &warnings, func(dec *json.Decoder) error {
-		var s map[string]string
+		clear(s)
 		if err := dec.Decode(&s); err != nil {
 			return err
 		}
