@@ -108,6 +108,10 @@ type Inputs struct {
 	StreamVolumes []collect.StreamVolume
 	// VolumeTruncated: the volume API hit its series limit.
 	VolumeTruncated bool
+	// Mentions are names incident write-ups (postmortems) give without
+	// querying them; runbooks' mentions come from Runbooks. An unread
+	// metric one names is dormant, not a drop candidate.
+	Mentions []Mention
 	// History is what earlier scans stored, for scoring; zero for the
 	// first scan.
 	History History
@@ -386,7 +390,7 @@ func Build(in Inputs) (Output, error) {
 		out.VolumeTruncated = in.VolumeTruncated
 	}
 	out.References = res.sorted()
-	if err := classify(out.Signals, out.Consumers, out.References, in.Owners, since, in.Start); err != nil {
+	if err := classify(out.Signals, out.Consumers, out.References, in.Owners, mentioned(in), since, in.Start); err != nil {
 		return Output{}, err
 	}
 

@@ -49,6 +49,9 @@ type Facts struct {
 	// Swept: a sweep (a query over every metric name) touched it. Weak
 	// evidence: it changes no class, and scoring weighs it low.
 	Swept bool
+	// Mentioned names a runbook or postmortem that names the signal (for
+	// a label, its metric) without querying it; empty when none does.
+	Mentioned string
 }
 
 // Classify returns a signal's class and, for a dormant signal, why it
@@ -62,6 +65,9 @@ func Classify(f Facts) (Class, string) {
 	case !f.Read:
 		if why := DormantReason(f.Name, f.Tier); why != "" {
 			return ClassDormant, why
+		}
+		if f.Mentioned != "" {
+			return ClassDormant, "mentioned in " + f.Mentioned
 		}
 	}
 	return ClassCandidate, ""

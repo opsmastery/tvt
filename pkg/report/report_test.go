@@ -1,6 +1,7 @@
 package report
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -237,5 +238,46 @@ func TestPct(t *testing.T) {
 		if got := pct(v); got != want {
 			t.Errorf("pct(%v) = %q, want %q", v, got, want)
 		}
+	}
+}
+
+func TestConfirmRows(t *testing.T) {
+	in := fixture()
+	// A dormant metric with a dormant label: the metric's row covers it.
+	in.Signals = append(in.Signals,
+		graph.Signal{ID: "prom:label:node_errors:device", Kind: graph.KindLabel, Name: "device", Parent: "node_errors", Source: "prom", Class: "dormant", Dormant: "error signal"},
+		graph.Signal{ID: "prom:metric:load15", Kind: graph.KindMetric, Name: "load15", Source: "prom", Class: "dormant", Dormant: "mentioned in runbook https://r/x", Owner: "team-infra"})
+	for i := range in.Signals {
+		if in.Signals[i].ID == "prom:metric:node_errors" {
+			in.Signals[i].Dormant = "error signal"
+		}
+	}
+	in.Costs = append(in.Costs, graph.Cost{SignalID: "prom:metric:node_errors", MonthlyCost: 9}, graph.Cost{SignalID: "prom:metric:load15", MonthlyCost: 3})
+	r := Build(in, 0)
+	if r.Totals.Dormant != 3 || len(r.Confirm) != 2 {
+		t.Fatalf("dormant %d, confirm %+v", r.Totals.Dormant, r.Confirm)
+	}
+	first, second := r.Confirm[0], r.Confirm[1]
+	if first.ID != "confirm:prom:metric:node_errors" || second.ID != "confirm:prom:metric:load15" {
+		t.Errorf("order: %s, %s", first.ID, second.ID)
+	}
+	if !strings.HasPrefix(second.Question, "team-infra: nothing read metric load15 in the 30 days to 2026-11-14, but it looks incident-critical (mentioned in runbook https://r/x).") ||
+		!strings.Contains(second.Question, "worth 3.00 USD a month") {
+		t.Errorf("question = %q", second.Question)
+	}
+	if !strings.HasPrefix(first.Question, "Owner: ") || len(first.Gaps) == 0 {
+		t.Errorf("first = %+v", first)
+	}
+	for _, rec := range r.Recommendations {
+		if rec.Signal.ID == "prom:metric:load15" || rec.Signal.ID == "prom:metric:node_errors" {
+			t.Errorf("dormant %s recommended", rec.Signal.ID)
+		}
+	}
+	var b bytes.Buffer
+	if err := RenderHTML(&b, r); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(b.String(), `<tr class="confirm"`); n != 2 || !strings.Contains(b.String(), "Dormant: confirm") {
+		t.Errorf("HTML confirm rows %d", n)
 	}
 }

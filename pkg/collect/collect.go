@@ -210,6 +210,9 @@ type Runbook struct {
 	// Alerts names the rules that link to it, as "source/name".
 	Alerts []string
 	Steps  []parse.RunbookStep
+	// Mentions are the metric-shaped names anywhere in its text
+	// (parse.Mentions); empty for a Grafana link, which has no text.
+	Mentions []string
 	// Err says why it couldn't be read; Steps is then empty.
 	Err string
 }

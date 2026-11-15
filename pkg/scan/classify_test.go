@@ -164,3 +164,32 @@ func TestMatcherMatches(t *testing.T) {
 		}
 	}
 }
+
+// A runbook or postmortem that only names an unread metric makes it, and
+// its labels, dormant: a question for the owner, not a drop candidate.
+func TestClassifyMentions(t *testing.T) {
+	signals := []graph.Signal{
+		{ID: "prom:metric:node_load15", Kind: graph.KindMetric, Name: "node_load15", Source: "prom"},
+		{ID: "prom:label:node_load15:instance", Kind: graph.KindLabel, Name: "instance", Parent: "node_load15", Source: "prom"},
+		{ID: "prom:metric:node_forks_total", Kind: graph.KindMetric, Name: "node_forks_total", Source: "prom"},
+		{ID: "prom:metric:plain_total", Kind: graph.KindMetric, Name: "plain_total", Source: "prom"},
+	}
+	in := Inputs{
+		Mentions: []Mention{{Source: "postmortem pm/2026-10.md", Names: []string{"node_forks_total", "node_load15"}}},
+		Runbooks: []collect.Runbook{{URL: "https://r/backlog", Mentions: []string{"node_load15"}}},
+	}
+	if err := classify(signals, nil, nil, nil, mentioned(in), time.Time{}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"prom:metric:node_load15":         "mentioned in postmortem pm/2026-10.md", // sorted: postmortem before runbook
+		"prom:label:node_load15:instance": "mentioned in postmortem pm/2026-10.md",
+		"prom:metric:node_forks_total":    "mentioned in postmortem pm/2026-10.md",
+		"prom:metric:plain_total":         "",
+	}
+	for _, s := range signals {
+		if s.Dormant != want[s.ID] || (want[s.ID] != "") != (s.Class == "dormant") {
+			t.Errorf("%s: %s %q, want %q", s.ID, s.Class, s.Dormant, want[s.ID])
+		}
+	}
+}

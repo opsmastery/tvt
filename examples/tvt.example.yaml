@@ -1,5 +1,5 @@
 # Example tvt config. Copy to ./tvt.yaml (git-ignored). `tvt scan --config tvt.yaml`
-# reads external_consumers, ownership, slos, runbooks, pricecard, clients, sweep_share and window_days; the other sections are accepted and read
+# reads external_consumers, ownership, slos, runbooks, postmortems, pricecard, clients, sweep_share and window_days; the other sections are accepted and read
 # by later sprints (backends still come from flags). Unknown keys are errors.
 grafana:
   url: http://localhost:3000
@@ -62,6 +62,10 @@ slos:
 # makes its signals hard keeps. Links under a mirror's url_prefix are read from
 # a local checkout; others are fetched with an unauthenticated GET only when
 # fetch is true. Anything tvt can't read is a recorded gap.
+# Incident write-ups: an unread metric one names (outside a query) is dormant,
+# a question for its owner, never a drop candidate. Files or directories.
+postmortems:
+  paths: [./postmortems]
 runbooks:
   fetch: false
   mirrors:
