@@ -96,3 +96,16 @@ func TestWhyCommandInHTML(t *testing.T) {
 		t.Error("HTML rows don't link to tvt why")
 	}
 }
+
+// A label kept in an alert's result shows that alert, inferred.
+func TestExplainResultLabels(t *testing.T) {
+	in := fixture()
+	in.References = append(in.References, graph.Reference{SignalID: "prom:metric:kept", ConsumerID: "rule:prom:a/g/HighErrors", Evidence: graph.EvidenceDeclared, ResultLabels: true})
+	w, err := Explain(in, "prom:label:kept:pod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(w.Readers) != 1 || w.Readers[0].Consumer != "rule:prom:a/g/HighErrors" || len(w.Readers[0].Inferred) != 1 || !strings.Contains(w.Readers[0].Inferred[0], "result through kept") {
+		t.Errorf("readers = %+v", w.Readers)
+	}
+}

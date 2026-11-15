@@ -188,10 +188,11 @@ type Reference struct {
 	// ResultLabels: the signal's labels survive into the consumer's result
 	// (no aggregation or join removes them), so the panel, alert or caller
 	// receives every one, as in up{job="shop"}. It is not a read: the
-	// labels aren't added to Labels, and whether dropping one is safe (do
-	// series merge? does the alert's identity change?) is left to the
-	// analysis that proposes the drop. False when any label is only summed
-	// away, as in sum by (job) (up).
+	// labels aren't added to Labels. Classification protects every label
+	// of the metric when an alert (any hard-keep consumer) or a dashboard
+	// viewed in the window keeps them in its result, since removing one
+	// merges series and changes what fires or shows (scan.classify).
+	// False when any label is only summed away, as in sum by (job) (up).
 	ResultLabels bool
 	// Assumed means the reference is a guess rather than read exactly from
 	// the query: a variable, a pattern that couldn't be resolved, a query
