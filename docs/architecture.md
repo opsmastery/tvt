@@ -65,6 +65,22 @@ Only `candidate` signals are scored. Each scan stores one row per candidate in `
 
 `testdata/bench/baseline.json` records the scores and the items each state still misses. A score below it fails CI. After a deliberate change, `make bench-update` re-records it, and the diff shows what moved. Bump `version` in `benchmark.yaml` when the scoring rules change.
 
+## Scale (S5 item 7)
+
+`cmd/tvt/scale_test.go` scans the lab with an avalanche-shaped Prometheus in place of its metrics: the metric and label naming of `prometheus-community/avalanche` (`avalanche_gauge_metric_mmmmm_0_<n>`, `series_id`, `cycle_id`, ten constant `label_key_kkkkk_<n>` labels), served from memory for tvt's cardinality, series and metadata calls. tvt only sees API answers, so this runs the same code as a real avalanche target. A real Prometheus holding millions of series needs several GB, more than the lab's 3.8 GB Podman VM. `TVT_SCALE_SERIES=<n> [TVT_SCALE_METRICS=<m>] go test ./cmd/tvt -run '^TestScanScale$' -v` prints a measured run.
+
+Measured Nov 15 on the development Mac (Intel, 12 threads, under load), `--label-top 50`. Max RSS is the whole test process, including the in-process fixture servers; "allocated" includes the servers' JSON writing:
+
+| Series | Metrics | Scan time | Peak heap | Max RSS | Allocated |
+| --- | --- | --- | --- | --- | --- |
+| 2,000,000 | 1,000 | 1.0 s | 5 MiB | 27 MB | 187 MiB |
+| 4,000,000 | 1,000 | 1.7 s | 4 MiB | 27 MB | 344 MiB |
+| 3,000,000 | 100 | 9.5 s | 6 MiB | 28 MB | 1,002 MiB |
+
+Memory stays flat with series because nothing holds a series: TSDB status gives counts per metric, and `/api/v1/series` for the top metrics is decoded as a stream into label-value sets. Time and allocation follow the series read for the `--label-top` metrics (50 × 30,000 in the last row), not the total. Reusing one map per series decode (this item) cut that row from 11.3 s and 2.4 GB allocated. The cost that's left is JSON decoding, so wide metrics are what to watch at partner scale. Not covered: Mimir's cardinality API, and the backends' own time to answer at that size.
+
+`TestScanScaleRegression` runs on every build and in `make bench` (CI's benchmark job): 200,000 series as 100 metrics × 2,000, so the top 50 stream 100,000 series. It fails when allocation, or peak heap plus 16 MiB of sampling noise, more than doubles against `testdata/bench/scale.json` (`make bench-update` re-records it; scan time is recorded but never checked, since CI machines vary). It's skipped under `-race`. Mutation checks: keeping every decoded series fails it (peak heap 137 MiB against 3), and so does decoding each series four times (559 MiB allocated against 81).
+
 ## Design rules
 
 - Read-only against every backend. Changes only happen through reviewed PRs. The only query tvt sends to a backend that logs queries is the query-log probe: a marker that selects no series or stream (PromQL for Prometheus and Mimir, LogQL for Loki), tagged `Source=tvt-probe`, which proves the log is written and is never counted as usage.
