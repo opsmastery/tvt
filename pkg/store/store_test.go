@@ -1351,3 +1351,28 @@ func TestQueryCosts(t *testing.T) {
 		t.Error("a cost for a consumer that isn't stored committed")
 	}
 }
+
+func TestSLOFindings(t *testing.T) {
+	s, _ := open(t)
+	findings := []graph.SLOFinding{
+		{Kind: graph.SLOPagingNotBurnRate, Subject: "rule:prometheus:shop.yml/g/A", Name: "A", Detail: "pages", Fix: "burn rate"},
+		{Kind: graph.SLOServiceWithout, Subject: "service:reconciler", Name: "reconciler", Detail: "no SLO", Fix: "define one"},
+		{Kind: graph.SLOWithoutAlert, Subject: "slo:sloth:x.yml:shop/a", Name: "shop/a", Detail: "declares B", Fix: "load it"},
+	}
+	id := scan(t, s, t0, func(sc *Scan) {
+		for _, f := range findings {
+			must(t, sc.PutSLOFinding(ctx, f))
+		}
+		if err := sc.PutSLOFinding(ctx, graph.SLOFinding{Kind: "rewrite_alert", Subject: "x"}); err == nil {
+			t.Error("unknown kind accepted")
+		}
+		if err := sc.PutSLOFinding(ctx, graph.SLOFinding{Kind: graph.SLOWithoutAlert}); err == nil {
+			t.Error("finding without a subject accepted")
+		}
+	})
+	got, err := s.SLOFindings(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(got, findings) {
+		t.Errorf("SLO findings %+v, want %+v", got, findings)
+	}
+}

@@ -30,6 +30,7 @@ func TestRulesFixture(t *testing.T) {
 		Expr:        "max(shop_order_export_lag_seconds)",
 		Queries:     []collect.PanelQuery{{DatasourceUID: "prometheus", DatasourceType: "prometheus", Expr: "max(shop_order_export_lag_seconds)"}},
 		Annotations: map[string]string{"summary": "Orders haven't been exported to the warehouse for over 5 minutes"},
+		Labels:      map[string]string{"severity": "warning"},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Rules\n got  %+v\n want %+v", got, want)

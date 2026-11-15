@@ -83,3 +83,52 @@ func TestOpenSLOOtherVersion(t *testing.T) {
 }
 
 var _ = collect.SLO{}
+
+// TestAlertsAndServices (S6 item 3): each format's service, short name and
+// the alert it generates, which SLO coverage looks for in the rulers.
+func TestAlertsAndServices(t *testing.T) {
+	for _, c := range []struct {
+		doc                   string
+		service, short, alert string
+	}{
+		{`version: prometheus/v1
+service: shop
+slos:
+  - name: a
+    sli: {events: {error_query: e, total_query: t}}
+    alerting: {name: ShopABurn, page_alert: {labels: {severity: critical}}}`, "shop", "a", "ShopABurn"},
+		{`version: prometheus/v1
+service: shop
+slos:
+  - name: a
+    sli: {events: {error_query: e, total_query: t}}
+    alerting: {name: ShopABurn, page_alert: {disable: true}, ticket_alert: {disable: true}}`, "shop", "a", ""},
+		{`apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata: {name: up, namespace: monitoring}
+spec:
+  indicator: {ratio: {errors: {metric: e}, total: {metric: t}}}`, "", "up", "ErrorBudgetBurn"},
+		{`apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata: {name: up, namespace: monitoring}
+spec:
+  alerting: {disabled: true}
+  indicator: {ratio: {errors: {metric: e}, total: {metric: t}}}`, "", "up", ""},
+		{`apiVersion: openslo/v1
+kind: SLO
+metadata: {name: lat}
+spec:
+  service: web
+  indicator:
+    spec:
+      thresholdMetric: {metricSource: {type: Prometheus, spec: {query: x}}}`, "web", "lat", ""},
+	} {
+		slos, err := Parse([]byte(c.doc), "x.yml")
+		if err != nil || len(slos) != 1 {
+			t.Fatalf("Parse: %v, %+v", err, slos)
+		}
+		if s := slos[0]; s.Service != c.service || s.Short != c.short || s.Alert != c.alert {
+			t.Errorf("%s: service %q short %q alert %q, want %q %q %q", s.Name, s.Service, s.Short, s.Alert, c.service, c.short, c.alert)
+		}
+	}
+}

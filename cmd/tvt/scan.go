@@ -465,6 +465,9 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	if len(g.QueryCosts) > 0 {
 		fmt.Fprintf(out, "%-12s %s\n", "query load", queryLoadSummary(g.Consumers, g.QueryCosts))
 	}
+	if in.SLOsConfigured {
+		fmt.Fprintf(out, "%-12s %s\n", "slo coverage", sloSummary(g.SLOFindings, len(in.Owners) > 0))
+	}
 	if in.Patterns != nil {
 		fmt.Fprintf(out, "%-12s %s\n", "lines", lineSummary(g.LineFindings))
 	}
@@ -738,6 +741,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 	}
 	for _, c := range g.QueryCosts {
 		if err := sc.PutQueryCost(ctx, c); err != nil {
+			return err
+		}
+	}
+	for _, f := range g.SLOFindings {
+		if err := sc.PutSLOFinding(ctx, f); err != nil {
 			return err
 		}
 	}
@@ -1045,6 +1053,20 @@ func humanBytes(n int64) string {
 		f /= 1000
 	}
 	return ""
+}
+
+// sloSummary is the scan's SLO coverage line (S6 item 3).
+func sloSummary(findings []graph.SLOFinding, owners bool) string {
+	n := map[string]int{}
+	for _, f := range findings {
+		n[f.Kind]++
+	}
+	services := fmt.Sprintf("%d services without an SLO", n[graph.SLOServiceWithout])
+	if !owners {
+		services = "services unknown (no ownership.owners)"
+	}
+	return fmt.Sprintf("%s, %d paging alerts not on burn rate, %d SLOs without an alert",
+		services, n[graph.SLOPagingNotBurnRate], n[graph.SLOWithoutAlert])
 }
 
 // queryLoadSummary is the scan's query load line (S6 item 2): queries
