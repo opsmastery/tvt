@@ -51,6 +51,18 @@ type groundTruth struct {
 		Rules   map[string]gtRule  `yaml:"rules"`
 		Metrics map[string]gtEntry `yaml:"metrics"`
 	} `yaml:"mimir"`
+	// Rule-efficiency findings (S6 item 1): per rule name, or no_findings.
+	RuleFindings map[string]yaml.Node `yaml:"rule_findings"`
+}
+
+// gtRuleFindings is one rule's expected findings.
+type gtRuleFindings struct {
+	Source   string `yaml:"source"`
+	Findings []struct {
+		Kind   string `yaml:"kind"`
+		Detail string `yaml:"detail"`
+		Fix    string `yaml:"fix"`
+	} `yaml:"findings"`
 }
 
 type gtEntry struct {

@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 16
+const SchemaVersion = 17
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -328,6 +328,35 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			    PRIMARY KEY (scan_id, stream, pattern)
 			)`,
 			`UPDATE meta SET value = '16' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
+	if from < 17 {
+		for _, q := range []string{
+			`CREATE TABLE IF NOT EXISTS rule_costs (
+			    scan_id          INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+			    consumer_id      TEXT NOT NULL REFERENCES consumers (id) DEFERRABLE INITIALLY DEFERRED,
+			    evals_per_day    REAL NOT NULL CHECK (evals_per_day >= 0),
+			    samples_per_eval REAL NOT NULL CHECK (samples_per_eval >= 0),
+			    bytes_per_eval   REAL NOT NULL CHECK (bytes_per_eval >= 0),
+			    evaluations      INTEGER NOT NULL CHECK (evaluations >= 0),
+			    unknown          TEXT NOT NULL DEFAULT '',
+			    PRIMARY KEY (scan_id, consumer_id)
+			)`,
+			`CREATE TABLE IF NOT EXISTS rule_findings (
+			    scan_id     INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+			    consumer_id TEXT NOT NULL REFERENCES consumers (id) DEFERRABLE INITIALLY DEFERRED,
+			    kind        TEXT NOT NULL CHECK (kind IN ('grafana_managed_alert', 'logql_parses_raw_logs', 'no_line_filter_before_parser',
+			                    'long_range_window', 'interval_below_scrape', 'duplicate_rule', 'unread_recording_rule', 'no_series',
+			                    'group_slower_than_interval')),
+			    detail      TEXT NOT NULL DEFAULT '',
+			    fix         TEXT NOT NULL DEFAULT '',
+			    PRIMARY KEY (scan_id, consumer_id, kind)
+			)`,
+			`UPDATE meta SET value = '17' WHERE key = 'schema_version'`,
 		} {
 			if _, err := tx.ExecContext(ctx, q); err != nil {
 				return err
@@ -712,6 +741,46 @@ func (s *Store) LineFindings(ctx context.Context, scanID int64) ([]graph.LineFin
 	return out, rows.Err()
 }
 
+// RuleCosts returns the rule costs of scan scanID, by consumer.
+func (s *Store) RuleCosts(ctx context.Context, scanID int64) ([]graph.RuleCost, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT consumer_id, evals_per_day, samples_per_eval, bytes_per_eval, evaluations, unknown
+		 FROM rule_costs WHERE scan_id = ? ORDER BY consumer_id`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.RuleCost
+	for rows.Next() {
+		var c graph.RuleCost
+		if err := rows.Scan(&c.ConsumerID, &c.EvalsPerDay, &c.SamplesPerEval, &c.BytesPerEval, &c.Evaluations, &c.Unknown); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// RuleFindings returns the rule findings of scan scanID, by consumer and
+// kind.
+func (s *Store) RuleFindings(ctx context.Context, scanID int64) ([]graph.RuleFinding, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT consumer_id, kind, detail, fix FROM rule_findings WHERE scan_id = ? ORDER BY consumer_id, kind`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.RuleFinding
+	for rows.Next() {
+		var f graph.RuleFinding
+		if err := rows.Scan(&f.ConsumerID, &f.Kind, &f.Detail, &f.Fix); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // Scores returns the candidate ranks of scan scanID, highest priority
 // first.
 func (s *Store) Scores(ctx context.Context, scanID int64) ([]graph.Score, error) {
@@ -739,18 +808,20 @@ func (s *Store) Scores(ctx context.Context, scanID int64) ([]graph.Score, error)
 type Scan struct {
 	ID int64
 
-	tx      *sql.Tx
-	started time.Time
-	done    bool
-	signal  *sql.Stmt
-	cons    *sql.Stmt
-	ref     *sql.Stmt
-	cost    *sql.Stmt
-	source  *sql.Stmt
-	load    *sql.Stmt
-	volume  *sql.Stmt
-	score   *sql.Stmt
-	line    *sql.Stmt
+	tx          *sql.Tx
+	started     time.Time
+	done        bool
+	signal      *sql.Stmt
+	cons        *sql.Stmt
+	ref         *sql.Stmt
+	cost        *sql.Stmt
+	source      *sql.Stmt
+	load        *sql.Stmt
+	volume      *sql.Stmt
+	score       *sql.Stmt
+	line        *sql.Stmt
+	ruleCost    *sql.Stmt
+	ruleFinding *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -851,6 +922,9 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		{&sc.volume, `INSERT INTO stream_volumes (scan_id, selector, bytes_per_day) VALUES (?, ?, ?)`},
 		{&sc.line, `INSERT INTO line_findings (scan_id, stream, pattern, kind, lines, window_ms, share, bytes_per_day, monthly_cost)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`},
+		{&sc.ruleCost, `INSERT INTO rule_costs (scan_id, consumer_id, evals_per_day, samples_per_eval, bytes_per_eval, evaluations, unknown)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`},
+		{&sc.ruleFinding, `INSERT INTO rule_findings (scan_id, consumer_id, kind, detail, fix) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.score, `INSERT INTO scores (scan_id, signal_id, monthly_cost, usage_weight, strongest, confidence, priority, held)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
@@ -1005,6 +1079,30 @@ func (sc *Scan) PutLineFinding(ctx context.Context, f graph.LineFinding) error {
 	}
 	_, err := sc.line.ExecContext(ctx, sc.ID, f.Stream, f.Pattern, f.Kind, f.Lines, f.Window.Milliseconds(), f.Share, f.BytesPerDay, f.MonthlyCost)
 	return wrap("line finding", f.Stream+" "+f.Pattern, err)
+}
+
+// PutRuleCost records what a rule's evaluations cost, once per rule.
+func (sc *Scan) PutRuleCost(ctx context.Context, c graph.RuleCost) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if c.ConsumerID == "" {
+		return errors.New("store: rule cost: ConsumerID is required")
+	}
+	_, err := sc.ruleCost.ExecContext(ctx, sc.ID, c.ConsumerID, c.EvalsPerDay, c.SamplesPerEval, c.BytesPerEval, c.Evaluations, c.Unknown)
+	return wrap("rule cost", c.ConsumerID, err)
+}
+
+// PutRuleFinding records one finding about a rule, once per rule and kind.
+func (sc *Scan) PutRuleFinding(ctx context.Context, f graph.RuleFinding) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if f.ConsumerID == "" || f.Kind == "" {
+		return errors.New("store: rule finding: ConsumerID and Kind are required")
+	}
+	_, err := sc.ruleFinding.ExecContext(ctx, sc.ID, f.ConsumerID, f.Kind, f.Detail, f.Fix)
+	return wrap("rule finding", f.ConsumerID+" "+f.Kind, err)
 }
 
 // PutScore records a candidate signal's rank in this scan, once per signal.

@@ -21,7 +21,19 @@ var page = template.Must(template.New("report.html.tmpl").Funcs(template.FuncMap
 		}
 		return s
 	},
-	"pct":  pct,
+	"pct": pct,
+	"bytes": func(v float64) string {
+		units := []string{"B", "kB", "MB", "GB", "TB"}
+		i := 0
+		for v >= 1000 && i < len(units)-1 {
+			v /= 1000
+			i++
+		}
+		if i == 0 {
+			return fmt.Sprintf("%.0f B", v)
+		}
+		return fmt.Sprintf("%.1f %s", v, units[i])
+	},
 	"date": func(t time.Time) string { return t.UTC().Format("2006-01-02") },
 	"when": func(t time.Time) string {
 		if t.IsZero() {

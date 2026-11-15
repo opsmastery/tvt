@@ -284,3 +284,51 @@ func TestProbeSendsTheTaggedMarker(t *testing.T) {
 		t.Errorf("probe request = %+v", got)
 	}
 }
+
+// TestRuleEvaluations reads the ruler's own entries (S6 item 1): group,
+// query and queryable samples, never returned as usage; API queries carry
+// their samples and whether they were instant.
+func TestRuleEvaluations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "query.log")
+	lines := `{"time":"2026-11-15T20:30:51Z","params":{"end":"2026-11-15T20:30:51.782Z","query":"shop_payment_queue_depth > 100","start":"2026-11-15T20:30:51.782Z","step":0},"stats":{"samples":{"totalQueryableSamples":4,"peakSamples":4}},"ruleGroup":{"file":"/etc/prometheus/rules/shop.yml","name":"shop-alerts"}}
+{"time":"2026-11-15T20:30:52Z","params":{"end":"2026-11-15T20:30:52Z","query":"max(shop_order_export_lag_seconds)","start":"2026-11-15T20:30:52Z","step":0},"stats":{"samples":{"totalQueryableSamples":1}},"httpRequest":{"clientIP":"10.89.0.29","method":"POST","path":"/api/v1/query"}}
+{"time":"2026-11-15T20:30:53Z","params":{"end":"2026-11-15T20:30:53Z","query":"rate(x[5m])","start":"2026-11-15T14:30:53Z","step":60},"stats":{"samples":{"totalQueryableSamples":7200}},"httpRequest":{"clientIP":"10.89.0.29","path":"/api/v1/query_range"}}
+{"time":"2026-11-15T20:30:54Z","params":{"query":"up"},"ruleGroup":{"name":"no-stats"}}
+`
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ql := &QueryLog{Paths: []string{path}}
+	evals, err := ql.RuleEvaluations(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evals) != 2 || evals[0].Group != "shop-alerts" || evals[0].Samples != 4 || evals[0].Expr != "shop_payment_queue_depth > 100" || evals[1].Samples != 0 {
+		t.Errorf("evaluations = %+v", evals)
+	}
+	qs, err := ql.Queries(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs) != 2 || !qs[0].Instant || qs[0].Samples != 1 || qs[1].Instant || qs[1].Samples != 7200 {
+		t.Errorf("queries = %+v", qs)
+	}
+}
+
+// TestRuleEvaluationsFixture: the lab's ruler logs every group's evaluations.
+func TestRuleEvaluationsFixture(t *testing.T) {
+	evals, err := (&QueryLog{Paths: []string{filepath.Join(fixtures, "query.log")}}).RuleEvaluations(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := map[string]int{}
+	for _, e := range evals {
+		groups[e.Group]++
+		if e.Samples < 0 {
+			t.Errorf("negative samples %+v", e)
+		}
+	}
+	if groups["shop-alerts"] == 0 || groups["shop-recording"] == 0 {
+		t.Errorf("groups = %v", groups)
+	}
+}

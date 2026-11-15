@@ -15,7 +15,10 @@ type rulesData struct {
 		// Interval is the group's effective evaluation interval in seconds
 		// (its own, else the global evaluation_interval).
 		Interval float64 `json:"interval"`
-		Rules    []struct {
+		// EvaluationTime is how long the group's last evaluation took, in
+		// seconds.
+		EvaluationTime float64 `json:"evaluationTime"`
+		Rules          []struct {
 			Name  string `json:"name"`
 			Query string `json:"query"`
 			Type  string `json:"type"` // "alerting" or "recording"
@@ -57,6 +60,8 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 				Expr:      r.Query,
 				Language:  "promql",
 				Interval:  time.Duration(g.Interval * float64(time.Second)),
+				// Clamped: a hostile or broken API can't overflow it.
+				GroupEvaluation: time.Duration(min(max(g.EvaluationTime, 0), 86400) * float64(time.Second)),
 
 				Annotations: nonEmpty(r.Annotations),
 			})

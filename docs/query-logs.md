@@ -101,6 +101,15 @@ The cost of query logging is disk and log volume, not query latency.
 
    Container addresses are reused: in the lab, after a restart the agent got the address Grafana had before, so a 30-day Prometheus log can hold both under one IP. Matching on text comes first for that reason, and an inferred Grafana address only counts within an hour of its matching queries. Configure `clients.grafana` where addresses are stable.
 
+## Rule evaluations in the query logs (Sprint 2 item 12)
+
+Checked on the lab Nov 15, 2026 (Grafana 12, Loki 3.5, Prometheus 3.5), with the rule-efficiency seeds:
+
+- **Prometheus' own ruler** logs each rule's evaluation with `ruleGroup` (`file`, `name`) and `stats.samples.totalQueryableSamples`. tvt still leaves these out of usage (rules come from the rules API) and uses them as the log's heartbeat; since S6 item 1 they also price each rule (`prometheus.QueryLog.RuleEvaluations`).
+- **Loki's ruler** logs `caller=metrics.go component=ruler evaluation_mode=local` lines with the query (a binary expression wrapped in parentheses), `total_bytes` and `total_lines`, but no rule or group name (`loki.QueryLog.RuleEvaluations`).
+- **Grafana-managed rules** carry no marker. Their Loki evaluations are ordinary `component=frontend` lines (`query_type=metric`, `range_type=instant`, `length=0s`) with no `source`, user or rule header; their Prometheus evaluations are `POST /api/v1/query` instant queries from Grafana's IP with no user agent. Only the query text, the instant type and the cadence tie them to the rule, which is how S3 item 5's matching and S6 item 1's cost per rule join them. Both carry per-evaluation cost (Loki `total_bytes`, Prometheus `totalQueryableSamples`), which `collect.LoggedQuery.Bytes`/`Samples` keep, with `Instant` (S6 item 2).
+- Restarting Grafana can change its container address (the lab's went from 10.89.0.17 to .29), another reason matching is on text first.
+
 ## Sweeps (S3 item 6)
 
 An agent's "what's here" (`count by (__name__) ({__name__=~".+"})`) touches every metric without depending on any. A query from an observed consumer (query log, dashboard) whose selector names no metric outright, restricts no label, and matches every metric name or selects more than `sweep_share` of the series (`tvt.yaml`, default 0.5) is a sweep: its references are stored with `refs.sweep = 1` and keep nothing on their own. A metric the same query names explicitly (`... + node_load1`) is still read. Alerts, recording rules, SLOs, runbooks and declared external consumers never sweep. tvt's own queries stay out through `X-Query-Tags: Source=tvt`.

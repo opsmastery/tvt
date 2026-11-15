@@ -136,7 +136,7 @@ An acknowledged gap stays in the header with its reason and moves to the row's `
 
 ## The header
 
-`scan` (ID, start, window, log coverage, price card), `sources` (every evidence source's coverage), `gaps` (every gap, acknowledged or not, above), `unmatched_acknowledgements`, `totals` (candidates, recommendations, dormant signals, metric savings, and stream savings apart, since stream selectors overlap), `held`.
+`scan` (ID, start, window, log coverage, price card), `sources` (every evidence source's coverage), `gaps` (every gap, acknowledged or not, above), `unmatched_acknowledgements`, `totals` (candidates, recommendations, dormant signals, metric savings, and stream savings apart, since stream selectors overlap, and rule findings), `held`.
 
 ## Line-level findings
 
@@ -147,4 +147,35 @@ An acknowledged gap stays in the header with its reason and moves to the row's `
 
 A stream the dormant rules hold (an error stream by name, or a tier 0 or 1 owner's) gets no line finding: lines repeated in an error stream are a symptom, never a saving. A Loki without the pattern ingester answers 404, and the scan goes on without line findings and says so.
 
-Readers check `version` (now 5: 2 made gaps structured, 3 added `services`, 4 added `scan.repriced_from`, 5 added `line_findings`) and refuse one they don't know.
+## Rules (S6 item 1)
+
+`rules` (version 6) lists every rule (Prometheus, Mimir and Loki rulers, Grafana-managed) with what its evaluations cost and what's wrong with it, rules with findings first. Report only: tvt never edits a rule.
+
+**Cost per rule** is evaluations per day (86400 ÷ the rule's interval) times what one evaluation read, measured from the query logs:
+
+| Ruler | Where one evaluation's cost comes from |
+| --- | --- |
+| Prometheus | the query log's rule entries (`ruleGroup`), matched by group and query: `stats.samples.totalQueryableSamples` |
+| Loki | `component=ruler` metrics.go lines, matched by query (Loki logs no rule or group): `total_bytes` |
+| Grafana-managed | the instant queries Grafana sent with the rule's query text (in the Prometheus or Loki log; neither marks them as rule evaluations, see `docs/query-logs.md`), summed over the rule's queries |
+| Mimir | unknown for now: its ruler's evaluations aren't read with their cost |
+
+Queries compare with whitespace and enclosing parentheses ignored (Loki logs `(a > 20)` for `a > 20`). An unknown interval, an unread log or no logged evaluation leaves the cost unknown with the reason (`cost_unknown`), never zero. Rows give `evals_per_day`, `samples_per_eval`/`bytes_per_eval` and their daily totals, and how many evaluations the means come from. No price card prices query work yet, so rules carry no money figure on any backend (on Grafana Cloud findings ship without one by design).
+
+**Findings**, each with a detail and its fix:
+
+| Kind | When | Fix |
+| --- | --- | --- |
+| `grafana_managed_alert` | Grafana evaluates an alert on Loki or Prometheus and queries the datasource every interval | move it to the datasource ruler, or alert on a recording rule there |
+| `logql_parses_raw_logs` | a LogQL alert runs a parser (`json`, `logfmt`, `regexp`, `pattern`, `unpack`) every evaluation | record the count with a Loki recording rule; alert on its output |
+| `no_line_filter_before_parser` | a LogQL rule's parser has no line filter between it and the selector, so it parses every line | add `\|= "…"` before the parser |
+| `long_range_window` | a range or subquery window of at least 1h and at least 120 intervals (`[24h]` every 1m) | evaluate less often, or record a shorter window and aggregate it |
+| `interval_below_scrape` | evaluated more often than every metric it reads is scraped (target metadata intervals; skipped when any read metric has none, such as a recording rule's output) | evaluate at the scrape interval or slower |
+| `duplicate_rule` | another rule of the same ruler and kind has the same expression; both copies are flagged, each naming the other | keep one |
+| `unread_recording_rule` | nothing but sweeps reads a recording rule's output | remove the rule |
+| `no_series` | a PromQL rule whose every directly read metric has no series in the TSDB, so it can never return anything (broken, not unused); rules `parse.UsesAbsence` matches are skipped | fix the metric name or delete the rule |
+| `group_slower_than_interval` | the group's last evaluation (rules API `evaluationTime`) took longer than its interval | split the group or lengthen the interval |
+
+Not yet: a "broad stream selector" finding (no lab case to check it against), and `no_series` over the whole window rather than the scan's TSDB head. The scan prints a `rules` line (`16 of 16 priced from logged evaluations, 10 findings (duplicate_rule 2, …)`). Golden: `TestRuleFindings` on the benchmark's `rule-efficiency` state, against tvt-lab's `rule_findings:`; every lab rule is listed there or under `no_findings`, so any other finding fails.
+
+Readers check `version` (now 6: 2 made gaps structured, 3 added `services`, 4 added `scan.repriced_from`, 5 added `line_findings`, 6 added `rules` and `totals.rule_findings`) and refuse one they don't know.
