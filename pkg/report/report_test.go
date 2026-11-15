@@ -353,6 +353,8 @@ func TestSourceGapKinds(t *testing.T) {
 		{graph.SourceCoverage{Source: scan.SourceRunbooks, Configured: true, Coverage: 0.5, Gap: "runbook a: 404\nrunbook b: timeout"},
 			[]Gap{{Source: scan.SourceRunbooks, Kind: GapUnreadable, Text: "runbooks: runbook a: 404"}, {Source: scan.SourceRunbooks, Kind: GapUnreadable, Text: "runbooks: runbook b: timeout"}}},
 		{graph.SourceCoverage{Source: scan.SourcePromQueryLog, Configured: true, Coverage: 1}, nil},
+		{graph.SourceCoverage{Source: "season holiday peak", Configured: true, Gap: "runs in Nov, outside the window"},
+			[]Gap{{Source: "season holiday peak", Kind: GapSeason, Text: "season holiday peak: runs in Nov, outside the window"}}},
 	} {
 		if got := sourceGaps(tc.s); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%+v: %+v, want %+v", tc.s, got, tc.want)
