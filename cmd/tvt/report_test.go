@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -248,5 +249,72 @@ seasons:
 	}
 	if !confirm {
 		t.Error("shop_feature_flag_evaluations_total isn't a seasonal confirm row")
+	}
+}
+
+// S4 item 8: tvt report --price-card on the grafana-cloud lab scan gives
+// the report a self-hosted scan gives, row for row: same recommendations,
+// savings, disk and priorities. Only the what-if marker differs.
+func TestReportPriceCardMatchesRescan(t *testing.T) {
+	setNow(t)
+	dir := t.TempDir()
+	scanReport := func(config, card string) report.Report {
+		t.Helper()
+		l := newLab(t, nil)
+		db := filepath.Join(dir, config+".db")
+		o := labOptions(l, db)
+		o.Config = filepath.Join(lab, config)
+		var out bytes.Buffer
+		if err := runScan(context.Background(), o, env, &out); err != nil {
+			t.Fatalf("scan %s: %v\n%s", config, err, out.String())
+		}
+		out.Reset()
+		if err := runReport(context.Background(), reportOptions{DB: db, JSON: "-", PriceCard: card}, &out); err != nil {
+			t.Fatal(err)
+		}
+		var r report.Report
+		if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	selfCard := filepath.Join(lab, "pricecard-selfhosted.yaml")
+	whatIf := scanReport("tvt-lab.yaml", selfCard)
+	rescan := scanReport("tvt-lab-selfhosted.yaml", "")
+	vendor := scanReport("tvt-lab.yaml", "")
+	if whatIf.Scan.RepricedFrom != vendor.Scan.PriceCard || whatIf.Scan.PriceCard != rescan.Scan.PriceCard || rescan.Scan.RepricedFrom != "" {
+		t.Errorf("scan: what-if %+v, rescan %+v", whatIf.Scan, rescan.Scan)
+	}
+	if len(whatIf.Recommendations) == 0 || len(whatIf.Recommendations) != len(rescan.Recommendations) {
+		t.Fatalf("%d what-if recommendations, %d rescanned", len(whatIf.Recommendations), len(rescan.Recommendations))
+	}
+	vendorSaving := map[string]float64{}
+	for _, v := range vendor.Recommendations {
+		vendorSaving[v.ID] = v.Savings.Monthly
+	}
+	var moved bool
+	for i, w := range whatIf.Recommendations {
+		r := rescan.Recommendations[i]
+		if w.ID != r.ID || w.Savings.DiskBytes != r.Savings.DiskBytes || math.Abs(w.Savings.Monthly-r.Savings.Monthly) > 1e-9 ||
+			math.Abs(w.Score.Priority-r.Score.Priority) > 1e-9 || w.Savings.Currency != r.Savings.Currency {
+			t.Errorf("row %d: what-if %s %+v %+v, rescan %s %+v %+v", i, w.ID, w.Savings, w.Score, r.ID, r.Savings, r.Score)
+		}
+		moved = moved || w.Savings.Monthly != vendorSaving[w.ID]
+	}
+	if !moved {
+		t.Error("repricing changed no saving")
+	}
+	if math.Abs(whatIf.Totals.MetricSavings-rescan.Totals.MetricSavings) > 1e-6 {
+		t.Errorf("totals: what-if %v, rescan %v", whatIf.Totals.MetricSavings, rescan.Totals.MetricSavings)
+	}
+
+	// The page says it's a what-if; a card that doesn't load fails.
+	var page bytes.Buffer
+	b, _ := json.Marshal(whatIf)
+	if err := report.RenderHTMLFromJSON(&page, b); err != nil || !strings.Contains(page.String(), "What-if pricing") {
+		t.Errorf("HTML what-if banner missing: %v", err)
+	}
+	if err := runReport(context.Background(), reportOptions{DB: filepath.Join(dir, "tvt-lab.yaml.db"), JSON: "-", PriceCard: "no-such-preset"}, &page); err == nil {
+		t.Error("an unknown price card didn't fail")
 	}
 }
