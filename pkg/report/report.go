@@ -258,6 +258,10 @@ type Input struct {
 	Scores     []graph.Score
 	// LineFindings are the scan's line findings (store.LineFindings).
 	LineFindings []graph.LineFinding
+	// StreamVolumes are the scan's streams (store.StreamVolumes): tvt why
+	// uses them to find readers of a stream signal's streams through an
+	// overlapping selector.
+	StreamVolumes []graph.StreamVolume
 	// LastReads are every signal's most recent logged read across all
 	// scans (store.LastReads).
 	LastReads []LastReadOf

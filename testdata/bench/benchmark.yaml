@@ -14,7 +14,9 @@
 # overlay: only the files that changed, laid over the base's.
 # Version 2 (S5 item 3): recommendations also score line findings against
 # ground truth's line_patterns.
-version: 2
+# Version 3 (S5 debug pass): a stream recommendation whose selector selects
+# a stream ground truth keeps is a false positive for each such stream.
+version: 3
 states:
   - name: before-deploy
     dir: before
