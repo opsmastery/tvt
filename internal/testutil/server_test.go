@@ -44,12 +44,16 @@ func TestServeRejectsWritesAndQueries(t *testing.T) {
 		{"GET", "/loki/api/v1/query_range", 403, ""},
 		{"GET", "/api/ds/query", 403, ""},
 		{"GET", "/api/datasources/proxy/uid/prom/api/v1/series", 403, ""},
-		// The probe marker is allowed only as itself, tagged, on an
-		// instant-query endpoint of Prometheus or Mimir.
+		// A probe marker is allowed only as itself, tagged, on its own
+		// backend's instant-query endpoint (Prometheus or Mimir, or Loki).
 		{"GET", "/api/v1/query?query=" + url.QueryEscape(collect.ProbeQuery("ab12")), 403, ""},
 		{"GET", "/api/v1/query?query=" + url.QueryEscape(collect.ProbeQuery("ab12")+" + up"), 403, collect.ProbeTag},
 		{"GET", "/api/v1/query_range?query=" + url.QueryEscape(collect.ProbeQuery("ab12")), 403, collect.ProbeTag},
 		{"GET", "/loki/api/v1/query?query=" + url.QueryEscape(collect.ProbeQuery("ab12")), 403, collect.ProbeTag},
+		{"GET", "/loki/api/v1/query?query=" + url.QueryEscape(collect.LokiProbeQuery("ab12")), 403, ""},
+		{"GET", "/loki/api/v1/query?query=" + url.QueryEscape(collect.LokiProbeQuery("ab12")+" or count_over_time({app=\"shop\"}[1m])"), 403, collect.ProbeTag},
+		{"GET", "/loki/api/v1/query_range?query=" + url.QueryEscape(collect.LokiProbeQuery("ab12")), 403, collect.ProbeTag},
+		{"GET", "/api/v1/query?query=" + url.QueryEscape(collect.LokiProbeQuery("ab12")), 403, collect.ProbeTag},
 	} {
 		rec := &recorder{TB: t}
 		reached := false
@@ -137,10 +141,14 @@ func (f *fatalRecorder) Fatal(args ...any) {
 }
 
 func TestServeAllowsTheProbe(t *testing.T) {
-	for _, path := range []string{"/api/v1/query", "/prometheus/api/v1/query"} {
+	for path, query := range map[string]string{
+		"/api/v1/query":            collect.ProbeQuery("ab12"),
+		"/prometheus/api/v1/query": collect.ProbeQuery("ab12"),
+		"/loki/api/v1/query":       collect.LokiProbeQuery("ab12"),
+	} {
 		reached := false
 		srv := Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true }))
-		req, _ := http.NewRequest("GET", srv.URL+path+"?query="+url.QueryEscape(collect.ProbeQuery("ab12")), nil)
+		req, _ := http.NewRequest("GET", srv.URL+path+"?query="+url.QueryEscape(query), nil)
 		req.Header.Set("X-Query-Tags", collect.ProbeTag)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

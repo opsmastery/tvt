@@ -110,10 +110,13 @@ An agent's "what's here" (`count by (__name__) ({__name__=~".+"})`) touches ever
 A log that stopped being written, or a stale copy, looks exactly like a quiet one. So each `tvt scan` sends one marker query to every query log it can probe, before collecting anything, and re-reads the log for up to `--probe-wait` (default 30s) until the marker shows up:
 
 ```
-count(tvt_query_log_probe{nonce="<16 hex digits>"})     X-Query-Tags: Source=tvt-probe
+count(tvt_query_log_probe{nonce="<16 hex digits>"})                      Prometheus, Mimir
+count_over_time({tvt_query_log_probe="<16 hex digits>"}[1m])             Loki (S5 item 5)
+X-Query-Tags: Source=tvt-probe                                           both
 ```
 
 - It selects no series (verified in the lab: Mimir logs it with `fetched_series_count=0`), and every reader drops it from usage.
 - Prometheus logs it as an API query (match on the text; Prometheus doesn't log headers). Mimir logs it with `header_x_query_tags="Source=tvt-probe"` when `X-Query-Tags` is in `log_query_request_headers`.
+- Loki (`/loki/api/v1/query`, instant) logs the marker as a `caller=metrics.go component=frontend query_type=metric ... source=tvt-probe` line, plus a querier line and a `query_type=stats` line for the bare selector (checked on the lab's Loki 3.5, Nov 15: in the container log within 3s). Only the frontend line proves the log; the reader drops every marker from usage by its text, so a proxy that strips `X-Query-Tags` doesn't turn it into a read. No stream carries the `tvt_query_log_probe` label, so it touches no chunk.
 - If the marker never appears, the probe request fails, or tvt can't send one (a Prometheus log in a `--mimir` scan), the source's coverage is 0 and the scan records the gap (`scan_sources.gap`). The log's queries still count: unknown means used.
-- So tvt must read the **live** log, not a copy made before the scan. Partners point `--prom-query-log` at the file Prometheus writes (or a mount of it), and `--mimir-query-log`/`--loki-query-log` at the backends' container logs: on Kubernetes the node's `/var/log/pods/...` files, which tvt reads in the CRI format. Loki's probe (a LogQL marker) is Sprint 3 item 9.
+- So tvt must read the **live** log, not a copy made before the scan. Partners point `--prom-query-log` at the file Prometheus writes (or a mount of it), and `--mimir-query-log`/`--loki-query-log` at the backends' container logs: on Kubernetes the node's `/var/log/pods/...` files, which tvt reads in the CRI format.

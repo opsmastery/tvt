@@ -20,7 +20,8 @@ import (
 // series) and ruler evaluations aren't usage. Ruler lines still show the
 // log is being written: like Prometheus rule evaluations they are a
 // coverage heartbeat. Queries tagged X-Query-Tags Source=tvt... (logged as
-// source=) are tvt's own.
+// source=) are tvt's own, and so is the probe marker whatever its tag (a
+// proxy may drop the header).
 type QueryLog struct {
 	// Paths are files or glob patterns. Lines may be plain or in the CRI
 	// container log format; .gz files are decompressed.
@@ -31,7 +32,10 @@ type QueryLog struct {
 	Bucket time.Duration
 }
 
-var _ collect.QueryLogSource = (*QueryLog)(nil)
+var (
+	_ collect.QueryLogSource = (*QueryLog)(nil)
+	_ collect.ProbeSource    = (*QueryLog)(nil)
+)
 
 var userQueryTypes = map[string]bool{"limited": true, "filter": true, "metric": true}
 
@@ -53,6 +57,9 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 		if src := strings.ToLower(kv["source"]); strings.HasPrefix(src, "tvt") {
 			return
 		}
+		if _, probe := collect.LokiProbeNonce(kv["query"]); probe {
+			return
+		}
 		out = append(out, collect.LoggedQuery{Source: "loki", Expr: kv["query"], Language: "logql", At: at, Client: kv["source"]})
 	})
 	if err != nil {
@@ -60,6 +67,21 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
 	return out, nil
+}
+
+// ProbeSeen reports whether the log holds tvt's marker query for nonce, as
+// the frontend logs a user-facing query.
+func (q *QueryLog) ProbeSeen(ctx context.Context, nonce string) (bool, error) {
+	found := false
+	err := q.scan(ctx, time.Time{}, func(_ time.Time, kv map[string]string) {
+		if kv["component"] != "frontend" {
+			return
+		}
+		if n, ok := collect.LokiProbeNonce(kv["query"]); ok && n == nonce {
+			found = true
+		}
+	})
+	return found, err
 }
 
 // Coverage is the share of the window the log covers (logfile.Coverage),

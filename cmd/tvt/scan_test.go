@@ -67,6 +67,10 @@ type labServers struct {
 	// its probe marker.
 	promLog string
 	probes  *atomic.Int32
+	// lokiLog is the same for Loki's recorded query log (empty when the
+	// snapshot has none); lokiProbes counts Loki markers (S5 item 5).
+	lokiLog    string
+	lokiProbes *atomic.Int32
 }
 
 // probeSink answers tvt's probe query like Prometheus or Mimir and, when
@@ -95,27 +99,70 @@ func probeSink(t *testing.T, log string, n *atomic.Int32) http.HandlerFunc {
 	}
 }
 
+// lokiProbeSink answers tvt's Loki probe like Loki does and, when log is
+// set, writes the frontend metrics.go line Loki logs for it.
+func lokiProbeSink(t *testing.T, log string, n *atomic.Int32) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("query")
+		if _, ok := collect.LokiProbeNonce(q); !ok {
+			t.Errorf("Loki query endpoint got %q, not a probe marker", q)
+		}
+		n.Add(1)
+		if log != "" {
+			f, err := os.OpenFile(log, os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			fmt.Fprintf(f, "level=info ts=%s caller=metrics.go:237 component=frontend org_id=fake latency=fast query=%q query_type=metric range_type=instant status=200 source=%s\n",
+				scanNow().Format(time.RFC3339Nano), q, strings.TrimPrefix(r.Header.Get("X-Query-Tags"), "Source="))
+			f.Close()
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+	}
+}
+
+// copyLog copies dir/rel into a temp file the fixture backends can append
+// to; "" when the snapshot has no such log.
+func copyLog(t *testing.T, dir, rel string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, rel))
+	if errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), filepath.Base(rel))
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 	t.Helper()
 	return newLabAt(t, lab, promOverride)
 }
 
 // newLabAt serves the lab snapshot in dir (laid out like testdata/lab).
-func newLabAt(t *testing.T, dir string, promOverride map[string]http.HandlerFunc) labServers {
+// Override keys are Prometheus paths, or "loki:" plus a Loki path.
+func newLabAt(t *testing.T, dir string, override map[string]http.HandlerFunc) labServers {
 	t.Helper()
-	if promOverride == nil {
-		promOverride = map[string]http.HandlerFunc{}
+	promOverride, lokiOverride := map[string]http.HandlerFunc{}, map[string]http.HandlerFunc{}
+	for k, h := range override {
+		if path, ok := strings.CutPrefix(k, "loki:"); ok {
+			lokiOverride[path] = h
+		} else {
+			promOverride[k] = h
+		}
 	}
 	if _, ok := promOverride["/api/v1/series"]; !ok {
 		promOverride["/api/v1/series"] = syntheticSeries
 	}
-	promLog := filepath.Join(t.TempDir(), "query.log")
-	data, err := os.ReadFile(filepath.Join(dir, "prometheus/query.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(promLog, data, 0o600); err != nil {
-		t.Fatal(err)
+	promLog := copyLog(t, dir, "prometheus/query.log")
+	if promLog == "" {
+		t.Fatalf("%s has no prometheus/query.log", dir)
 	}
 	probes := &atomic.Int32{}
 	if _, ok := promOverride["/api/v1/query"]; !ok {
@@ -148,13 +195,22 @@ func newLabAt(t *testing.T, dir string, promOverride map[string]http.HandlerFunc
 		},
 		"/api/org": func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"id":1,"name":"Main Org."}`) },
 	})
+	lokiLog, lokiProbes := copyLog(t, dir, "loki/query.log"), &atomic.Int32{}
+	for path, h := range patternsRoute(t, dir) {
+		if _, ok := lokiOverride[path]; !ok {
+			lokiOverride[path] = h
+		}
+	}
+	if _, ok := lokiOverride["/loki/api/v1/query"]; !ok {
+		lokiOverride["/loki/api/v1/query"] = lokiProbeSink(t, lokiLog, lokiProbes)
+	}
 	loki := fixtureServerAt(t, dir, map[string]string{
 		"/loki/api/v1/rules":        "loki/rules.yaml",
 		"/prometheus/api/v1/rules":  "loki/prom_rules.json",
 		"/loki/api/v1/labels":       "loki/labels.json",
 		"/loki/api/v1/index/volume": "loki/volume_by_stream.json",
-	}, patternsRoute(t, dir))
-	return labServers{prom, graf, loki, promLog, probes}
+	}, lokiOverride)
+	return labServers{prom, graf, loki, promLog, probes, lokiLog, lokiProbes}
 }
 
 // patternsRoute serves the snapshot's recorded pattern API answers
@@ -922,14 +978,17 @@ func TestScanQueryLogsMimirLoki(t *testing.T) {
 	o := labOptions(l, db)
 	o.Prom, o.Mimir, o.LabelTop = "", mimirSrv.URL, 0
 	o.MimirQueryLogs = stringList{filepath.Join(lab, "mimir/query.log")}
-	o.LokiQueryLogs = stringList{filepath.Join(lab, "loki/query.log")}
+	o.LokiQueryLogs = stringList{l.lokiLog}
 	var out bytes.Buffer
 	if err := runScan(context.Background(), o, env, &out); err != nil {
 		t.Fatalf("scan: %v\n%s", err, out.String())
 	}
 	t.Log("\n" + out.String())
-	if mimirProbes.Load() != 1 || l.probes.Load() != 0 {
-		t.Errorf("probes: mimir %d, prometheus %d; want 1 and 0", mimirProbes.Load(), l.probes.Load())
+	if mimirProbes.Load() != 1 || l.probes.Load() != 0 || l.lokiProbes.Load() != 1 {
+		t.Errorf("probes: mimir %d, prometheus %d, loki %d; want 1, 0 and 1", mimirProbes.Load(), l.probes.Load(), l.lokiProbes.Load())
+	}
+	if !strings.Contains(out.String(), "loki log") || !strings.Contains(out.String(), "(probe found)") {
+		t.Errorf("output lacks the Loki probe:\n%s", out.String())
 	}
 
 	ctx := context.Background()
@@ -954,7 +1013,7 @@ func TestScanQueryLogsMimirLoki(t *testing.T) {
 		t.Errorf("mimir query log %+v, want proven", s)
 	}
 	if s := bySource[sourceLokiQueryLog]; !s.Configured || s.Gap != "" || s.Coverage <= 0 {
-		t.Errorf("loki query log %+v", s)
+		t.Errorf("loki query log %+v, want proven", s)
 	}
 	if s := bySource[sourcePromQueryLog]; !s.Configured || s.Coverage != 0 || !strings.Contains(s.Gap, "no Prometheus URL") {
 		t.Errorf("prometheus query log %+v, want an unproven gap", s)
@@ -1019,6 +1078,52 @@ func TestScanQueryLogUnproven(t *testing.T) {
 	}
 	if !found {
 		t.Error("an unproven log's queries were dropped")
+	}
+}
+
+// Loki's log (S5 item 5): a Loki that answers the marker but never logs it
+// leaves its query log unproven, coverage 0, with its queries still read;
+// a failed probe request is a gap naming the failure.
+func TestScanLokiQueryLogUnproven(t *testing.T) {
+	setNow(t)
+	for name, sink := range map[string]http.HandlerFunc{
+		"never logged": lokiProbeSink(t, "", &atomic.Int32{}),
+		"probe fails":  func(w http.ResponseWriter, r *http.Request) { http.Error(w, "query not allowed", http.StatusForbidden) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			l := newLab(t, map[string]http.HandlerFunc{"loki:/loki/api/v1/query": sink})
+			db := filepath.Join(t.TempDir(), "tvt.db")
+			o := labOptions(l, db)
+			o.LokiQueryLogs = stringList{l.lokiLog}
+			o.ProbeWait = 300 * time.Millisecond
+			var out bytes.Buffer
+			if err := runScan(context.Background(), o, env, &out); err != nil {
+				t.Fatalf("scan: %v\n%s", err, out.String())
+			}
+			want := "tvt's probe query never appeared"
+			if name == "probe fails" {
+				want = "probe query failed: loki: /loki/api/v1/query: HTTP 403"
+			}
+			var line string
+			for _, ln := range strings.Split(out.String(), "\n") {
+				if strings.HasPrefix(ln, "loki log") {
+					line = ln
+				}
+			}
+			if !strings.Contains(line, "coverage 0%") || !strings.Contains(line, want) {
+				t.Errorf("loki log line %q, want coverage 0%% and %q", line, want)
+			}
+			g := readGraph(t, db)
+			found := false
+			for _, r := range g.refs {
+				if strings.Contains(g.consumers[r.ConsumerID].Expr, `"route=/healthz"`) {
+					found = true
+				}
+			}
+			if !found {
+				t.Error("an unproven Loki log's queries were dropped")
+			}
+		})
 	}
 }
 
