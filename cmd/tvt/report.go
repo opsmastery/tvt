@@ -68,14 +68,8 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if o.Config != "" {
-		cfg, err := config.Load(o.Config)
-		if err != nil {
-			return err
-		}
-		for _, a := range cfg.Gaps.Acknowledge {
-			in.Acknowledged = append(in.Acknowledged, report.Acknowledgement{Source: a.Source, Match: a.Match, Reason: a.Reason})
-		}
+	if in.Acknowledged, err = acknowledgements(o.Config); err != nil {
+		return err
 	}
 	r := report.Build(in, o.Top)
 	b, err := json.MarshalIndent(r, "", "  ")
@@ -130,6 +124,23 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "; written to %s\n", written)
 	return nil
+}
+
+// acknowledgements reads tvt.yaml's gaps.acknowledge entries; an empty
+// path has none.
+func acknowledgements(path string) ([]report.Acknowledgement, error) {
+	if path == "" {
+		return nil, nil
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	var out []report.Acknowledgement
+	for _, a := range cfg.Gaps.Acknowledge {
+		out = append(out, report.Acknowledgement{Source: a.Source, Match: a.Match, Reason: a.Reason})
+	}
+	return out, nil
 }
 
 func loadReport(ctx context.Context, path string) (report.Input, error) {
