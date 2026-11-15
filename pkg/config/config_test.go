@@ -26,6 +26,9 @@ func TestExampleLoads(t *testing.T) {
 	if len(c.SLOs.Paths) != 1 || c.SLOs.Paths[0] != filepath.Join(examples, "slos") {
 		t.Errorf("slos %+v", c.SLOs)
 	}
+	if v, err := c.Storage.VolumeBytes(); err != nil || v != 50<<30 {
+		t.Errorf("storage.volume_size = %d, %v; want 50Gi", v, err)
+	}
 	if c.Runbooks.Fetch || len(c.Runbooks.Mirrors) != 1 || c.Runbooks.Mirrors[0].Path != filepath.Join(examples, "..", "..", "runbooks") {
 		t.Errorf("runbooks %+v", c.Runbooks)
 	}
@@ -133,5 +136,29 @@ func TestClients(t *testing.T) {
 		if err != nil || p.String() != want {
 			t.Errorf("%s: %v %v, want %s", in, p, err, want)
 		}
+	}
+}
+
+func TestParseSize(t *testing.T) {
+	for in, want := range map[string]int64{
+		"53687091200": 53687091200, "50Gi": 50 << 30, "50GiB": 50 << 30, "500G": 500e9, "500GB": 500e9,
+		"1.5TB": 1.5e12, "1.5Ti": 3 << 39, "512Mi": 512 << 20, "2K": 2000, "100B": 100, " 10 Gi ": 10 << 30, "1Pi": 1 << 50,
+	} {
+		if got, err := ParseSize(in); err != nil || got != want {
+			t.Errorf("ParseSize(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "Gi", "50 gigs", "-5Gi", "50iB", "50gi", "1e3", "0", "0.1", "99999999Pi", "50 Gi B"} {
+		if got, err := ParseSize(in); err == nil {
+			t.Errorf("ParseSize(%q) = %d, want an error", in, got)
+		}
+	}
+	if _, err := Parse([]byte("storage:\n  volume_size: lots\n")); err == nil || !strings.Contains(err.Error(), "storage.volume_size") {
+		t.Errorf("bad volume_size: %v", err)
+	}
+	if c, err := Parse([]byte("storage: {}\n")); err != nil {
+		t.Fatal(err)
+	} else if v, err := c.Storage.VolumeBytes(); v != 0 || err != nil {
+		t.Errorf("unset volume_size = %d, %v; want 0", v, err)
 	}
 }

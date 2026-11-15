@@ -1,5 +1,5 @@
 # Example tvt config. Copy to ./tvt.yaml (git-ignored). `tvt scan --config tvt.yaml`
-# reads external_consumers, ownership, slos, runbooks, postmortems, seasons, gaps, pricecard, clients, sweep_share and window_days; the other sections are accepted and read
+# reads external_consumers, ownership, slos, runbooks, postmortems, seasons, gaps, pricecard, clients, storage, sweep_share and window_days; the other sections are accepted and read
 # by later sprints (backends still come from flags). Unknown keys are errors.
 grafana:
   url: http://localhost:3000
@@ -13,6 +13,11 @@ pricecard: ./pricecard.yaml
 # The shortest observation window anything is recommended from: a scan with a
 # shorter --window scores every candidate with confidence 0 (default 30).
 window_days: 30
+# The volume under the Prometheus TSDB (a PVC's requested storage, or df). With
+# it, tvt scan warns when retention.size is above 85% of it; without
+# retention.size it warns either way. Warnings are evidence gaps, never savings.
+storage:
+  volume_size: 50Gi
 
 # Who sent logged queries, where the log can't say (the Prometheus query log
 # records only a client IP). Without grafana, an address that sent a query
