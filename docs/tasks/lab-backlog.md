@@ -60,6 +60,17 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 - Shop spans named with raw product paths, the spanmetrics histogram on default buckets, a volatile resource attribute in the metric identity, and a debug exporter left on.
 
+## Optional realism suite: SnowOps Labs (from S7)
+
+[SnowOps Labs](https://github.com/snowops-oss/snowopslabs) (Apache 2.0) builds a real Kubernetes platform on k3d or kind: kube-prometheus-stack, Grafana, Loki with Promtail, Tempo with Alloy for traces, Istio, Kafka, Vault, Argo CD and OpenCost, with 12 reversible faults graded against the live cluster. tvt-lab stays the source of exact ground truth; SnowOps tests precision, safety and scale, so it has no golden output. It needs Docker with at least 2 CPUs and 4 GB per scenario: run it in a Codespace or apart from tvt-lab's Podman stack, and review its `install.sh` first.
+
+- A values overlay for tvt: longer Prometheus retention (it ships 24h, 2 GB), the Prometheus query log and Grafana router logging, plus a `make snowops-scan` that runs `tvt scan` read-only against it.
+- S5: precision and scale on a full kube-prometheus-stack plus Istio cluster (no hard keep misclassified; scan time and memory against the series count).
+- S7: `ServiceMonitor`/`PodMonitor` `metricRelabelings` and kube-prometheus-stack Helm values as `propose` targets.
+- S8: the diagnosability loop (apply cuts, inject each fault, still diagnosable and graded), and the `observability-sre` scenario for OTTL readers and connector chains.
+- S11: compare the self-hosted fixed floor and disk estimate with OpenCost's allocation for the monitoring namespace.
+- Later: the `victoria-metrics-k8s-stack` provider for the VictoriaMetrics adapter and MetricsQL; Promtail for logs beside Alloy for traces as the double-shipping and agent-migration case.
+
 ## Later
 
 - Spike: can the Podman machine VM (kernel 5.10 or newer) run the OTel eBPF profiler and OBI in a privileged container with host PID and `/sys/kernel/tracing`? If yes, an optional `profiling` Compose profile (Pyroscope plus the profiler, off by default), with an `unknown_service` process and a profile fixture.
