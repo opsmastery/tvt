@@ -1,0 +1,66 @@
+# Monitors a team adds next to kube-prometheus-stack (S5 item 8), for the
+# selection tests. Not rendered by the chart: hand-written, stable.
+#
+# The chart's Prometheus selects ServiceMonitors and PodMonitors labelled
+# release: "kps" in any namespace (serviceMonitorSelectorNilUsesHelmValues:
+# true, namespace selectors {}). So shop (no release label) and
+# legacy-jobs (release: other) are not scraped, whatever they say.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: shop
+  namespace: shop
+  labels:
+    app.kubernetes.io/name: shop
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shop
+  endpoints:
+    - port: http
+      metricRelabelings:
+        - action: drop
+          sourceLabels: [__name__]
+          regex: shop_debug_.*
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: payments
+  namespace: payments
+  labels:
+    release: kps
+spec:
+  selector:
+    matchLabels:
+      app: payments
+  endpoints:
+    - port: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: batch
+  namespace: batch
+  labels:
+    release: kps
+spec:
+  selector:
+    matchLabels:
+      app: batch
+  podMetricsEndpoints:
+    - port: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: legacy-jobs
+  namespace: batch
+  labels:
+    release: other
+spec:
+  selector:
+    matchLabels:
+      app: legacy-jobs
+  podMetricsEndpoints:
+    - port: metrics

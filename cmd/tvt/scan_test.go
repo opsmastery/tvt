@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"maps"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -1438,6 +1440,113 @@ func TestScanStorageHygiene(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestScanSelectedMonitors (S5 item 8) points tvt.yaml at the pinned
+// kube-prometheus-stack render plus the extra monitors: the monitors line
+// names the two the chart's Prometheus doesn't select, the report lists
+// them as header gaps only, and a scrape pool naming one of them (served
+// in the targets API) is reported, never attributed to it.
+func TestScanSelectedMonitors(t *testing.T) {
+	setNow(t)
+	targets := func(w http.ResponseWriter, r *http.Request) {
+		b, err := os.ReadFile(filepath.Join(lab, "prometheus", "targets.json"))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(b, &doc); err != nil {
+			t.Error(err)
+			return
+		}
+		data := doc["data"].(map[string]any)
+		active := data["activeTargets"].([]any)
+		for _, a := range active {
+			tg := a.(map[string]any)
+			if tg["scrapePool"] == "shop" {
+				extra := maps.Clone(tg)
+				extra["scrapePool"] = "serviceMonitor/shop/shop/0"
+				active = append(active, extra)
+				break
+			}
+		}
+		data["activeTargets"] = active
+		_ = json.NewEncoder(w).Encode(doc)
+	}
+	l := newLab(t, map[string]http.HandlerFunc{"/api/v1/targets": targets})
+	dir := t.TempDir()
+	db := filepath.Join(dir, "tvt.db")
+	o := labOptions(l, db)
+	o.Config = filepath.Join(dir, "tvt.yaml")
+	kps, err := filepath.Abs(filepath.Join("..", "..", "testdata", "kube-prometheus-stack"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := fmt.Sprintf("kubernetes:\n  namespace: monitoring\n  manifests:\n    - %s\n    - %s\n",
+		filepath.Join(kps, "render.yaml"), filepath.Join(kps, "extra-monitors.yaml"))
+	if err := os.WriteFile(o.Config, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	const want = "monitors     15 of 17 monitors selected by 1 server, not selected: batch/legacy-jobs, shop/shop\n"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, out.String())
+	}
+	in, _, err := loadReport(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Now = scanTime
+	r := report.Build(in, 0)
+	var gaps []string
+	for _, g := range r.Gaps {
+		if g.Kind == report.GapMonitors {
+			gaps = append(gaps, g.Text)
+		}
+	}
+	wantGaps := []string{
+		"kubernetes monitors: PodMonitor batch/legacy-jobs is selected by no Prometheus/monitoring/kps-kube-prometheus-stack-prometheus: it scrapes nothing, so no series or saving is attributed to it",
+		"kubernetes monitors: ServiceMonitor shop/shop is selected by no Prometheus/monitoring/kps-kube-prometheus-stack-prometheus: it scrapes nothing, so no series or saving is attributed to it",
+		"kubernetes monitors: scrape pool serviceMonitor/shop/shop/0 names a monitor the manifests don't show as selected (out of date?): its series aren't attributed to a monitor",
+	}
+	if !slices.Equal(gaps, wantGaps) {
+		t.Errorf("monitor gaps:\n%s\nwant:\n%s", strings.Join(gaps, "\n"), strings.Join(wantGaps, "\n"))
+	}
+	found := false
+	for _, s := range r.Sources {
+		if s.Name == scan.SourceMonitors {
+			found = true
+			if s.Coverage != 1 {
+				t.Errorf("monitors coverage %v, want 1", s.Coverage)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no %q source", scan.SourceMonitors)
+	}
+	for _, rec := range r.Recommendations {
+		for _, g := range rec.Evidence.Gaps {
+			if strings.Contains(g, "kubernetes monitors") {
+				t.Errorf("%s lists a monitor gap", rec.ID)
+			}
+		}
+	}
+
+	// A manifest tvt can't read fails the scan before any backend.
+	if err := os.WriteFile(o.Config, []byte("kubernetes:\n  manifests: [missing/]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o.DB = filepath.Join(dir, "other.db")
+	if err := runScan(context.Background(), o, env, io.Discard); err == nil {
+		t.Error("a missing manifest path scanned")
+	}
+	if _, err := os.Stat(o.DB); !os.IsNotExist(err) {
+		t.Error("a failed scan created the database")
 	}
 }
 
