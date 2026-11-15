@@ -46,8 +46,10 @@ summary { cursor:pointer; color:var(--accent); }
 </div>
 
 {{if .Gaps}}
-<div class="gaps"><b>Evidence gaps</b>: a reader these sources would have shown can't be ruled out.
-<ul>{{range .Gaps}}<li>{{.}}</li>{{end}}</ul></div>
+<div class="gaps"><b>Evidence gaps</b>: a reader these would have shown can't be ruled out. Unacknowledged gaps show on every row they affect; acknowledge one in tvt.yaml (<code>gaps.acknowledge</code>) with a reason.
+<ul>{{range .Gaps}}<li><span class="tag">{{.Kind}}</span> {{.Text}}{{if .Acknowledged}} <span class="muted">(acknowledged: {{.Reason}})</span>{{end}}</li>{{end}}</ul>
+{{if .UnmatchedAcknowledgements}}<p>Acknowledgements that match no gap (remove them from tvt.yaml):</p><ul>{{range .UnmatchedAcknowledgements}}<li>{{.Source}}{{if .Match}} matching "{{.Match}}"{{end}}: {{.Reason}}</li>{{end}}</ul>{{end}}
+</div>
 {{end}}
 
 <h2>Recommendations</h2>
@@ -62,6 +64,7 @@ summary { cursor:pointer; color:var(--accent); }
 <td><span class="tag">{{$r.Action}}</span><br><code>{{$r.Signal.ID}}</code></td>
 <td>{{$r.Claim}}<br><b>Check:</b> {{$r.CheapestCheck}}
 {{if $r.Evidence.Gaps}}<div class="rowgap">Gaps: {{join $r.Evidence.Gaps "; "}}</div>{{end}}
+{{if $r.Evidence.Acknowledged}}<div class="muted" style="font-size:12px">Acknowledged: {{join $r.Evidence.Acknowledged "; "}}</div>{{end}}
 <details><summary>Evidence, readers and assumptions</summary><div class="detail">
 <b>Score</b>: usage weight {{printf "%.2f" $r.Score.UsageWeight}} ({{$r.Score.Strongest}}), confidence {{printf "%.2f" $r.Score.Confidence}}, priority {{printf "%.2f" $r.Score.Priority}}.
 Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.RiskIfWrong.Dormant}}, dormant{{end}}{{if $r.RiskIfWrong.Tier}}, tier {{$r.RiskIfWrong.Tier}}{{end}}.

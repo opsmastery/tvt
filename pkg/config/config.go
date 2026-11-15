@@ -33,6 +33,10 @@ type Config struct {
 	SLOs SLOs `yaml:"slos"`
 	// Runbooks says how to read the runbooks alerts link to.
 	Runbooks Runbooks `yaml:"runbooks"`
+	// Gaps acknowledges evidence gaps: an acknowledged gap leaves the
+	// report's rows (it stays in the header with its reason); an
+	// unacknowledged one shows on every row it affects.
+	Gaps Gaps `yaml:"gaps"`
 	// Postmortems are incident write-ups: a metric one names is expected
 	// in incidents, so if nothing reads it, it is dormant (ask the owner),
 	// never a drop candidate.
@@ -99,6 +103,21 @@ type SLOs struct {
 	// Pyrra or OpenSLO YAML. A repository is a path to its checkout.
 	// Relative paths are relative to tvt.yaml.
 	Paths []string `yaml:"paths"`
+}
+
+// Gaps lists acknowledged evidence gaps.
+type Gaps struct {
+	Acknowledge []GapAck `yaml:"acknowledge"`
+}
+
+// GapAck accepts the gaps of one evidence source (as the report names it:
+// "loki query log", "runbooks", "datasources", "assumed references"…)
+// whose text contains Match (all of them when Match is empty). Reason is
+// required: it is shown wherever the gap would have been.
+type GapAck struct {
+	Source string `yaml:"source"`
+	Match  string `yaml:"match"`
+	Reason string `yaml:"reason"`
 }
 
 // Postmortems lists where incident write-ups live.
@@ -226,6 +245,11 @@ func (c *Config) validate() error {
 	for i, p := range c.Postmortems.Paths {
 		if p == "" {
 			return fmt.Errorf("postmortems.paths[%d]: empty path", i)
+		}
+	}
+	for i, a := range c.Gaps.Acknowledge {
+		if strings.TrimSpace(a.Source) == "" || strings.TrimSpace(a.Reason) == "" {
+			return fmt.Errorf("gaps.acknowledge[%d]: source and reason are required", i)
 		}
 	}
 	for i, m := range c.Runbooks.Mirrors {
