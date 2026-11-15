@@ -24,13 +24,18 @@ var Lab = filepath.Join(Testdata, "lab")
 // logs queries as usage (invariant 4: tvt never runs PromQL or LogQL
 // there). It covers Prometheus and Mimir (any prefix), Loki, and Grafana's
 // query and datasource-proxy APIs, which forward to those backends. The
-// one exception is the query-log probe (collect.ProbeQuery): an instant
-// query to Prometheus or Mimir whose text is a marker selecting no series,
-// tagged collect.ProbeTag.
+// one exception is the query-log probe: an instant query whose text is a
+// marker selecting nothing, tagged collect.ProbeTag, to Prometheus or Mimir
+// (collect.ProbeQuery) or to Loki (collect.LokiProbeQuery, S5 item 5).
 func forbidden(r *http.Request) bool {
 	path := r.URL.Path
 	if strings.HasSuffix(path, "/api/v1/query") && !strings.Contains(path, "/loki/") && !strings.Contains(path, "/api/datasources/proxy/") {
 		if _, ok := collect.ProbeNonce(r.URL.Query().Get("query")); ok && r.Header.Get("X-Query-Tags") == collect.ProbeTag {
+			return false
+		}
+	}
+	if strings.HasSuffix(path, "/loki/api/v1/query") && !strings.Contains(path, "/api/datasources/proxy/") {
+		if _, ok := collect.LokiProbeNonce(r.URL.Query().Get("query")); ok && r.Header.Get("X-Query-Tags") == collect.ProbeTag {
 			return false
 		}
 	}
