@@ -66,6 +66,7 @@ summary { cursor:pointer; color:var(--accent); }
 {{if $r.Evidence.Gaps}}<div class="rowgap">Gaps: {{join $r.Evidence.Gaps "; "}}</div>{{end}}
 {{if $r.Evidence.Acknowledged}}<div class="muted" style="font-size:12px">Acknowledged: {{join $r.Evidence.Acknowledged "; "}}</div>{{end}}
 <details><summary>Evidence, readers and assumptions</summary><div class="detail">
+<b>Every reader</b>: <code>{{why $r.Signal.ID}}</code><br>
 <b>Score</b>: usage weight {{printf "%.2f" $r.Score.UsageWeight}} ({{$r.Score.Strongest}}), confidence {{printf "%.2f" $r.Score.Confidence}}, priority {{printf "%.2f" $r.Score.Priority}}.
 Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.RiskIfWrong.Dormant}}, dormant{{end}}{{if $r.RiskIfWrong.Tier}}, tier {{$r.RiskIfWrong.Tier}}{{end}}.
 {{with $r.Evidence.LastRead}}<br><b>Last read</b>: {{when .At}}{{if .Actor}} by {{.Actor}}{{end}} (<code>{{.Consumer}}</code>).{{end}}
@@ -109,7 +110,7 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 <tbody>
 {{range .Confirm}}
 <tr class="confirm" id="{{.ID}}"><td><span class="tag">dormant: confirm</span><br><code>{{.Signal.ID}}</code></td>
-<td>{{.Question}}{{if .Gaps}}<div class="rowgap">Gaps: {{join .Gaps "; "}}</div>{{end}}</td>
+<td>{{.Question}}{{if .Gaps}}<div class="rowgap">Gaps: {{join .Gaps "; "}}</div>{{end}}<div class="muted" style="font-size:12px">Every reader: <code>{{why .Signal.ID}}</code></div></td>
 <td class="num">{{money .Savings.Monthly .Savings.Currency}}</td>
 <td>{{if .Owner}}{{.Owner}}{{else}}<span class="muted">unknown</span>{{end}}{{if .Tier}}<br><span class="muted">tier {{.Tier}}</span>{{end}}</td></tr>
 {{else}}
