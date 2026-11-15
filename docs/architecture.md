@@ -28,6 +28,8 @@ Every scan stores a class on every signal (`score.Classify`, applied in `scan.Bu
 
 `hard_keep` and `keep_high` are both protected; they stay separate so the report can tell a declared dependency from "people look at it". Owners and tiers come from `ownership.owners` in `tvt.yaml` (first match; a label takes its metric's owner). A label nobody reads still takes `hard_keep` or `keep_high` when a protecting consumer keeps its metric's labels in the result (`refs.result_labels`: no aggregation, as in `rate(x[5m]) > 100`): removing it would merge series and change what the alert fires on or the viewed panel shows. It isn't counted as a read, so a raw ad hoc query protects nothing; `tvt why` lists such consumers as inferred readers.
 
+A log stream signal is a selector, and selectors overlap: rerouting `{app="shop", component="api", level=~"warn|error"}` also moves the lines a viewed panel shows through `{app="shop", level=~"warn|error"}`. So a stream signal also takes the readers (read, hard keep, viewed; never a sweep) of every stream signal that selects a stream in common with it (`scan.StreamOverlaps`). That's decided over the volume API's streams; a selector that selects none of them is compared by its matchers, and a selector tvt can't read overlaps everything. `tvt why` lists those readers as inferred ("reads the same streams through …").
+
 ## Usage weights (defaults, tunable)
 
 Weights rank candidates. A viewed dashboard never reaches ranking (it makes the signal `keep_high`), but its weight still applies to label candidates and to the report's evidence.
