@@ -27,7 +27,7 @@ import (
 //
 // A label signal takes its metric's owner, tier and name rules; a stream
 // signal's name rules run over its selector.
-func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.Reference, owners []config.Owner, mentions map[string]string, missed map[string]string, since, until time.Time) error {
+func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.Reference, overlaps map[string][]string, owners []config.Owner, mentions map[string]string, missed map[string]string, since, until time.Time) error {
 	om, err := newOwnerMatcher(owners)
 	if err != nil {
 		return err
@@ -73,6 +73,15 @@ func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.R
 		f := score.Facts{}
 		if p := facts[s.ID]; p != nil {
 			f = *p
+		}
+		// A stream signal's streams are also read through every
+		// overlapping selector (streamOverlaps): those readers protect
+		// it too. A sweep still keeps nothing.
+		for _, o := range overlaps[s.ID] {
+			if p := facts[o]; p != nil {
+				f.Read = f.Read || p.Read
+				f.HardKeep, f.Viewed = f.HardKeep || p.HardKeep, f.Viewed || p.Viewed
+			}
 		}
 		if s.Kind == graph.KindLabel {
 			if k := resultKept[ResultKeptMetric(*s)]; k != nil {

@@ -201,6 +201,9 @@ func readLatest(ctx context.Context, path string) (report.Input, store.ScanInfo,
 	if in.Scores, err = st.Scores(ctx, info.ID); err != nil {
 		return in, info, err
 	}
+	if in.StreamVolumes, err = st.StreamVolumes(ctx, info.ID); err != nil {
+		return in, info, err
+	}
 	if in.LineFindings, err = st.LineFindings(ctx, info.ID); err != nil {
 		return in, info, err
 	}
