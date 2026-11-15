@@ -1,0 +1,10 @@
+shop-audit.yml:
+    - name: shop-audit
+      rules:
+        - alert: ShopAuditDenials
+          expr: sum(count_over_time({app="shop", component="audit"} |= "result=denied" [5m])) > 20
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: Spike in denied actions in the shop audit log
