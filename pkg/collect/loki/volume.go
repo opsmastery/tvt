@@ -158,3 +158,23 @@ func streamKey(labels map[string]string) string {
 
 // StreamSelector is a stream's canonical selector (its full label set).
 func StreamSelector(labels map[string]string) string { return streamKey(labels) }
+
+// ExactStreamSelector selects only the stream with exactly these labels:
+// a selector also matches every stream carrying more labels, so each of
+// names the stream lacks is pinned to "" (no such label). names are the
+// label names the other streams use; Loki needs one non-empty matcher,
+// which labels supply.
+func ExactStreamSelector(labels map[string]string, names []string) string {
+	ms := make([]parse.Matcher, 0, len(labels)+len(names))
+	for k, v := range labels {
+		ms = append(ms, parse.Matcher{Label: k, Op: parse.MatchEqual, Value: v})
+	}
+	seen := map[string]bool{}
+	for _, n := range names {
+		if _, ok := labels[n]; !ok && !seen[n] && n != "" {
+			seen[n] = true
+			ms = append(ms, parse.Matcher{Label: n, Op: parse.MatchEqual, Value: ""})
+		}
+	}
+	return parse.CanonicalSelector(ms)
+}

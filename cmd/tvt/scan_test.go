@@ -20,6 +20,7 @@ import (
 
 	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect/loki"
 	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
@@ -232,7 +233,7 @@ func patternsRoute(t *testing.T, dir string) map[string]http.HandlerFunc {
 		t.Fatal(err)
 	}
 	return map[string]http.HandlerFunc{"/loki/api/v1/patterns": func(w http.ResponseWriter, r *http.Request) {
-		body, ok := recorded[r.URL.Query().Get("query")]
+		body, ok := recorded[plainSelector(t, r.URL.Query().Get("query"))]
 		if !ok {
 			t.Errorf("patterns query %q: no recorded answer", r.URL.Query().Get("query"))
 			http.NotFound(w, r)
@@ -240,6 +241,24 @@ func patternsRoute(t *testing.T, dir string) map[string]http.HandlerFunc {
 		}
 		w.Write(body)
 	}}
+}
+
+// plainSelector drops the label="" matchers tvt adds to ask Loki for
+// exactly one stream (loki.ExactStreamSelector), giving the recorded key.
+func plainSelector(t *testing.T, sel string) string {
+	t.Helper()
+	refs, err := parse.LogQL(sel)
+	if err != nil || len(refs) != 1 {
+		t.Errorf("patterns query %q: %v", sel, err)
+		return sel
+	}
+	var ms []parse.Matcher
+	for _, m := range refs[0].Matchers {
+		if m.Op != parse.MatchEqual || m.Value != "" {
+			ms = append(ms, m)
+		}
+	}
+	return parse.CanonicalSelector(ms)
 }
 
 func labOptions(l labServers, db string) scanOptions {
@@ -1419,5 +1438,30 @@ func TestScanStorageHygiene(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// streamPatterns asks Loki for exactly each stream (S5 debug pass): a
+// selector of the stream's own labels would also match a stream that
+// carries one more label and add its lines. Results stay keyed by the
+// stream's own selector, which line findings look up.
+func TestStreamPatternsExact(t *testing.T) {
+	var queries []string
+	srv := testutil.NewServer(t, testutil.Routes{"/loki/api/v1/patterns": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.Query().Get("query"))
+		fmt.Fprint(w, `{"status":"success","data":[{"pattern":"x","samples":[[1,2]]}]}`)
+	})})
+	lc := loki.New(srv.URL, "")
+	vols := []collect.StreamVolume{
+		{Labels: map[string]string{"app": "shop", "level": "warn"}, Bytes: 10},
+		{Labels: map[string]string{"app": "shop", "level": "warn", "pod": "a"}, Bytes: 5},
+	}
+	got, summary := streamPatterns(context.Background(), lc, vols)
+	want := []string{`{app="shop", level="warn", pod=""}`, `{app="shop", level="warn", pod="a"}`}
+	if !slices.Equal(queries, want) {
+		t.Errorf("queries %q, want %q", queries, want)
+	}
+	if _, ok := got[`{app="shop", level="warn"}`]; !ok || len(got) != 2 || !strings.Contains(summary, "2 patterns in the 2 largest streams") {
+		t.Errorf("patterns %v, summary %q", got, summary)
 	}
 }

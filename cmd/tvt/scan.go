@@ -540,11 +540,22 @@ func streamPatterns(ctx context.Context, lc *loki.Client, vols []collect.StreamV
 	top := slices.Clone(vols)
 	sort.SliceStable(top, func(i, j int) bool { return top[i].Bytes > top[j].Bytes })
 	top = top[:min(len(top), scan.PatternStreams)]
+	// Ask for exactly each stream: its labels, and every other stream's
+	// label names pinned to "", so a stream carrying more labels can't add
+	// its lines (S5 debug pass).
+	var names []string
+	for _, v := range vols {
+		for k := range v.Labels {
+			names = append(names, k)
+		}
+	}
+	slices.Sort(names)
+	names = slices.Compact(names)
 	out := map[string][]collect.LinePattern{}
 	var lines int
 	for _, v := range top {
 		sel := loki.StreamSelector(v.Labels)
-		ps, err := lc.Patterns(ctx, sel, patternWindow)
+		ps, err := lc.Patterns(ctx, loki.ExactStreamSelector(v.Labels, names), patternWindow)
 		switch {
 		case errors.Is(err, loki.ErrNotFound):
 			return nil, "unavailable: Loki's pattern API answered 404 (enable pattern_ingester for line findings)"
