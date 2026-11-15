@@ -188,7 +188,12 @@ func (r *readOnly) RoundTrip(req *http.Request) (*http.Response, error) {
 	p := req.URL.Path
 	if strings.HasSuffix(p, "/api/v1/query") || strings.HasSuffix(p, "/api/v1/query_range") ||
 		strings.HasPrefix(p, "/api/ds/query") || strings.Contains(p, "/api/datasources/proxy/") {
-		if _, probe := collect.ProbeNonce(req.URL.Query().Get("query")); !probe {
+		q := req.URL.Query().Get("query")
+		_, probe := collect.ProbeNonce(q)
+		if strings.HasPrefix(p, "/loki/") {
+			_, probe = collect.LokiProbeNonce(q) // S5 item 5
+		}
+		if !probe || !strings.HasSuffix(p, "/api/v1/query") || strings.Contains(p, "/api/datasources/proxy/") {
 			r.t.Errorf("tvt ran a query against %s: only the probe marker is allowed", req.URL.Redacted())
 			return nil, fmt.Errorf("e2e: refused query")
 		}
@@ -301,18 +306,18 @@ func TestE2EScanPrometheus(t *testing.T) {
 		t.Error("no dashboard loads: is the lab's viewer running?")
 	}
 
-	// Every log the lab writes is configured. The Prometheus log is proven
-	// by the probe; Loki's has no probe yet (S5) but must cover part of the
-	// window. Declared sources are read in full.
+	// Every log the lab writes is configured. The Prometheus and Loki logs
+	// are proven by their probes (Loki's since S5 item 5). Declared
+	// sources are read in full.
 	for _, s := range srcs {
 		switch s.Source {
 		case scan.SourceSLOs, scan.SourceRunbooks, scan.SourceDatasources:
 			if !s.Configured || s.Coverage != 1 || s.Gap != "" {
 				t.Errorf("source %+v", s)
 			}
-		case sourcePromQueryLog:
+		case sourcePromQueryLog, sourceLokiQueryLog:
 			if !s.Configured || s.Coverage <= 0 || s.Gap != "" {
-				t.Errorf("prometheus query log not proven: %+v", s)
+				t.Errorf("query log not proven: %+v", s)
 			}
 		default:
 			if !s.Configured || s.Coverage <= 0 {
@@ -434,6 +439,11 @@ func TestE2EReadOnlyTransport(t *testing.T) {
 	for _, req := range []*http.Request{
 		mustReq(t, http.MethodPost, "http://127.0.0.1:1/api/v1/query"),
 		mustReq(t, http.MethodGet, "http://127.0.0.1:1/api/v1/query?query="+url.QueryEscape("up")),
+		// Each marker only on its own backend's instant-query endpoint.
+		mustReq(t, http.MethodGet, "http://127.0.0.1:1/api/v1/query?query="+url.QueryEscape(collect.LokiProbeQuery("ab12"))),
+		mustReq(t, http.MethodGet, "http://127.0.0.1:1/loki/api/v1/query?query="+url.QueryEscape(collect.ProbeQuery("ab12"))),
+		mustReq(t, http.MethodGet, "http://127.0.0.1:1/loki/api/v1/query_range?query="+url.QueryEscape(collect.LokiProbeQuery("ab12"))),
+		mustReq(t, http.MethodGet, "http://127.0.0.1:1/loki/api/v1/query?query="+url.QueryEscape(`count_over_time({app="shop"}[1m])`)),
 	} {
 		if _, err := ro.RoundTrip(req); err == nil {
 			t.Errorf("%s %s was let through", req.Method, req.URL)
