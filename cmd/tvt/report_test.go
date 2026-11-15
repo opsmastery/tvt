@@ -126,6 +126,22 @@ func TestReportLab(t *testing.T) {
 			confirm["prom:metric:node_context_switches_total"].Reason, confirm["prom:metric:node_load15"].Reason)
 	}
 
+	// Evidence kept: the top-50 report tallies the full cut per service,
+	// and every ground-truth hard keep and dormant_confirm metric is kept.
+	var cut, kept, protected int
+	for _, svc := range r.Services {
+		cut += svc.Cut.Signals
+		kept += svc.HardKeep.Signals + svc.KeepHigh.Signals + svc.Dormant.Signals
+	}
+	for _, s := range g.signals {
+		if s.Kind != "label" && (s.Class == string(score.ClassHardKeep) || s.Class == string(score.ClassKeepHigh) || s.Class == string(score.ClassDormant)) {
+			protected++
+		}
+	}
+	if cut != len(all.Recommendations) || kept != protected || protected == 0 {
+		t.Errorf("services: cut %d of %d recommendations, kept %d of %d protected", cut, len(all.Recommendations), kept, protected)
+	}
+
 	// Acknowledging the Prometheus query log's partial coverage takes it
 	// off every row; a stale acknowledgement is reported.
 	cfg := filepath.Join(dir, "tvt.yaml")

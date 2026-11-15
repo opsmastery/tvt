@@ -86,6 +86,21 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </table>
 </div>
 
+<h2>Evidence kept per service</h2>
+<p class="muted">What tvt would cut next to what stays protected. Kept counts are metrics and streams (a label's cost is part of its metric's); cut counts every recommendation, not only the top rows.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Service</th><th class="num">Would cut</th><th class="num">Hard keep</th><th class="num">keep_high</th><th class="num">Dormant</th><th class="num">Incident</th><th class="num">Records</th></tr></thead>
+<tbody>{{$cur := .Scan.Currency}}{{range .Services}}<tr><td>{{.Name}}</td>
+<td class="num">{{.Cut.Signals}}<br><span class="muted">{{money .Cut.Monthly $cur}}</span></td>
+<td class="num">{{.HardKeep.Signals}}<br><span class="muted">{{money .HardKeep.Monthly $cur}}</span></td>
+<td class="num">{{.KeepHigh.Signals}}<br><span class="muted">{{money .KeepHigh.Monthly $cur}}</span></td>
+<td class="num">{{.Dormant.Signals}}<br><span class="muted">{{money .Dormant.Monthly $cur}}</span></td>
+<td class="num">{{.Incident.Signals}}<br><span class="muted">{{money .Incident.Monthly $cur}}</span></td>
+<td class="num">{{.Records.Signals}}<br><span class="muted">{{money .Records.Monthly $cur}}</span></td></tr>{{end}}</tbody>
+</table>
+</div>
+
 <h2>Dormant: confirm</h2>
 <p class="muted">Nothing read these, but they look incident-critical. They are never drop candidates: each is a question for its owner.{{if gt .Totals.Dormant (len .Confirm)}} The {{len .Confirm}} with the largest saving of {{.Totals.Dormant}} dormant signals (labels of a listed metric are covered by its row).{{end}}</p>
 <div class="table-wrap">
