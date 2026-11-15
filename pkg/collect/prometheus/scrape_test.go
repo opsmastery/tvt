@@ -3,6 +3,7 @@ package prometheus
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,9 @@ func TestScrapeFixture(t *testing.T) {
 	got, err := New(fixtureServer(t, scrapeFixtures).URL, "").Scrape(context.Background())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Contains(got.Pools, "shop") || len(got.Pools) != len(got.JobIntervals) {
+		t.Errorf("pools = %v", got.Pools)
 	}
 	if got.JobIntervals["alertmanager"] != 15*time.Second || got.JobIntervals["shop"] != 10*time.Second || len(got.JobIntervals) != 6 {
 		t.Errorf("job intervals %v", got.JobIntervals)

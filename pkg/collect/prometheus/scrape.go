@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,7 +52,11 @@ func (c *Client) Scrape(ctx context.Context) (collect.Scrape, error) {
 		if cur, ok := out.JobIntervals[job]; !ok || time.Duration(d) < cur {
 			out.JobIntervals[job] = time.Duration(d)
 		}
+		if t.ScrapePool != "" && !slices.Contains(out.Pools, t.ScrapePool) {
+			out.Pools = append(out.Pools, t.ScrapePool)
+		}
 	}
+	sort.Strings(out.Pools)
 
 	// Target metadata, one job at a time and at most metadataTargets
 	// targets each: unfiltered, the API returns every target's copy of every

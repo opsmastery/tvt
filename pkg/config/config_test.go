@@ -26,6 +26,9 @@ func TestExampleLoads(t *testing.T) {
 	if len(c.SLOs.Paths) != 1 || c.SLOs.Paths[0] != filepath.Join(examples, "slos") {
 		t.Errorf("slos %+v", c.SLOs)
 	}
+	if len(c.Kubernetes.Manifests) != 1 || c.Kubernetes.Manifests[0] != filepath.Join(examples, "manifests") || c.Kubernetes.Namespace != "monitoring" {
+		t.Errorf("kubernetes %+v", c.Kubernetes)
+	}
 	if v, err := c.Storage.VolumeBytes(); err != nil || v != 50<<30 {
 		t.Errorf("storage.volume_size = %d, %v; want 50Gi", v, err)
 	}

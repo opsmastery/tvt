@@ -19,6 +19,14 @@ window_days: 30
 storage:
   volume_size: 50Gi
 
+# Kubernetes manifests (helm template output, a GitOps checkout), read from
+# disk: tvt resolves which ServiceMonitors and PodMonitors the
+# prometheus-operator Prometheus selects, and never attributes series to
+# one it doesn't. namespace is helm template's --namespace.
+kubernetes:
+  manifests: [manifests/]
+  namespace: monitoring
+
 # Who sent logged queries, where the log can't say (the Prometheus query log
 # records only a client IP). Without grafana, an address that sent a query
 # matching a panel or Grafana-managed rule is taken to be Grafana's.

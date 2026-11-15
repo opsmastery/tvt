@@ -21,6 +21,7 @@ import (
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/grafana"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect/kube"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/loki"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/mimir"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/prometheus"
@@ -161,6 +162,16 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		in.Seasons = cfg.Seasons
 		// Validated when the config was read.
 		in.VolumeBytes, _ = cfg.Storage.VolumeBytes()
+		if len(cfg.Kubernetes.Manifests) > 0 {
+			objs, err := kube.Load(cfg.Kubernetes.Manifests)
+			if err != nil {
+				return err
+			}
+			sel := kube.Resolve(objs, cfg.Kubernetes.Namespace)
+			in.Monitors = &sel
+			_, summary := scan.MonitorSelection(sel, nil)
+			fmt.Fprintf(out, "%-12s %s\n", "monitors", summary)
+		}
 		if cfg.PriceCard != "" {
 			card, err := cost.Load(cfg.PriceCard)
 			if err != nil {
