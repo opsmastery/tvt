@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 )
 
 // Why is everything tvt knows about one signal's readers: the view behind
@@ -159,6 +160,27 @@ func Explain(in Input, id string) (Why, error) {
 		}
 		w.Readers = append(w.Readers, r)
 	}
+	// A label no consumer reads may still reach a consumer's result through
+	// its metric (no aggregation): that consumer depends on it, and when
+	// it's an alert or a viewed dashboard the label is protected.
+	if s.Kind == graph.KindLabel {
+		metric := scan.ResultKeptMetric(s)
+		for _, ref := range in.References {
+			if ref.SignalID != metric || !ref.ResultLabels || ref.Sweep {
+				continue
+			}
+			con := consumers[ref.ConsumerID]
+			w.Readers = append(w.Readers, WhyReader{
+				Reader: Reader{
+					Consumer: ref.ConsumerID, Kind: string(con.Kind), Name: con.Name,
+					Evidence: string(ref.Evidence), Source: readerSource(ref, con), Client: con.Client,
+					Via: ref.Via, LastSeen: ref.LastSeen, Actor: ref.Actor, Exact: !ref.Assumed,
+				},
+				FirstSeen: ref.FirstSeen, Expr: con.Expr,
+				Inferred: []string{"its values reach this reader's result through " + s.Parent + " (not a read; removing it merges series)"},
+			})
+		}
+	}
 	sort.SliceStable(w.Readers, func(i, j int) bool {
 		a, b := w.Readers[i], w.Readers[j]
 		if a.Sweep != b.Sweep {
@@ -175,6 +197,7 @@ func Explain(in Input, id string) (Why, error) {
 		}
 		return a.Consumer < b.Consumer
 	})
+	w.Gaps = uniqueGaps(w.Gaps)
 	r := Build(in, 0)
 	for _, rec := range r.Recommendations {
 		if rec.Signal.ID == id {

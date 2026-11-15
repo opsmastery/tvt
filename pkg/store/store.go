@@ -510,6 +510,27 @@ func (s *Store) References(ctx context.Context, scanID int64) ([]graph.Reference
 	return out, rows.Err()
 }
 
+// LastViewed returns every consumer's latest recorded view across all
+// scans (consumers.last_viewed only moves forward), so a dashboard view
+// still counts after Grafana's log line for it has rotated away.
+func (s *Store) LastViewed(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, last_viewed FROM consumers WHERE last_viewed IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var id string
+		var at int64
+		if err := rows.Scan(&id, &at); err != nil {
+			return nil, err
+		}
+		out[id] = fromMillis(at)
+	}
+	return out, rows.Err()
+}
+
 // SignalRead is the most recent time a query log showed a signal being
 // read: by which consumer, and by whom when the log recorded it.
 type SignalRead struct {
