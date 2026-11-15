@@ -212,7 +212,7 @@ func TestReportGapsAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"version":7`, `"line_findings":[]`, `"rules":[]`, `"query_load":{"queries":0,"samples":0,"bytes":0,"clients":[],"top":[]}`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
+	for _, key := range []string{`"version":8`, `"slo_coverage":{"services_without_slo":[],"paging_not_burn_rate":[],"slos_without_alert":[]}`, `"slo_findings":0`, `"line_findings":[]`, `"rules":[]`, `"query_load":{"queries":0,"samples":0,"bytes":0,"clients":[],"top":[]}`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
 		`"savings"`, `"risk_if_wrong"`, `"assumptions"`, `"status":"open"`, `"savings_per_minute"`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("JSON has no %s", key)
@@ -497,6 +497,35 @@ func TestQueryLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range []string{"Query load", "Shop / &lt;Requests&gt;", "75%", "2.0 MB"} {
+		if !strings.Contains(page.String(), s) {
+			t.Errorf("HTML lacks %q", s)
+		}
+	}
+}
+
+func TestSLOCoverageReport(t *testing.T) {
+	in := Input{
+		Scan: Scan{ID: 1, StartedAt: time.Date(2026, 11, 15, 22, 0, 0, 0, time.UTC)},
+		SLOFindings: []graph.SLOFinding{
+			{Kind: graph.SLOPagingNotBurnRate, Subject: "rule:prometheus:a.yml/g/A", Name: "<A>", Detail: "pages (critical) on a threshold", Fix: "burn rate"},
+			{Kind: graph.SLOServiceWithout, Subject: "service:reconciler", Name: "reconciler", Detail: "no SLO", Fix: "define one"},
+			{Kind: graph.SLOWithoutAlert, Subject: "slo:sloth:x.yml:shop/a", Name: "shop/a", Detail: "declares alert B, but no ruler has it loaded", Fix: "load it"},
+		},
+	}
+	r := Build(in, 0)
+	c := r.SLOCoverage
+	if r.Totals.SLOFindings != 3 || len(c.ServicesWithoutSLO) != 1 || len(c.PagingNotBurnRate) != 1 || c.SLOsWithoutAlert[0].ID != "slo:sloth:x.yml:shop/a" {
+		t.Fatalf("slo coverage %+v, totals %+v", c, r.Totals)
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page strings.Builder
+	if err := RenderHTMLFromJSON(&page, b); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{"SLO coverage", "&lt;A&gt;", "reconciler", "declares alert B", "Fix: load it"} {
 		if !strings.Contains(page.String(), s) {
 			t.Errorf("HTML lacks %q", s)
 		}
