@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect/kube"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
@@ -107,6 +108,10 @@ type Inputs struct {
 	// VolumeBytes is the size of the volume under that TSDB (tvt.yaml
 	// storage.volume_size); 0 when unknown.
 	VolumeBytes int64
+	// Monitors is which ServiceMonitors and PodMonitors the
+	// prometheus-operator servers in tvt.yaml's kubernetes.manifests
+	// select; nil when none are configured.
+	Monitors *kube.Selection
 	// StreamVolumes is every Loki stream's ingest (the volume API); nil
 	// when it wasn't collected, which leaves stream signals without costs.
 	StreamVolumes []collect.StreamVolume
@@ -434,6 +439,14 @@ func Build(in Inputs) (Output, error) {
 		st, _ := StorageHygiene(*in.Storage, in.VolumeBytes)
 		sources = append(sources, st)
 	}
+	if in.Monitors != nil {
+		var pools []string
+		if in.Scrape != nil {
+			pools = in.Scrape.Pools
+		}
+		mon, _ := MonitorSelection(*in.Monitors, pools)
+		sources = append(sources, mon)
+	}
 	seen := map[string]bool{}
 	var sum float64
 	var logs int
@@ -452,7 +465,7 @@ func Build(in Inputs) (Output, error) {
 			s.WindowStart = since
 		}
 		out.Sources = append(out.Sources, s)
-		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || s.Source == SourceStorage || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
+		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || s.Source == SourceStorage || s.Source == SourceMonitors || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
 			continue
 		}
 		sum += s.Coverage

@@ -18,6 +18,7 @@ const (
 	GapAssumed      = "assumed"      // a reference tvt inferred rather than read
 	GapSeason       = "season"       // a season (tvt.yaml seasons) the window missed: its readers couldn't show
 	GapStorage      = "storage"      // a storage hygiene warning (S5 item 6): no retention.size, or one too close to the volume; never a saving
+	GapMonitors     = "monitors"     // a ServiceMonitor or PodMonitor no Prometheus selects, or one tvt can't decide (S5 item 8); never a saving
 )
 
 // SourceAssumed names the gaps of assumed references.
@@ -60,6 +61,8 @@ func sourceGaps(s graph.SourceCoverage) []Gap {
 			kind = GapSeason
 		case s.Source == scan.SourceStorage:
 			kind = GapStorage
+		case s.Source == scan.SourceMonitors:
+			kind = GapMonitors
 		}
 		var out []Gap
 		for _, line := range strings.Split(s.Gap, "\n") {
