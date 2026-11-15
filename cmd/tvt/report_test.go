@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,5 +163,74 @@ func TestReportLab(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "missing.db")); err == nil {
 		t.Error("report created a database")
+	}
+}
+
+// A season the lab window (Oct 10 - Nov 9) misses: the shop's unread
+// signals are dormant, never recommended, and the header lists the gap.
+func TestReportLabSeasons(t *testing.T) {
+	setNow(t)
+	l := newLab(t, nil)
+	dir := t.TempDir()
+	db := filepath.Join(dir, "tvt.db")
+	o := labOptions(l, db)
+	o.Config = filepath.Join(dir, "tvt.yaml")
+	body := fmt.Sprintf(`pricecard: grafana-cloud
+slos:
+  paths: [%q]
+postmortems:
+  paths: [%q]
+runbooks:
+  fetch: false
+  mirrors:
+    - url_prefix: https://github.com/Opsmastery-Summit/tvt-lab/blob/main/
+      path: %q
+ownership:
+  owners:
+    - name: shop
+      metrics: ["shop_feature_flag_.*"]
+seasons:
+  - name: spring sale
+    months: [3, 4]
+    services: [shop]
+`, filepath.Join(lab, "slos"), filepath.Join(lab, "postmortems"), lab)
+	if err := os.WriteFile(o.Config, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := runScan(context.Background(), o, env, &out); err != nil {
+		t.Fatalf("scan: %v\n%s", err, out.String())
+	}
+	if err := runReport(context.Background(), reportOptions{DB: db, JSON: filepath.Join(dir, "r.json"), Top: 0}, &out); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "r.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r report.Report
+	if err := json.Unmarshal(b, &r); err != nil {
+		t.Fatal(err)
+	}
+	var gap bool
+	for _, g := range r.Gaps {
+		gap = gap || g.Kind == report.GapSeason && strings.Contains(g.Text, "spring sale: runs in Mar, Apr")
+	}
+	if !gap {
+		t.Errorf("no season gap in %+v", r.Gaps)
+	}
+	for _, rec := range r.Recommendations {
+		if strings.HasPrefix(rec.Signal.Name, "shop_feature_flag_") || strings.HasPrefix(rec.Signal.Parent, "shop_feature_flag_") {
+			t.Errorf("%s recommended despite its missed season", rec.ID)
+		}
+	}
+	var confirm bool
+	for _, c := range r.Confirm {
+		if c.Signal.ID == "prom:metric:shop_feature_flag_evaluations_total" {
+			confirm = c.Reason == "seasonal reader: spring sale falls outside the window" && c.Owner == "shop"
+		}
+	}
+	if !confirm {
+		t.Error("shop_feature_flag_evaluations_total isn't a seasonal confirm row")
 	}
 }

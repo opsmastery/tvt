@@ -26,7 +26,18 @@ Only `candidate` signals with a score above zero confidence. Hard keeps, keep_hi
 
 ## Dormant: confirm
 
-A dormant signal is unread but looks incident-critical: its name says error, latency, saturation or queue depth, its owner's tier is 0 or 1, or a runbook or postmortem names it without querying it. Runbook mentions come from the runbooks alerts link to; postmortems from `postmortems.paths` in `tvt.yaml` (files or directories of `.md`, `.markdown`, `.txt`, `.html`). A mention is any metric-shaped word (it has `_` or `:`) that names a collected metric.
+A dormant signal is unread but looks incident-critical: its name says error, latency, saturation or queue depth, its owner's tier is 0 or 1, a runbook or postmortem names it without querying it, or its owner has a season the window missed.
+
+**Seasons.** Some readers only run in some months: a quarter-end close, a holiday peak, tax season. `tvt.yaml` declares them:
+
+```yaml
+seasons:
+  - name: quarter close
+    months: [3, 6, 9, 12]
+    services: [finance]     # ownership.owners names
+```
+
+A season is seen when the scan window touches any of its months. One the window misses is a `season` gap in the header, and every unread signal its services own is dormant ("seasonal reader: quarter close falls outside the window"), not a drop candidate. To clear it, scan with a window that reaches back into one of its months. Runbook mentions come from the runbooks alerts link to; postmortems from `postmortems.paths` in `tvt.yaml` (files or directories of `.md`, `.markdown`, `.txt`, `.html`). A mention is any metric-shaped word (it has `_` or `:`) that names a collected metric.
 
 Dormant signals are never recommendations. Each becomes a `confirm` row: `id` (`confirm:<signal id>`), `signal`, `reason`, `question` (for the owner: nothing read it in the window, it looks incident-critical because of the reason, will they need it in an incident, and what dropping it would save), `owner`, `tier`, `savings` and `gaps`. Rows come highest saving first, limited by `--top`; a label whose metric is also dormant is left out, since the metric's question covers it. `totals.dormant` counts every dormant signal. An owner's answer arrives with S9's owner workflow.
 
@@ -59,6 +70,7 @@ A gap is a way the evidence falls short: a reader it would have shown can't be r
 | `partial` | A source that covers only part of the window |
 | `unreadable` | A definition tvt couldn't read: a runbook it couldn't fetch, an SLO whose SLI it can't parse, panels on a datasource it doesn't parse (a consumer with `unparsed` set reads something tvt can't see, so its dashboard is never "unused") |
 | `assumed` | References tvt inferred rather than read (one header gap per consumer, with how many signals and why) |
+| `season` | A `tvt.yaml` season the window misses: its readers couldn't show |
 
 Grafana Cloud's blind spots (direct Loki API queries Usage Insights doesn't see) join with the Cloud adapters (Sprint 2 item 11).
 

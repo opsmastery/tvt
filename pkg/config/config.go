@@ -33,6 +33,11 @@ type Config struct {
 	SLOs SLOs `yaml:"slos"`
 	// Runbooks says how to read the runbooks alerts link to.
 	Runbooks Runbooks `yaml:"runbooks"`
+	// Seasons are readers that only run in some months (a quarter-end
+	// close, a holiday peak). A window that misses every month of a
+	// season can't show its readers: that is a gap, and the unread signals
+	// of the season's services are dormant, not drop candidates.
+	Seasons []Season `yaml:"seasons"`
 	// Gaps acknowledges evidence gaps: an acknowledged gap leaves the
 	// report's rows (it stays in the header with its reason); an
 	// unacknowledged one shows on every row it affects.
@@ -103,6 +108,15 @@ type SLOs struct {
 	// Pyrra or OpenSLO YAML. A repository is a path to its checkout.
 	// Relative paths are relative to tvt.yaml.
 	Paths []string `yaml:"paths"`
+}
+
+// Season is a recurring period with its own readers.
+type Season struct {
+	Name string `yaml:"name"`
+	// Months are the months of the year it runs in, 1-12.
+	Months []int `yaml:"months"`
+	// Services are ownership.owners names whose signals it reads.
+	Services []string `yaml:"services"`
 }
 
 // Gaps lists acknowledged evidence gaps.
@@ -245,6 +259,34 @@ func (c *Config) validate() error {
 	for i, p := range c.Postmortems.Paths {
 		if p == "" {
 			return fmt.Errorf("postmortems.paths[%d]: empty path", i)
+		}
+	}
+	owners := map[string]bool{}
+	for _, o := range c.Ownership.Owners {
+		owners[o.Name] = true
+	}
+	seasons := map[string]bool{}
+	for i, se := range c.Seasons {
+		if strings.TrimSpace(se.Name) == "" {
+			return fmt.Errorf("seasons[%d]: name is required", i)
+		}
+		if seasons[se.Name] {
+			return fmt.Errorf("seasons[%d]: %q appears twice", i, se.Name)
+		}
+		seasons[se.Name] = true
+		if len(se.Months) == 0 || len(se.Services) == 0 {
+			return fmt.Errorf("season %q: months and services are required", se.Name)
+		}
+		for _, m := range se.Months {
+			if m < 1 || m > 12 {
+				return fmt.Errorf("season %q: month %d, want 1-12", se.Name, m)
+			}
+		}
+		for _, svc := range se.Services {
+			// A typo would silently protect nothing: services must be owners.
+			if !owners[svc] {
+				return fmt.Errorf("season %q: service %q is not an ownership.owners name", se.Name, svc)
+			}
 		}
 	}
 	for i, a := range c.Gaps.Acknowledge {

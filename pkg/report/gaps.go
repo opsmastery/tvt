@@ -16,6 +16,7 @@ const (
 	GapPartial      = "partial"      // the source covers part of the window
 	GapUnreadable   = "unreadable"   // a definition tvt couldn't read: a runbook, an SLO, a datasource it doesn't parse
 	GapAssumed      = "assumed"      // a reference tvt inferred rather than read
+	GapSeason       = "season"       // a season (tvt.yaml seasons) the window missed: its readers couldn't show
 )
 
 // SourceAssumed names the gaps of assumed references.
@@ -51,8 +52,11 @@ func sourceGaps(s graph.SourceCoverage) []Gap {
 		return []Gap{{Source: s.Source, Kind: GapUnconfigured, Text: s.Source + " not configured"}}
 	case s.Gap != "":
 		kind := GapUnreadable
-		if isQueryLog(s.Source) {
+		switch {
+		case isQueryLog(s.Source):
 			kind = GapUnproven
+		case strings.HasPrefix(s.Source, scan.SourceSeasonPrefix):
+			kind = GapSeason
 		}
 		var out []Gap
 		for _, line := range strings.Split(s.Gap, "\n") {
