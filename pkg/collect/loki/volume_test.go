@@ -38,7 +38,7 @@ func TestStreamVolumesFixture(t *testing.T) {
 		}
 	})
 	c := New(srv.URL, "")
-	c.Now = func() time.Time { return time.Unix(1794189597, 0) }
+	c.Now = func() time.Time { return time.Unix(1794708152, 0) }
 	got, err := c.StreamVolumes(context.Background(), 24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -58,10 +58,12 @@ func TestStreamVolumesFixture(t *testing.T) {
 			t.Errorf("window %v", s.Window)
 		}
 	}
-	if first := got[0]; StreamSelector(first.Labels) != `{app="shop", component="api", level="debug"}` || first.Bytes != 79753044 {
+	if first := got[0]; StreamSelector(first.Labels) != `{app="shop", component="api", level="debug"}` || first.Bytes != 1403974474 {
 		t.Errorf("first stream %v %d", first.Labels, first.Bytes)
 	}
-	if total != 79753044+16715740+1942599+234735+76774 {
+	// Captured Nov 15 at steady state (the Nov 9 capture saw about 1.4h of
+	// a fresh Loki, 98.7 MB/day).
+	if total != 1403974474+515449172+45463524+7138043+1710528 {
 		t.Errorf("total %d", total)
 	}
 }
