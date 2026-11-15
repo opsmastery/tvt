@@ -312,7 +312,8 @@ func TestE2EScanPrometheus(t *testing.T) {
 	for _, s := range srcs {
 		switch s.Source {
 		case scan.SourceSLOs, scan.SourceRunbooks, scan.SourceDatasources:
-			if !s.Configured || s.Coverage != 1 || s.Gap != "" {
+			// The lab config names no owners: SLO coverage says so (S6 item 3).
+			if gap := strings.TrimPrefix(s.Gap, noOwnersGap); !s.Configured || s.Coverage != 1 || gap != "" {
 				t.Errorf("source %+v", s)
 			}
 		case sourcePromQueryLog, sourceLokiQueryLog:
