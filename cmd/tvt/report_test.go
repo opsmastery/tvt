@@ -125,6 +125,38 @@ func TestReportLab(t *testing.T) {
 			confirm["prom:metric:node_context_switches_total"].Reason, confirm["prom:metric:node_load15"].Reason)
 	}
 
+	// Acknowledging the Prometheus query log's partial coverage takes it
+	// off every row; a stale acknowledgement is reported.
+	cfg := filepath.Join(dir, "tvt.yaml")
+	if err := os.WriteFile(cfg, []byte("gaps:\n  acknowledge:\n    - source: prometheus query log\n      reason: the lab rotates its query log\n    - source: slo definitions\n      match: nothing like this\n      reason: stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := runReport(context.Background(), reportOptions{DB: db, Config: cfg, JSON: filepath.Join(dir, "acked.json"), Top: 0}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "(1 acknowledged), 1 acknowledgements match no gap") {
+		t.Errorf("output: %s", out.String())
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "acked.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var acked report.Report
+	if err := json.Unmarshal(b, &acked); err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range acked.Recommendations {
+		for _, g := range rec.Evidence.Gaps {
+			if strings.HasPrefix(g, "prometheus query log") {
+				t.Fatalf("%s still shows the acknowledged gap %q", rec.ID, g)
+			}
+		}
+		if rec.Signal.Source == "prom" && len(rec.Evidence.Acknowledged) == 0 {
+			t.Fatalf("%s doesn't list the acknowledged gap", rec.ID)
+		}
+	}
+
 	if err := runReport(context.Background(), reportOptions{DB: filepath.Join(dir, "missing.db"), JSON: "-"}, &out); err == nil {
 		t.Error("a missing database didn't fail")
 	}

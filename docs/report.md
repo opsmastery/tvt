@@ -4,7 +4,7 @@
 
 ```sh
 tvt scan ... --db tvt.db
-tvt report --db tvt.db --json report.json --html report.html --top 50
+tvt report --db tvt.db --config tvt.yaml --json report.json --html report.html --top 50
 # --json - writes only the JSON, to stdout; --html "" skips the page; --top 0 keeps every recommendation
 ```
 
@@ -38,7 +38,7 @@ Recommendations are ranked by **savings per minute of checking**: the score's pr
 | --- | --- |
 | `id` | `<action>:<signal id>`, stable across scans |
 | `claim` | One testable sentence: what tvt saw in the window and what the change saves |
-| `evidence` | `references` (consumer IDs), `query_log` (logged queries that touched the signal, sweeps flagged), `last_read` (the most recent logged read from any scan; it never decays into "never read"), `gaps` |
+| `evidence` | `references` (consumer IDs), `query_log` (logged queries that touched the signal, sweeps flagged), `last_read` (the most recent logged read from any scan; it never decays into "never read"), `gaps` (unacknowledged) and `acknowledged_gaps` (with reasons) |
 | `cheapest_check`, `check_minutes` | The fastest way to confirm or refute the claim. In order: ask whoever last queried it (2 min); ask its owner (5); ask the team of an unviewed dashboard that shows it (5); search code and configs (15) |
 | `downstream` | Every reader: consumer, kind, evidence class, source (`query log`, `rules API`, `dashboard JSON`, `SLO file`, `runbook`, `tvt.yaml`, `assumed`), client, via, last seen, actor, `exact` (false when inferred), `sweep` |
 | `savings` | Monthly, in the price card's currency; `approximate` for a vendor preset or a stream (selectors overlap); `disk_bytes` on a self-hosted card |
@@ -48,8 +48,38 @@ Recommendations are ranked by **savings per minute of checking**: the score's pr
 | `status` | `open`, `confirmed` or `dismissed` (with `dismissed_reason`); owner decisions arrive with S9, so every row is `open` for now |
 | `score` | Usage weight, strongest evidence, confidence, priority |
 
+## Evidence gaps
+
+A gap is a way the evidence falls short: a reader it would have shown can't be ruled out. The header lists every one, each with a `source`, a `kind` and its `text`:
+
+| Kind | When |
+| --- | --- |
+| `unconfigured` | A usage log isn't set up (a backend's query log, the Grafana router log), so it shows nothing |
+| `unproven` | A query log whose probe never appeared: tvt can't show it records every query |
+| `partial` | A source that covers only part of the window |
+| `unreadable` | A definition tvt couldn't read: a runbook it couldn't fetch, an SLO whose SLI it can't parse, panels on a datasource it doesn't parse (a consumer with `unparsed` set reads something tvt can't see, so its dashboard is never "unused") |
+| `assumed` | References tvt inferred rather than read (one header gap per consumer, with how many signals and why) |
+
+Grafana Cloud's blind spots (direct Loki API queries Usage Insights doesn't see) join with the Cloud adapters (Sprint 2 item 11).
+
+Every row lists the gaps that could hide one of its readers: its backend's query log, the Grafana router log, the definition sources, and its own assumed readers.
+
+**Acknowledging a gap.** A gap you've accepted goes in `tvt.yaml`, with a reason:
+
+```yaml
+gaps:
+  acknowledge:
+    - source: loki query log          # as the report names it
+      reason: Loki is only read through Grafana here
+    - source: datasources
+      match: grafana-pyroscope        # only gaps whose text contains this
+      reason: profiles aren't metrics
+```
+
+An acknowledged gap stays in the header with its reason and moves to the row's `acknowledged_gaps`. An unacknowledged one shows in every affected row's `gaps`, and `check` will fail on it (S8). An acknowledgement that matches no gap is listed under `unmatched_acknowledgements`, so stale entries surface. `tvt report --config tvt.yaml` reads them.
+
 ## The header
 
-`scan` (ID, start, window, log coverage, price card), `sources` (every evidence source's coverage), `gaps` (every source that is unconfigured, partial or unproven), `totals` (candidates, recommendations, dormant signals, metric savings, and stream savings apart, since stream selectors overlap), `held`.
+`scan` (ID, start, window, log coverage, price card), `sources` (every evidence source's coverage), `gaps` (every gap, acknowledged or not, above), `unmatched_acknowledgements`, `totals` (candidates, recommendations, dormant signals, metric savings, and stream savings apart, since stream selectors overlap), `held`.
 
-Readers check `version` (now 1) and refuse one they don't know.
+Readers check `version` (now 2: gaps became structured) and refuse one they don't know.
