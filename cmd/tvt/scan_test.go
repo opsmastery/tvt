@@ -528,6 +528,10 @@ func TestScanLabAgents(t *testing.T) {
 	t.Logf("sweep: %d references, all weak", sweeps)
 }
 
+// noOwnersGap is the slo definitions gap when tvt.yaml names no owners
+// (S6 item 3); the lab configs name none.
+const noOwnersGap = "no ownership.owners in tvt.yaml: services without an SLO can't be listed"
+
 func TestScanLab(t *testing.T) {
 	setNow(t)
 	l := newLab(t, nil)
@@ -686,7 +690,7 @@ func TestScanLab(t *testing.T) {
 			// services without an SLO (S6 item 3).
 			gap := s.Gap
 			if s.Source == scan.SourceSLOs {
-				gap = strings.TrimPrefix(gap, "no ownership.owners in tvt.yaml: services without an SLO can't be listed")
+				gap = strings.TrimPrefix(gap, noOwnersGap)
 			}
 			if !s.Configured || s.Coverage != 1 || gap != "" {
 				t.Errorf("source %+v", s)
