@@ -3,7 +3,8 @@
 // Every call is a read-only GET, and every request carries
 // X-Query-Tags: Source=tvt, so Loki's own query log can tell tvt's requests
 // apart from real usage. The collector never runs LogQL through
-// /loki/api/v1/query or query_range.
+// /loki/api/v1/query or query_range, except Probe's marker
+// (collect.LokiProbeQuery), which selects no stream.
 package loki
 
 import (
@@ -80,12 +81,17 @@ func (e *httpError) Unwrap() error {
 // response body on HTTP 200. The caller closes it. Any other status is an
 // *httpError.
 func (c *Client) get(ctx context.Context, path string, q url.Values, accept string) (io.ReadCloser, error) {
+	return c.getTagged(ctx, path, q, accept, "Source=tvt")
+}
+
+// getTagged is get with tags as the X-Query-Tags value.
+func (c *Client) getTagged(ctx context.Context, path string, q url.Values, accept, tags string) (io.ReadCloser, error) {
 	req, err := httpx.NewRequest(ctx, c.BaseURL, path, q, c.Token)
 	if err != nil {
 		return nil, fmt.Errorf("loki: %s: %w", path, err)
 	}
 	req.Header.Set("Accept", accept)
-	req.Header.Set("X-Query-Tags", "Source=tvt")
+	req.Header.Set("X-Query-Tags", tags)
 
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
@@ -97,4 +103,17 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, accept stri
 		return nil, &httpError{Path: path, Status: resp.StatusCode, Body: httpx.ErrorBody(resp.Body)}
 	}
 	return httpx.Limit(resp.Body, httpx.MaxResponseBytes), nil
+}
+
+// Probe sends Loki's query-log marker for nonce (collect.LokiProbeQuery) as
+// an instant query tagged collect.ProbeTag (S5 item 5). It is the one LogQL
+// query tvt sends: it selects no stream, and the query log reader drops it
+// from usage.
+func (c *Client) Probe(ctx context.Context, nonce string) error {
+	q := url.Values{"query": {collect.LokiProbeQuery(nonce)}}
+	body, err := c.getTagged(ctx, "/loki/api/v1/query", q, "application/json", collect.ProbeTag)
+	if err != nil {
+		return err
+	}
+	return body.Close()
 }

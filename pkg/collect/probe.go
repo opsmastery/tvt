@@ -23,6 +23,10 @@ const (
 
 var probeRe = regexp.MustCompile(`^count\(` + probeMetric + `\{nonce="([0-9a-f]{1,64})"\}\)$`)
 
+// lokiProbeRe matches LokiProbeQuery. The stream label is probeMetric, which
+// no real stream carries, so the marker selects no stream.
+var lokiProbeRe = regexp.MustCompile(`^count_over_time\(\{` + probeMetric + `="([0-9a-f]{1,64})"\}\[1m\]\)$`)
+
 // NewProbeNonce returns a random nonce for one scan's marker.
 func NewProbeNonce() string {
 	b := make([]byte, 8)
@@ -41,6 +45,23 @@ func ProbeQuery(nonce string) string {
 // any other query.
 func ProbeNonce(expr string) (nonce string, ok bool) {
 	m := probeRe.FindStringSubmatch(expr)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// LokiProbeQuery is Loki's marker query for nonce (S5 item 5):
+// count_over_time({tvt_query_log_probe="..."}[1m]). It is a metric query,
+// so Loki's frontend logs it as query_type=metric, and it selects no stream.
+func LokiProbeQuery(nonce string) string {
+	return fmt.Sprintf(`count_over_time({%s=%q}[1m])`, probeMetric, nonce)
+}
+
+// LokiProbeNonce returns the nonce of a logged Loki marker query; ok is
+// false for any other query.
+func LokiProbeNonce(expr string) (nonce string, ok bool) {
+	m := lokiProbeRe.FindStringSubmatch(expr)
 	if m == nil {
 		return "", false
 	}

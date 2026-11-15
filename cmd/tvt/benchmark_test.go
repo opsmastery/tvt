@@ -279,7 +279,7 @@ func scanState(t *testing.T, st benchState, dir string) (scanGraph, report.Repor
 	db := filepath.Join(t.TempDir(), "tvt.db")
 	o := labOptionsAt(dir, l, db)
 	o.LabelTop = 5
-	o.LokiQueryLogs = stringList{filepath.Join(dir, "loki/query.log")}
+	o.LokiQueryLogs = stringList{l.lokiLog}
 	var out strings.Builder
 	if err := runScan(context.Background(), o, env, &out); err != nil {
 		t.Fatalf("scan: %v\n%s", err, out.String())
