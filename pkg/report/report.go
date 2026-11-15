@@ -14,7 +14,7 @@ import (
 
 // Version is the JSON report's schema version. Readers (the HTML report,
 // propose, check) refuse a version they don't know.
-const Version = 8
+const Version = 9
 
 // Actions a recommendation can propose.
 const (
@@ -79,6 +79,8 @@ type Report struct {
 	// SLOCoverage is the SLO coverage report (S6 item 3, version 8).
 	// Report only.
 	SLOCoverage SLOCoverage `json:"slo_coverage"`
+	// Pipelines are the pipeline targets (S6 item 4, version 9).
+	Pipelines Pipelines `json:"pipelines"`
 	// Held are candidates tvt can't recommend yet, by reason
 	// (score.Held*): a short window, no coverage, a new signal.
 	Held map[string]int `json:"held,omitempty"`
@@ -145,6 +147,13 @@ type Recommendation struct {
 	Assumptions []string `json:"assumptions"`
 	Owner       string   `json:"owner,omitempty"`
 	Status      string   `json:"status"`
+	// Pipeline is where the change goes (S6 item 4, ADR 0007): the one
+	// pipeline whose handles claim the signal, or "unmapped" (with
+	// PipelineNote saying why), which is reported but never proposable.
+	// Empty when tvt.yaml lists no pipelines.
+	Pipeline     string `json:"pipeline,omitempty"`
+	PipelineNote string `json:"pipeline_note,omitempty"`
+	Proposable   bool   `json:"proposable"`
 	// DismissedReason says why, for a dismissed recommendation.
 	DismissedReason string `json:"dismissed_reason,omitempty"`
 	Score           Score  `json:"score"`
@@ -166,6 +175,9 @@ type Confirm struct {
 	Tier     *int   `json:"tier,omitempty"`
 	// Savings is what dropping it would save, if the owner says it can go.
 	Savings Savings `json:"savings"`
+	// Pipeline and PipelineNote: as on a recommendation (S6 item 4).
+	Pipeline     string `json:"pipeline,omitempty"`
+	PipelineNote string `json:"pipeline_note,omitempty"`
 	// Gaps are the unacknowledged gaps in the sources that could have
 	// shown a reader; Acknowledged are the accepted ones, with reasons.
 	Gaps         []string `json:"gaps"`
@@ -280,6 +292,9 @@ type Input struct {
 	QueryCosts []graph.QueryCost
 	// SLOFindings are the scan's SLO coverage findings (store.SLOFindings).
 	SLOFindings []graph.SLOFinding
+	// PipelineTargets are the scan's pipeline targets
+	// (store.PipelineTargets).
+	PipelineTargets []graph.PipelineTarget
 	// StreamVolumes are the scan's streams (store.StreamVolumes): tvt why
 	// uses them to find readers of a stream signal's streams through an
 	// overlapping selector.
@@ -379,10 +394,11 @@ func Build(in Input, limit int) Report {
 		}
 		return a.ID < b.ID
 	})
+	r.Confirm = confirmRows(in.Signals, costs, gs, listed, in.Scan, limit)
+	r.Pipelines = pipelineTargets(r.Recommendations, r.Confirm, in.PipelineTargets, in.StreamVolumes, gs)
 	if limit > 0 && len(r.Recommendations) > limit {
 		r.Recommendations = r.Recommendations[:limit]
 	}
-	r.Confirm = confirmRows(in.Signals, costs, gs, listed, in.Scan, limit)
 	r.LineFindings = lineFindings(in.LineFindings, in.Scan.Currency)
 	r.Rules, r.Totals.RuleFindings = rules(consumers, in.RuleCosts, in.RuleFindings)
 	r.QueryLoad = queryLoad(consumers, in.QueryCosts)

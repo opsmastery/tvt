@@ -1,0 +1,1 @@
+{"series_count_total":54246,"labels":[{"label_name":"instance","label_values_count":1,"series_count":3177,"cardinality":[]},{"label_name":"job","label_values_count":1,"series_count":3177,"cardinality":[]},{"label_name":"op","label_values_count":3,"series_count":3177,"cardinality":[]},{"label_name":"user_id","label_values_count":1788,"series_count":3177,"cardinality":[]}]}
