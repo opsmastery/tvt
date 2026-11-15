@@ -113,4 +113,11 @@ S4 (`docs/tasks/s04-report-v1.md`), started Nov 14.
 
 S4 is done (Nov 14). Done-when checked live by `TestE2EReport` (`make e2e`): cold start to the top-50 HTML and JSON report in 2s on the lab, only candidates recommended, every row lists its gaps.
 
+Bug fixes (Nov 14, pre-S5 review):
+- Labels in a protecting consumer's result are protected. `refs.result_labels` (an alert or viewed panel whose result keeps the metric's labels, as in `rate(x[5m]) > 100`) was recorded but unused, so an unread label of an alerted metric could be recommended for removal, merging series under the alert. `scan.classify` now gives every label of such a metric the consumer's protection (hard_keep, or keep_high for a dashboard viewed in the window) without counting it as a read (a raw ad hoc query protects nothing); `tvt why` lists those consumers as inferred readers. `TestResultLabelsProtectLabels`.
+- Dashboard views survive log rotation. Classification used only the views in this scan's Grafana log, so a dashboard viewed 10 days ago whose log line had rotated away lost keep_high. `scan.History.LastViewed` (`Store.LastViewed`, the stored `consumers.last_viewed` max) is merged into consumers before classifying; the window still ages views out. `TestHistoryViewsKeepDashboards`, `TestScanKeepsViewsAfterLogRotation` (3 lab signals lapsed without it).
+- Label-removal rows state that removal needs aggregation, never a plain `labeldrop` (series would collide and lose samples): a constraint for `propose`.
+- A row's gaps list one assumed reader once (it could reach the signal directly and through a recording rule).
+- New fuzz target `FuzzMentions`.
+
 Run `scripts/capture-fixtures.sh` against the lab first and build against those fixtures.
