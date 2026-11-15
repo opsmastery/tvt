@@ -349,7 +349,7 @@ func assertReferences(t *testing.T, g scanGraph, src string, gt groundTruth) {
 			ok = dash && !viewed && !hard
 		case "keep_medium":
 			ok = adhoc && !hard && !dash // a query log saw it, and only ad hoc
-		case "drop_metric":
+		case "drop_metric", "dormant_confirm":
 			ok = !hard && !dash && !adhoc
 		default:
 			t.Fatalf("ground-truth metric %s: class %q", name, e.Class)
@@ -550,8 +550,11 @@ func assertClasses(t *testing.T, g scanGraph, src string, gt groundTruth) {
 		"keep_high":   {"keep_high"},
 		"keep_medium": {"candidate"},
 		"low":         {"candidate"},
-		"drop_metric": {"candidate", "dormant"},
-		"drop_label":  {"candidate", "dormant"},
+		"drop_metric": {"candidate"},
+		"drop_label":  {"candidate"},
+		// Decided Nov 14 (S4 item 3): unread signals the dormant name and
+		// tier rules hold back are questions for their owner, never drops.
+		"dormant_confirm": {"dormant"},
 	}
 	expect := func(s graph.Signal) (gtEntry, bool) {
 		switch s.Kind {
@@ -605,7 +608,7 @@ func assertClasses(t *testing.T, g scanGraph, src string, gt groundTruth) {
 		t.Fatal("no signal matched a ground-truth metric or label")
 	}
 	if len(dormant) > 0 {
-		t.Logf("%d seeded drops the dormant name rules hold back: %s", len(dormant), strings.Join(dormant, ", "))
+		t.Logf("%d dormant: confirm signals (ground truth dormant_confirm): %s", len(dormant), strings.Join(dormant, ", "))
 	}
 
 	// Streams: the selectors that select a hard_keep stream include a

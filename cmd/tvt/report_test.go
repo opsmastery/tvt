@@ -55,7 +55,7 @@ func TestReportLab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(string(page), "<tr id="); n != 50 {
+	if n := strings.Count(string(page), `<tr class="rec"`); n != 50 {
 		t.Errorf("HTML has %d rows, want 50", n)
 	}
 	if len(r.Gaps) == 0 {
@@ -93,6 +93,36 @@ func TestReportLab(t *testing.T) {
 	}
 	if drops == 0 {
 		t.Error("no ground-truth drop is a candidate")
+	}
+
+	// Dormant: confirm. Every ground-truth dormant_confirm metric is a
+	// question for its owner and never a recommendation; every row is a
+	// dormant signal.
+	confirm := map[string]report.Confirm{}
+	for _, c := range all.Confirm {
+		confirm[c.Signal.ID] = c
+		if g.signals[c.Signal.ID].Class != string(score.ClassDormant) || c.Question == "" || c.Reason == "" {
+			t.Errorf("confirm row %+v", c)
+		}
+	}
+	var dormant int
+	for name, e := range gt.Metrics {
+		if e.Class != "dormant_confirm" {
+			continue
+		}
+		dormant++
+		id := "prom:metric:" + name
+		if _, ok := confirm[id]; !ok {
+			t.Errorf("ground-truth dormant_confirm %s has no confirm row", name)
+		}
+		if recommended[id] {
+			t.Errorf("dormant %s recommended", name)
+		}
+	}
+	if dormant < 23 || !strings.Contains(confirm["prom:metric:node_context_switches_total"].Reason, "postmortem") ||
+		!strings.Contains(confirm["prom:metric:node_load15"].Reason, "runbook") {
+		t.Errorf("%d dormant_confirm; mention reasons %q, %q", dormant,
+			confirm["prom:metric:node_context_switches_total"].Reason, confirm["prom:metric:node_load15"].Reason)
 	}
 
 	if err := runReport(context.Background(), reportOptions{DB: filepath.Join(dir, "missing.db"), JSON: "-"}, &out); err == nil {

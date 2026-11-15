@@ -54,6 +54,10 @@ type Report struct {
 	Gaps            []string         `json:"gaps"`
 	Totals          Totals           `json:"totals"`
 	Recommendations []Recommendation `json:"recommendations"`
+	// Confirm are the "dormant: confirm" rows: unread signals that look
+	// incident-critical (by name, tier, or a runbook or postmortem naming
+	// them). Each is a question for the owner, never a drop candidate.
+	Confirm []Confirm `json:"confirm"`
 	// Held are candidates tvt can't recommend yet, by reason
 	// (score.Held*): a short window, no coverage, a new signal.
 	Held map[string]int `json:"held,omitempty"`
@@ -82,10 +86,13 @@ type Source struct {
 // Totals summarize the recommendations. Stream selectors overlap, so
 // stream savings are summed apart from metric savings and can overcount.
 type Totals struct {
-	Candidates      int     `json:"candidates"`
-	Recommendations int     `json:"recommendations"`
-	MetricSavings   float64 `json:"metric_savings"`
-	StreamSavings   float64 `json:"stream_savings"`
+	Candidates      int `json:"candidates"`
+	Recommendations int `json:"recommendations"`
+	// Dormant counts every dormant signal; Confirm lists the top ones,
+	// leaving out labels whose metric is itself listed.
+	Dormant       int     `json:"dormant"`
+	MetricSavings float64 `json:"metric_savings"`
+	StreamSavings float64 `json:"stream_savings"`
 }
 
 // Recommendation is one proposed change and everything needed to check it.
@@ -115,6 +122,23 @@ type Recommendation struct {
 	// SavingsPerMinute ranks recommendations: the score's priority (savings
 	// discounted by usage and confidence) per minute of checking.
 	SavingsPerMinute float64 `json:"savings_per_minute"`
+}
+
+// Confirm is one "dormant: confirm" row.
+type Confirm struct {
+	// ID is stable across scans: confirm:<signal ID>.
+	ID     string    `json:"id"`
+	Signal SignalRef `json:"signal"`
+	// Reason is why it looks incident-critical (graph.Signal.Dormant).
+	Reason string `json:"reason"`
+	// Question is what to ask the owner.
+	Question string `json:"question"`
+	Owner    string `json:"owner,omitempty"`
+	Tier     *int   `json:"tier,omitempty"`
+	// Savings is what dropping it would save, if the owner says it can go.
+	Savings Savings `json:"savings"`
+	// Gaps are the sources that could have shown a reader but fall short.
+	Gaps []string `json:"gaps"`
 }
 
 // SignalRef names a signal.
@@ -226,7 +250,8 @@ type LastReadOf struct {
 	LastRead
 }
 
-// Build turns a stored scan into the JSON report. Only candidate signals
+// Build turns a stored scan into the JSON report. Dormant signals become
+// Confirm rows (questions for the owner, never recommendations). Only candidate signals
 // with a score above zero confidence are recommended: hard keeps,
 // keep_high and dormant signals never are, and a candidate tvt can't yet
 // trust (a short window, no coverage, new) is counted in Held. A label
@@ -234,7 +259,7 @@ type LastReadOf struct {
 // and so is the every-stream signal. Recommendations come highest savings
 // per minute of checking first; limit > 0 keeps that many.
 func Build(in Input, limit int) Report {
-	r := Report{Version: Version, GeneratedAt: in.Now, Scan: in.Scan, Sources: []Source{}, Gaps: []string{}, Recommendations: []Recommendation{}}
+	r := Report{Version: Version, GeneratedAt: in.Now, Scan: in.Scan, Sources: []Source{}, Gaps: []string{}, Recommendations: []Recommendation{}, Confirm: []Confirm{}}
 	if r.GeneratedAt.IsZero() {
 		r.GeneratedAt = in.Scan.StartedAt
 	}
@@ -309,6 +334,12 @@ func Build(in Input, limit int) Report {
 	if limit > 0 && len(r.Recommendations) > limit {
 		r.Recommendations = r.Recommendations[:limit]
 	}
+	r.Confirm = confirmRows(in.Signals, costs, sources, in.Scan, limit)
+	for _, s := range in.Signals {
+		if s.Class == string(score.ClassDormant) {
+			r.Totals.Dormant++
+		}
+	}
 	for _, rec := range r.Recommendations {
 		r.Totals.Recommendations++
 		if rec.Action == ActionReroute {
@@ -318,6 +349,66 @@ func Build(in Input, limit int) Report {
 		}
 	}
 	return r
+}
+
+// confirmRows are the dormant signals as questions for their owners,
+// highest saving first. A label whose metric is dormant too is left out:
+// the metric's question covers it.
+func confirmRows(signals []graph.Signal, costs map[string]graph.Cost, sources map[string]graph.SourceCoverage, meta Scan, limit int) []Confirm {
+	dormantMetric := map[string]bool{}
+	for _, s := range signals {
+		if s.Class == string(score.ClassDormant) && s.Kind == graph.KindMetric {
+			dormantMetric[s.Name] = true
+		}
+	}
+	out := []Confirm{}
+	for _, s := range signals {
+		if s.Class != string(score.ClassDormant) || s.Kind == graph.KindLabel && dormantMetric[s.Parent] {
+			continue
+		}
+		c := costs[s.ID]
+		row := Confirm{
+			ID:     "confirm:" + s.ID,
+			Signal: SignalRef{ID: s.ID, Kind: string(s.Kind), Name: s.Name, Parent: s.Parent, Source: s.Source},
+			Reason: s.Dormant, Owner: s.Owner, Tier: s.Tier,
+			Savings: Savings{Monthly: c.MonthlyCost, Currency: meta.Currency, DiskBytes: c.DiskBytes,
+				Approximate: meta.Approximate || s.Kind == graph.KindStream},
+			Gaps: signalGaps(s, sources),
+		}
+		row.Question = question(s, row, meta)
+		out = append(out, row)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Savings.Monthly != out[j].Savings.Monthly {
+			return out[i].Savings.Monthly > out[j].Savings.Monthly
+		}
+		return out[i].ID < out[j].ID
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// question is what to ask a dormant signal's owner.
+func question(s graph.Signal, row Confirm, meta Scan) string {
+	what := "metric " + s.Name
+	switch s.Kind {
+	case graph.KindLabel:
+		what = fmt.Sprintf("label %s on %s", s.Name, s.Parent)
+	case graph.KindStream:
+		what = "log stream " + s.Name
+	}
+	who := "Owner"
+	if s.Owner != "" {
+		who = s.Owner
+	}
+	money := fmt.Sprintf("%.2f", row.Savings.Monthly)
+	if meta.Currency != "" {
+		money += " " + meta.Currency
+	}
+	return fmt.Sprintf("%s: nothing read %s in the %d days to %s, but it looks incident-critical (%s). Will you need it during an incident? If not, it becomes a drop candidate worth %s a month.",
+		who, what, meta.WindowDays, meta.StartedAt.UTC().Format("2006-01-02"), s.Dormant, money)
 }
 
 func heldReason(sc graph.Score) string {

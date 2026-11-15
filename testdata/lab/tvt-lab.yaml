@@ -4,6 +4,8 @@
 pricecard: grafana-cloud
 slos:
   paths: [slos]
+postmortems:
+  paths: [postmortems]
 runbooks:
   fetch: false
   mirrors:
