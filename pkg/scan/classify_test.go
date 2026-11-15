@@ -178,7 +178,7 @@ func TestClassifyMentions(t *testing.T) {
 		Mentions: []Mention{{Source: "postmortem pm/2026-10.md", Names: []string{"node_forks_total", "node_load15"}}},
 		Runbooks: []collect.Runbook{{URL: "https://r/backlog", Mentions: []string{"node_load15"}}},
 	}
-	if err := classify(signals, nil, nil, nil, mentioned(in), time.Time{}, time.Now()); err != nil {
+	if err := classify(signals, nil, nil, nil, mentioned(in), nil, time.Time{}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
@@ -191,5 +191,59 @@ func TestClassifyMentions(t *testing.T) {
 		if s.Dormant != want[s.ID] || (want[s.ID] != "") != (s.Class == "dormant") {
 			t.Errorf("%s: %s %q, want %q", s.ID, s.Class, s.Dormant, want[s.ID])
 		}
+	}
+}
+
+// A season the window misses is a gap, and its services' unread signals
+// are dormant; a season the window touches changes nothing.
+func TestSeasons(t *testing.T) {
+	until := time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC)
+	since := until.AddDate(0, 0, -30) // Feb 18 - Mar 20
+	ss := []config.Season{
+		{Name: "holiday peak", Months: []int{11, 12}, Services: []string{"shop"}},
+		{Name: "quarter close", Months: []int{3, 6, 9, 12}, Services: []string{"finance"}},
+	}
+	srcs, missed := seasons(ss, since, until)
+	if len(srcs) != 2 || srcs[0].Source != "season holiday peak" || srcs[0].Coverage != 0 ||
+		srcs[0].Gap != "runs in Nov, Dec, outside the window: readers of shop can't show" {
+		t.Errorf("holiday source %+v", srcs[0])
+	}
+	if srcs[1].Coverage != 1 || srcs[1].Gap != "" {
+		t.Errorf("quarter close source %+v", srcs[1])
+	}
+	if len(missed) != 1 || missed["shop"] != "holiday peak" {
+		t.Errorf("missed = %v", missed)
+	}
+
+	tier := 3
+	owners := []config.Owner{
+		{Name: "shop", Tier: &tier, Metrics: []string{"shop_.*"}},
+		{Name: "finance", Metrics: []string{"ledger_.*"}},
+	}
+	signals := []graph.Signal{
+		{ID: "prom:metric:shop_gift_cards_total", Kind: graph.KindMetric, Name: "shop_gift_cards_total", Source: "prom"},
+		{ID: "prom:metric:ledger_entries_total", Kind: graph.KindMetric, Name: "ledger_entries_total", Source: "prom"},
+		{ID: "prom:metric:shop_read_total", Kind: graph.KindMetric, Name: "shop_read_total", Source: "prom"},
+	}
+	consumers := []graph.Consumer{{ID: "q", Kind: graph.ConsumerAdhocQuery}}
+	refs := []graph.Reference{{SignalID: "prom:metric:shop_read_total", ConsumerID: "q", Evidence: graph.EvidenceObserved}}
+	if err := classify(signals, consumers, refs, owners, nil, missed, since, until); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][2]string{
+		"prom:metric:shop_gift_cards_total": {"dormant", "seasonal reader: holiday peak falls outside the window"},
+		"prom:metric:ledger_entries_total":  {"candidate", ""}, // its season is in the window
+		"prom:metric:shop_read_total":       {"candidate", ""}, // read: a season changes nothing
+	}
+	for _, s := range signals {
+		if w := want[s.ID]; s.Class != w[0] || s.Dormant != w[1] {
+			t.Errorf("%s: %s %q, want %v", s.ID, s.Class, s.Dormant, w)
+		}
+	}
+
+	// A window crossing a year boundary touches both years' months.
+	_, missed = seasons(ss[:1], time.Date(2026, 12, 20, 0, 0, 0, 0, time.UTC), time.Date(2027, 1, 19, 0, 0, 0, 0, time.UTC))
+	if len(missed) != 0 {
+		t.Errorf("Dec-Jan window missed %v", missed)
 	}
 }

@@ -156,6 +156,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		}
 		in.External, in.Owners, in.Clients, in.SweepShare = cfg.ExternalConsumers, cfg.Ownership.Owners, cfg.Clients, cfg.SweepShare
 		in.MinWindowDays = cfg.WindowDays
+		in.Seasons = cfg.Seasons
 		if cfg.PriceCard != "" {
 			card, err := cost.Load(cfg.PriceCard)
 			if err != nil {
