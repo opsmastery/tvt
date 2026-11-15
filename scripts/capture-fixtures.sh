@@ -51,6 +51,7 @@ get "$PROM/api/v1/status/buildinfo"       "$OUT/prometheus/buildinfo.json"
 get "$PROM/api/v1/targets?state=active"  "$OUT/prometheus/targets.json"           # scrape interval per job (S3 costs)
 get "$PROM/api/v1/targets/metadata"       "$OUT/prometheus/targets_metadata.json"  # metric family -> job, type
 get "$PROM/api/v1/status/flags"           "$OUT/prometheus/flags.json"             # exemplar-storage
+get "$PROM/metrics"                       "$OUT/prometheus/metrics.txt"            # its own TSDB stats (self-hosted card)
 get "$PROM/api/v1/series?match[]=shop_cart_operations_total&limit=200" "$OUT/prometheus/series_cart_ops.json"
 # The query log is on the host (tvt-lab mounts it at lab-logs/prometheus);
 # the copy inside the container stopped when the lab moved it.
@@ -71,6 +72,21 @@ get "$LOKI/loki/api/v1/index/volume" "$OUT/loki/volume_by_stream.json" -G \
   --data-urlencode 'query={app=~".+"}' --data-urlencode 'since=24h' --data-urlencode 'aggregateBy=series' \
   --data-urlencode 'targetLabels=app,component,level'
 get "$LOKI/loki/api/v1/labels" "$OUT/loki/labels.json"
+# Line patterns per stream (S5 items 3-4): one patterns API answer per stream
+# in the volume fixture, over the pattern ingester's last 3 hours, as a JSON
+# object keyed by stream selector. Loki doesn't log patterns calls as queries.
+if python3 -I - "$LOKI" "$OUT/loki/volume_by_stream.json" > "$TMP" <<'PY'
+import json, sys, time, urllib.parse, urllib.request
+loki, vol = sys.argv[1], sys.argv[2]
+end = int(time.time())
+out = {}
+for r in json.load(open(vol))["data"]["result"]:
+    sel = "{" + ", ".join('%s="%s"' % (k, v) for k, v in sorted(r["metric"].items())) + "}"
+    q = urllib.parse.urlencode({"query": sel, "start": end - 3 * 3600, "end": end})
+    out[sel] = json.load(urllib.request.urlopen(loki + "/loki/api/v1/patterns?" + q, timeout=30))
+json.dump(out, sys.stdout, indent=1, sort_keys=True)
+PY
+then keep "$OUT/loki/patterns.json"; else rm -f "$TMP"; echo "  FAIL $OUT/loki/patterns.json" >&2; fi
 # Loki's query log: the metrics.go lines of the last two hours (frontend,
 # querier and ruler; item 4 keeps the frontend's user queries).
 compose logs --no-log-prefix --since 2h loki 2>&1 | grep 'caller=metrics.go' > "$TMP" || :

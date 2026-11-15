@@ -56,6 +56,15 @@ Confidence is how far the evidence can be trusted to have shown every reader, in
 
 Only `candidate` signals are scored. Each scan stores one row per candidate in `scores`: cost, usage weight, strongest evidence, confidence, priority and, when confidence is 0, why.
 
+## Benchmark
+
+`testdata/bench` turns tvt-lab's `ground-truth.yaml` into a versioned benchmark (S5). Each lab state is a frozen fixture snapshot; a state can be an overlay holding only the files that changed. `make bench` scans every state and scores two things separately, so a gain in one finding class can't hide a loss in another:
+
+- **Evidence found:** of the readers and non-readers ground truth names (metrics, labels, streams), the rules, dashboard views, declared reads and query-log sources it expects, the share the scan resolved.
+- **Recommendations:** precision and recall of what the report raises (a recommendation or a dormant "confirm" question) against each ground-truth class (keep, recommend or confirm). Raising the wrong kind is both a false positive and a false negative.
+
+`testdata/bench/baseline.json` records the scores and the items each state still misses. A score below it fails CI. After a deliberate change, `make bench-update` re-records it, and the diff shows what moved. Bump `version` in `benchmark.yaml` when the scoring rules change.
+
 ## Design rules
 
 - Read-only against every backend. Changes only happen through reviewed PRs. The only query tvt sends to a backend that logs queries is the query-log probe: a marker that selects no series, tagged `Source=tvt-probe`, which proves the log is written and is never counted as usage.
