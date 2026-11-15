@@ -35,9 +35,15 @@ var scanTime = time.Date(2026, 11, 15, 2, 10, 0, 0, time.UTC) // just after the 
 // shared read-only server. A handler in override takes precedence.
 func fixtureServer(t *testing.T, files map[string]string, override map[string]http.HandlerFunc) *httptest.Server {
 	t.Helper()
+	return fixtureServerAt(t, lab, files, override)
+}
+
+// fixtureServerAt is fixtureServer for the lab snapshot in dir.
+func fixtureServerAt(t *testing.T, dir string, files map[string]string, override map[string]http.HandlerFunc) *httptest.Server {
+	t.Helper()
 	routes := testutil.Routes{}
 	for path, name := range files {
-		routes[path] = testutil.File(t, "lab/"+name)
+		routes[path] = testutil.File(t, filepath.Join(dir, name))
 	}
 	for path, h := range override {
 		routes[path] = h
@@ -73,7 +79,7 @@ func probeSink(t *testing.T, log string, n *atomic.Int32) http.HandlerFunc {
 		if log != "" {
 			line, _ := json.Marshal(map[string]any{
 				"httpRequest": map[string]string{"clientIP": "10.89.0.20", "path": "/api/v1/query"},
-				"params":      map[string]string{"query": q}, "time": scanTime.Format(time.RFC3339Nano),
+				"params":      map[string]string{"query": q}, "time": scanNow().Format(time.RFC3339Nano),
 			})
 			f, err := os.OpenFile(log, os.O_APPEND|os.O_WRONLY, 0)
 			if err != nil {
@@ -89,6 +95,12 @@ func probeSink(t *testing.T, log string, n *atomic.Int32) http.HandlerFunc {
 
 func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 	t.Helper()
+	return newLabAt(t, lab, promOverride)
+}
+
+// newLabAt serves the lab snapshot in dir (laid out like testdata/lab).
+func newLabAt(t *testing.T, dir string, promOverride map[string]http.HandlerFunc) labServers {
+	t.Helper()
 	if promOverride == nil {
 		promOverride = map[string]http.HandlerFunc{}
 	}
@@ -96,7 +108,7 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 		promOverride["/api/v1/series"] = syntheticSeries
 	}
 	promLog := filepath.Join(t.TempDir(), "query.log")
-	data, err := os.ReadFile(filepath.Join(lab, "prometheus/query.log"))
+	data, err := os.ReadFile(filepath.Join(dir, "prometheus/query.log"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +119,7 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 	if _, ok := promOverride["/api/v1/query"]; !ok {
 		promOverride["/api/v1/query"] = probeSink(t, promLog, probes)
 	}
-	prom := fixtureServer(t, map[string]string{
+	prom := fixtureServerAt(t, dir, map[string]string{
 		"/api/v1/status/tsdb":      "prometheus/tsdb.json",
 		"/api/v1/rules":            "prometheus/rules.json",
 		"/api/v1/targets":          "prometheus/targets.json",
@@ -120,10 +132,10 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 		"/api/datasources":                "grafana/datasources.json",
 		"/api/ruler/grafana/api/v1/rules": "grafana/ruler_config.json",
 	}
-	for uid, file := range testutil.Dashboards(t) {
+	for uid, file := range testutil.DashboardsIn(t, dir) {
 		grafFiles["/api/dashboards/uid/"+uid] = "grafana/" + file
 	}
-	graf := fixtureServer(t, grafFiles, map[string]http.HandlerFunc{
+	graf := fixtureServerAt(t, dir, grafFiles, map[string]http.HandlerFunc{
 		"/api/user": func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer test-grafana-token" {
 				w.WriteHeader(http.StatusUnauthorized)
@@ -134,7 +146,7 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 		},
 		"/api/org": func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"id":1,"name":"Main Org."}`) },
 	})
-	loki := fixtureServer(t, map[string]string{
+	loki := fixtureServerAt(t, dir, map[string]string{
 		"/loki/api/v1/rules":        "loki/rules.yaml",
 		"/prometheus/api/v1/rules":  "loki/prom_rules.json",
 		"/loki/api/v1/labels":       "loki/labels.json",
@@ -144,6 +156,11 @@ func newLab(t *testing.T, promOverride map[string]http.HandlerFunc) labServers {
 }
 
 func labOptions(l labServers, db string) scanOptions {
+	return labOptionsAt(lab, l, db)
+}
+
+// labOptionsAt is labOptions for the lab snapshot in dir.
+func labOptionsAt(dir string, l labServers, db string) scanOptions {
 	return scanOptions{
 		Grafana:       l.grafana.URL,
 		Prom:          l.prom.URL,
@@ -151,11 +168,11 @@ func labOptions(l labServers, db string) scanOptions {
 		DB:            db,
 		Window:        30,
 		LabelTop:      2,
-		GrafanaLogs:   stringList{filepath.Join(lab, "grafana/grafana.log")},
+		GrafanaLogs:   stringList{filepath.Join(dir, "grafana/grafana.log")},
 		PromQueryLogs: stringList{l.promLog},
 		ProbeWait:     2 * time.Second,
 		// The lab's SLO definitions and runbooks (Sprint 2 item 7).
-		Config: filepath.Join(lab, "tvt-lab.yaml"),
+		Config: filepath.Join(dir, "tvt-lab.yaml"),
 	}
 }
 
@@ -165,8 +182,14 @@ func env(name string) string {
 
 func setNow(t *testing.T) {
 	t.Helper()
+	setNowAt(t, scanTime)
+}
+
+// setNowAt fixes the scan clock at now for the test.
+func setNowAt(t *testing.T, now time.Time) {
+	t.Helper()
 	old := scanNow
-	scanNow = func() time.Time { return scanTime }
+	scanNow = func() time.Time { return now }
 	t.Cleanup(func() { scanNow = old })
 }
 
