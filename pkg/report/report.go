@@ -14,7 +14,7 @@ import (
 
 // Version is the JSON report's schema version. Readers (the HTML report,
 // propose, check) refuse a version they don't know.
-const Version = 2
+const Version = 3
 
 // Actions a recommendation can propose.
 const (
@@ -58,6 +58,9 @@ type Report struct {
 	UnmatchedAcknowledgements []Acknowledgement `json:"unmatched_acknowledgements,omitempty"`
 	Totals                    Totals            `json:"totals"`
 	Recommendations           []Recommendation  `json:"recommendations"`
+	// Services is "evidence kept" per service: what tvt would cut next to
+	// what stays protected.
+	Services []Service `json:"services"`
 	// Confirm are the "dormant: confirm" rows: unread signals that look
 	// incident-critical (by name, tier, or a runbook or postmortem naming
 	// them). Each is a question for the owner, never a drop candidate.
@@ -269,7 +272,7 @@ type LastReadOf struct {
 // and so is the every-stream signal. Recommendations come highest savings
 // per minute of checking first; limit > 0 keeps that many.
 func Build(in Input, limit int) Report {
-	r := Report{Version: Version, GeneratedAt: in.Now, Scan: in.Scan, Sources: []Source{}, Gaps: []Gap{}, Recommendations: []Recommendation{}, Confirm: []Confirm{}}
+	r := Report{Version: Version, GeneratedAt: in.Now, Scan: in.Scan, Sources: []Source{}, Gaps: []Gap{}, Recommendations: []Recommendation{}, Confirm: []Confirm{}, Services: []Service{}}
 	if r.GeneratedAt.IsZero() {
 		r.GeneratedAt = in.Scan.StartedAt
 	}
@@ -332,6 +335,7 @@ func Build(in Input, limit int) Report {
 		}
 		r.Recommendations = append(r.Recommendations, rec)
 	}
+	r.Services = services(in.Signals, r.Recommendations, refs, costs)
 	sort.SliceStable(r.Recommendations, func(i, j int) bool {
 		a, b := r.Recommendations[i], r.Recommendations[j]
 		if a.SavingsPerMinute != b.SavingsPerMinute {
