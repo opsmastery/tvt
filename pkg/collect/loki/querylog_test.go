@@ -131,3 +131,40 @@ func TestLokiProbeSendsTheTaggedMarker(t *testing.T) {
 		t.Errorf("probe request = %+v", got)
 	}
 }
+
+// TestLokiRuleEvaluations: component=ruler lines are the ruler's own
+// evaluations with their bytes (S6 item 1); frontend lines carry bytes and
+// whether they were instant.
+func TestLokiRuleEvaluations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "loki.log")
+	lines := `level=info ts=2026-11-15T20:52:25Z caller=metrics.go:237 component=ruler evaluation_mode=local org_id=fake query="sum(count_over_time({app=\"shop\"} |= \"x\" | logfmt [5m]))" query_type=metric range_type=instant total_bytes=6.9kB
+level=info ts=2026-11-15T20:52:26Z caller=metrics.go:237 component=frontend org_id=fake query="sum(count_over_time({app=\"shop\"} | logfmt [5m]))" query_type=metric range_type=instant total_bytes=1.2MB
+level=info ts=2026-11-15T20:52:27Z caller=metrics.go:237 component=frontend org_id=fake query="{app=\"shop\"}" query_type=limited range_type=range total_bytes=552B
+`
+	if err := os.WriteFile(path, []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ql := &QueryLog{Paths: []string{path}}
+	evals, err := ql.RuleEvaluations(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evals) != 1 || evals[0].Bytes != 6900 || evals[0].Source != "loki" {
+		t.Errorf("evaluations = %+v", evals)
+	}
+	qs, err := ql.Queries(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs) != 2 || !qs[0].Instant || qs[0].Bytes != 1200000 || qs[1].Instant || qs[1].Bytes != 552 {
+		t.Errorf("queries = %+v", qs)
+	}
+}
+
+func TestParseBytes(t *testing.T) {
+	for in, want := range map[string]int64{"552B": 552, "6.9kB": 6900, "3.2MB": 3200000, "1GB": 1e9, "0B": 0, "": 0, "x": 0, "-1kB": 0, "NaNMB": 0, "1e30EB": 0, "12": 0} {
+		if got := ParseBytes(in); got != want {
+			t.Errorf("ParseBytes(%q) = %d, want %d", in, got, want)
+		}
+	}
+}

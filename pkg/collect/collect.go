@@ -181,6 +181,9 @@ type Rule struct {
 	// Annotations are an alert's annotations (runbook_url, summary, …):
 	// a runbook or Grafana link there can declare more dependencies.
 	Annotations map[string]string
+	// GroupEvaluation is how long the rule's group last took to evaluate
+	// (Prometheus and Mimir rules API evaluationTime); zero when unknown.
+	GroupEvaluation time.Duration
 }
 
 // EvaluatedByGrafana marks a rule Grafana evaluates itself.
@@ -311,6 +314,33 @@ type LoggedQuery struct {
 	DashboardUID string // when the request carried dashboard attribution
 	PanelID      int
 	OrgID        int64 // Grafana organization of DashboardUID, when logged
+	// Measured cost, when the log reports it (S6 item 2): Samples is
+	// Prometheus' totalQueryableSamples, Bytes Loki's total_bytes; zero
+	// when unknown. Instant is true for an instant query (a rule's
+	// evaluation is one; a dashboard panel usually isn't).
+	Samples int64
+	Bytes   int64
+	Instant bool
+}
+
+// RuleEvaluationSource reads the evaluations a datasource's own ruler
+// logged, with their measured cost (S6 item 1). They aren't usage.
+type RuleEvaluationSource interface {
+	RuleEvaluations(ctx context.Context, since time.Time) ([]RuleEvaluation, error)
+}
+
+// RuleEvaluation is one evaluation of a rule's query by a datasource
+// ruler, as its query log recorded it.
+type RuleEvaluation struct {
+	Source string // "prometheus", "loki"
+	// Group is the rule group (Prometheus logs it; Loki doesn't).
+	Group string
+	Expr  string
+	At    time.Time
+	// Samples (PromQL: totalQueryableSamples) or Bytes (LogQL:
+	// total_bytes) the evaluation read; zero when not logged.
+	Samples int64
+	Bytes   int64
 }
 
 // StreamVolume is ingested bytes for one log stream (its full label set)

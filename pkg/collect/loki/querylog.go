@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,13 +62,52 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 		if _, probe := collect.LokiProbeNonce(kv["query"]); probe {
 			return
 		}
-		out = append(out, collect.LoggedQuery{Source: "loki", Expr: kv["query"], Language: "logql", At: at, Client: kv["source"]})
+		out = append(out, collect.LoggedQuery{Source: "loki", Expr: kv["query"], Language: "logql", At: at, Client: kv["source"],
+			Bytes: ParseBytes(kv["total_bytes"]), Instant: kv["range_type"] == "instant"})
 	})
 	if err != nil {
 		return nil, err
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
 	return out, nil
+}
+
+// RuleEvaluations returns the Loki ruler's own evaluations (component=ruler
+// metrics.go lines) logged at or after since, oldest first, with the bytes
+// each processed. Loki doesn't log the rule or group, only the query.
+func (q *QueryLog) RuleEvaluations(ctx context.Context, since time.Time) ([]collect.RuleEvaluation, error) {
+	var out []collect.RuleEvaluation
+	err := q.scan(ctx, since, func(at time.Time, kv map[string]string) {
+		if kv["component"] != "ruler" || kv["query"] == "" {
+			return
+		}
+		out = append(out, collect.RuleEvaluation{Source: "loki", Expr: kv["query"], At: at, Bytes: ParseBytes(kv["total_bytes"])})
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
+	return out, nil
+}
+
+// ParseBytes reads a byte count as Loki's metrics.go lines write it
+// (humanized, powers of 1000: "552B", "6.9kB", "3.2MB"); 0 when it can't.
+func ParseBytes(s string) int64 {
+	s = strings.TrimSpace(s)
+	units := []struct {
+		suffix string
+		mult   float64
+	}{{"EB", 1e18}, {"PB", 1e15}, {"TB", 1e12}, {"GB", 1e9}, {"MB", 1e6}, {"kB", 1e3}, {"KB", 1e3}, {"B", 1}}
+	for _, u := range units {
+		if num, ok := strings.CutSuffix(s, u.suffix); ok {
+			v, err := strconv.ParseFloat(strings.TrimSpace(num), 64)
+			if err != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) || v*u.mult > math.MaxInt64/2 {
+				return 0
+			}
+			return int64(math.Round(v * u.mult))
+		}
+	}
+	return 0
 }
 
 // ProbeSeen reports whether the log holds tvt's marker query for nonce, as

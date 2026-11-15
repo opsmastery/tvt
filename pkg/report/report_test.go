@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -211,7 +212,7 @@ func TestReportGapsAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"version":5`, `"line_findings":[]`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
+	for _, key := range []string{`"version":6`, `"line_findings":[]`, `"rules":[]`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
 		`"savings"`, `"risk_if_wrong"`, `"assumptions"`, `"status":"open"`, `"savings_per_minute"`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("JSON has no %s", key)
@@ -407,5 +408,54 @@ func TestRowGapsUnique(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("%d assumed gaps on the row: %v", n, rec.Evidence.Gaps)
+	}
+}
+
+// TestRules (S6 item 1): rules with findings first, then by daily work,
+// unknown costs last; the HTML lists each finding with its fix.
+func TestRules(t *testing.T) {
+	in := Input{
+		Scan: Scan{ID: 1, StartedAt: time.Date(2026, 11, 15, 21, 0, 0, 0, time.UTC)},
+		Consumers: []graph.Consumer{
+			{ID: "rule:prometheus:/g/Cheap", Kind: graph.ConsumerAlertRule, Name: "Cheap", Expr: "up == 0", Interval: time.Minute},
+			{ID: "rule:prometheus:/g/Costly", Kind: graph.ConsumerAlertRule, Name: "Costly", Expr: "sum(increase(x[24h]))", Interval: time.Minute},
+			{ID: "rule:mimir:/m/Unknown", Kind: graph.ConsumerRecordingRule, Name: "job:x:rate5m", Expr: "rate(x[5m])", Interval: time.Minute},
+			{ID: "rule:grafana:f/g/uid", Kind: graph.ConsumerAlertRule, Name: "Logs <alert>", Expr: "A: x", EvaluatedBy: "grafana", Interval: 30 * time.Second},
+		},
+		RuleCosts: []graph.RuleCost{
+			{ConsumerID: "rule:prometheus:/g/Cheap", EvalsPerDay: 1440, SamplesPerEval: 3, Evaluations: 10},
+			{ConsumerID: "rule:prometheus:/g/Costly", EvalsPerDay: 1440, SamplesPerEval: 8640, Evaluations: 10},
+			{ConsumerID: "rule:mimir:/m/Unknown", EvalsPerDay: 1440, Unknown: "mimir doesn't log its ruler's evaluations with their cost"},
+			{ConsumerID: "rule:grafana:f/g/uid", EvalsPerDay: 2880, BytesPerEval: 6900, Evaluations: 4},
+		},
+		RuleFindings: []graph.RuleFinding{
+			{ConsumerID: "rule:grafana:f/g/uid", Kind: graph.RuleGrafanaManaged, Detail: "Grafana evaluates it", Fix: "move it to the Loki ruler"},
+		},
+	}
+	r := Build(in, 0)
+	var order []string
+	for _, row := range r.Rules {
+		order = append(order, row.Name)
+	}
+	want := []string{"Logs <alert>", "Costly", "Cheap", "job:x:rate5m"}
+	if !slices.Equal(order, want) {
+		t.Errorf("rule order %v, want %v", order, want)
+	}
+	if r.Totals.RuleFindings != 1 || r.Rules[0].Source != "grafana" || r.Rules[0].BytesPerDay != 2880*6900 || r.Rules[3].Kind != "record" {
+		t.Errorf("rules %+v, totals %+v", r.Rules, r.Totals)
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page strings.Builder
+	if err := RenderHTMLFromJSON(&page, b); err != nil {
+		t.Fatal(err)
+	}
+	html := page.String()
+	for _, s := range []string{"Logs &lt;alert&gt;", "grafana_managed_alert", "Fix: move it to the Loki ruler", "19.9 MB", "unknown: mimir doesn"} {
+		if !strings.Contains(html, s) {
+			t.Errorf("HTML lacks %q", s)
+		}
 	}
 }
