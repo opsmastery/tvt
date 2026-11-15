@@ -21,6 +21,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +36,9 @@ import (
 	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
+	"github.com/Opsmastery-Summit/tvt/pkg/score"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 )
 
@@ -374,6 +377,57 @@ func TestE2EScanMimir(t *testing.T) {
 
 // TestE2EReadOnlyTransport checks the guard itself: a POST or a query that
 // isn't the probe is refused before it leaves the machine.
+// TestE2EReport is S4's done-when on the live lab: from a cold start (no
+// database), scan and report the top 50 in under 30 minutes; no hard
+// keep, keep_high, dormant or record signal is ever recommended; every row
+// lists its evidence gaps.
+func TestE2EReport(t *testing.T) {
+	l := newLiveLab(t)
+	dir := t.TempDir()
+	db := filepath.Join(dir, "tvt.db")
+	start := time.Now()
+	g, _, _, _ := liveScan(t, scanOptions{
+		Grafana: l.grafana, Prom: l.prom, Loki: l.loki, DB: db,
+		Window: 30, LabelTop: 2, ProbeWait: 45 * time.Second,
+		GrafanaLogs:   l.grafanaLogs(t),
+		PromQueryLogs: stringList{l.logs("prometheus/query.log")},
+		LokiQueryLogs: stringList{l.logs("loki.log")},
+		Config:        l.config(t),
+	})
+	var out bytes.Buffer
+	jsonPath, htmlPath := filepath.Join(dir, "report.json"), filepath.Join(dir, "report.html")
+	if err := runReport(context.Background(), reportOptions{DB: db, Config: l.config(t), JSON: jsonPath, HTML: htmlPath, Top: 50}, &out); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(start)
+	t.Logf("cold start to report: %s\n%s", elapsed.Round(time.Second), out.String())
+	if elapsed > 30*time.Minute {
+		t.Errorf("cold start to report took %s, want under 30m", elapsed)
+	}
+	b, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r report.Report
+	if err := json.Unmarshal(b, &r); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(htmlPath); err != nil {
+		t.Errorf("no HTML report: %v", err)
+	}
+	if len(r.Recommendations) == 0 || len(r.Recommendations) > 50 {
+		t.Errorf("%d recommendations, want 1-50", len(r.Recommendations))
+	}
+	for _, rec := range r.Recommendations {
+		if c := g.signals[rec.Signal.ID].Class; c != string(score.ClassCandidate) {
+			t.Errorf("%s (%s) recommended", rec.Signal.ID, c)
+		}
+		if len(rec.Evidence.Gaps)+len(rec.Evidence.Acknowledged) == 0 {
+			t.Errorf("%s lists no evidence gaps", rec.ID)
+		}
+	}
+}
+
 func TestE2EReadOnlyTransport(t *testing.T) {
 	ft := &testing.T{}
 	ro := &readOnly{t: ft}
