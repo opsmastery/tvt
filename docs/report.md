@@ -47,6 +47,18 @@ Recommendations are ranked by **savings per minute of checking**: the score's pr
 
 Next to what tvt would cut, `services` lists what stays protected, one entry per `ownership.owners` name (signals no owner claims are `(unowned)`), largest cut first. `cut` counts every recommendation for the service and its monthly savings, before `--top` trims the rows, so the proportion is honest. The kept tallies (`hard_keep`, `keep_high`, `dormant`, `incident`: signals with incident-class evidence, and `records`, zero until S7's records class) count metrics and streams with their monthly cost; a label's cost is already in its metric's, so labels aren't counted. A signal can be in `incident` and in a class tally at once. The HTML page shows it as the "Evidence kept per service" table.
 
+## tvt why
+
+`tvt why <signal>` shows everything tvt knows about one signal's readers, from the same latest scan:
+
+```sh
+tvt why --db tvt.db shop_cart_operations_total          # a metric or stream name
+tvt why 'prom:label:shop_cart_operations_total:user_id' # a signal ID
+tvt why 'shop_cart_operations_total{user_id}' --json    # a label as metric{label}; flags before or after
+```
+
+A name found in several backends (`prom` and `mimir`) is ambiguous and the error lists the IDs. The view gives the signal's class (and why it is dormant), owner and tier, monthly cost, score or why it's held, its last logged read across every scan tvt kept (`Store.LastReads`, never decays), its report row (`drop:…`, `confirm:…`) if any, and every reader: evidence class, exact or inferred, source (`query log`, `rules API`, `dashboard JSON`, `runbook`, `SLO file`, `tvt.yaml` for external consumers, `assumed`), first seen (the start of the first scan that stored the reference, schema v15 `refs.first_scan`; references from before v15 date from their last scan) and last seen (the latest logged query), labels read, and why it is inferred (assumed reasons, a recording rule in between, a sweep). Readers come strongest first: declared, then incident, then observed; exact before inferred; sweeps last. The gaps are the signal's evidence gaps, acknowledged ones marked. `--json` prints `report.Why`. Every report row, recommendation or confirm, shows its `tvt why` command, so the page and the terminal give the same view.
+
 ## Each recommendation
 
 | Field | What it holds |

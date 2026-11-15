@@ -13,6 +13,7 @@
 ```
 tvt scan --grafana <url> --prom <url> --loki <url>   # build the usage graph (read-only)
 tvt report                                            # ranked savings report, HTML + JSON
+tvt why shop_cart_operations_total                    # every reader of one signal, and the evidence
 tvt propose                                           # config change + pull request
 tvt check                                             # CI gate on config PRs
 tvt version

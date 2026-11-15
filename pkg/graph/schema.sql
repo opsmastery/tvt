@@ -130,6 +130,10 @@ CREATE TABLE IF NOT EXISTS refs (
     -- Schema version 13: the consumer only swept the signal (a query over
     -- every metric name): weak evidence that keeps nothing on its own.
     sweep       INTEGER NOT NULL DEFAULT 0 CHECK (sweep IN (0, 1)),
+    -- Schema version 15: the first scan that saw the reference (never
+    -- updated), for tvt why's "first seen". Rows from before version 15
+    -- carry their last_scan, the earliest scan still known.
+    first_scan  INTEGER REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (signal_id, consumer_id, via)
 );
 CREATE INDEX IF NOT EXISTS refs_consumer ON refs (consumer_id);
