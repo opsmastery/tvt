@@ -2,6 +2,7 @@ package loki
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 )
 
 // The lab fixture: two hours of metrics.go lines. The viewer's panels 6
@@ -74,5 +76,58 @@ func TestLokiQueryLogFilters(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Expr != `{a="user"} |= "x"` || got[0].Client != "grafana-explore" {
 		t.Errorf("queries = %+v, want only the user query", got)
+	}
+}
+
+// The probe (S5 item 5): Loki logs the marker as a frontend metric query,
+// as the lab's Loki 3.5 did on Nov 15 (line trimmed). ProbeSeen finds it
+// only from the frontend and only for its own nonce, and Queries drops it
+// even when a proxy stripped the X-Query-Tags header.
+func TestLokiQueryLogProbe(t *testing.T) {
+	marker := `count_over_time({tvt_query_log_probe=\"feedc0de12345678\"}[1m])`
+	content := strings.Join([]string{
+		`2026-11-14T22:21:28.711827152-07:00 stderr F level=info ts=2026-11-15T05:21:28.676763132Z caller=metrics.go:409 org_id=fake latency=fast query_type=stats query="{tvt_query_log_probe=\"feedc0de12345678\"}" source=`,
+		`2026-11-14T22:21:28.711827152-07:00 stderr F level=info ts=2026-11-15T05:21:28.67913801Z caller=metrics.go:237 component=querier org_id=fake latency=fast query="` + marker + `" query_type=metric range_type=instant status=200 source=tvt-probe`,
+		`2026-11-14T22:21:28.711827152-07:00 stderr F level=info ts=2026-11-15T05:21:28.679709516Z caller=metrics.go:237 component=frontend org_id=fake latency=fast query="` + marker + `" query_type=metric range_type=instant status=200 source=tvt-probe`,
+		`level=info ts=2026-11-15T05:22:00Z caller=metrics.go:237 component=frontend query="count_over_time({tvt_query_log_probe=\"0000000000000001\"}[1m])" query_type=metric`,
+	}, "\n") + "\n"
+	path := filepath.Join(t.TempDir(), "loki.log")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ql := &QueryLog{Paths: []string{path}}
+	ctx := context.Background()
+	for nonce, want := range map[string]bool{"feedc0de12345678": true, "0000000000000001": true, "0f1e2d3c4b5a6978": false} {
+		if seen, err := ql.ProbeSeen(ctx, nonce); err != nil || seen != want {
+			t.Errorf("ProbeSeen(%s) = %v, %v; want %v", nonce, seen, err, want)
+		}
+	}
+	// Only the querier saw this one: not proof the frontend logs.
+	querierOnly := filepath.Join(t.TempDir(), "loki.log")
+	os.WriteFile(querierOnly, []byte(strings.Split(content, "\n")[1]+"\n"), 0o600)
+	if seen, err := (&QueryLog{Paths: []string{querierOnly}}).ProbeSeen(ctx, "feedc0de12345678"); err != nil || seen {
+		t.Errorf("querier-only marker: ProbeSeen = %v, %v; want false", seen, err)
+	}
+	got, err := ql.Queries(ctx, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("queries = %+v, want none: every marker is tvt's", got)
+	}
+}
+
+func TestLokiProbeSendsTheTaggedMarker(t *testing.T) {
+	var got *http.Request
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r
+		w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	if err := New(srv.URL, "").Probe(context.Background(), "ab12"); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.URL.Path != "/loki/api/v1/query" || got.URL.Query().Get("query") != collect.LokiProbeQuery("ab12") ||
+		got.Header.Get("X-Query-Tags") != collect.ProbeTag {
+		t.Errorf("probe request = %+v", got)
 	}
 }
