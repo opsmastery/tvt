@@ -37,7 +37,9 @@ type Why struct {
 }
 
 // WhyReader is one reader: the report's Reader plus when tvt first saw it,
-// the labels it reads, why it is inferred, and its query.
+// the labels it reads, why it is inferred, and its query. Reader.Exact
+// keeps the report's meaning (not assumed); a reader is exact in tvt why's
+// sense only when Inferred is empty too.
 type WhyReader struct {
 	Reader
 	FirstSeen time.Time `json:"first_seen"`
