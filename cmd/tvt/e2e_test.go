@@ -380,8 +380,6 @@ func TestE2EScanMimir(t *testing.T) {
 	}
 }
 
-// TestE2EReadOnlyTransport checks the guard itself: a POST or a query that
-// isn't the probe is refused before it leaves the machine.
 // TestE2EReport is S4's done-when on the live lab: from a cold start (no
 // database), scan and report the top 50 in under 30 minutes; no hard
 // keep, keep_high, dormant or record signal is ever recommended; every row
@@ -433,6 +431,8 @@ func TestE2EReport(t *testing.T) {
 	}
 }
 
+// TestE2EReadOnlyTransport checks the guard itself: a POST or a query that
+// isn't the probe is refused before it leaves the machine.
 func TestE2EReadOnlyTransport(t *testing.T) {
 	ft := &testing.T{}
 	ro := &readOnly{t: ft}
