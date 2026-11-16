@@ -64,6 +64,10 @@ var ErrTruncated = errors.New("prometheus: result truncated")
 // Mimir, which has no /api/v1/status/tsdb.
 var ErrNotFound = errors.New("endpoint not found")
 
+// ErrBadRequest wraps an HTTP 400 answer: the backend couldn't parse the
+// request (a selector syntax it doesn't support).
+var ErrBadRequest = errors.New("bad request")
+
 // New returns a client for baseURL with default settings.
 func New(baseURL, token string) *Client {
 	return &Client{BaseURL: baseURL, Token: token}
@@ -125,10 +129,14 @@ func (c *Client) getWith(ctx context.Context, path string, q url.Values, hdr htt
 			return nil, fmt.Errorf("prometheus: %s: HTTP 404: %w", path, ErrNotFound)
 		}
 		var e apiError
-		if json.Unmarshal(body, &e) == nil && e.Error != "" {
-			return nil, fmt.Errorf("prometheus: %s: HTTP %d: %s: %s", path, resp.StatusCode, e.ErrorType, e.Error)
+		var wrap error
+		if resp.StatusCode == http.StatusBadRequest {
+			wrap = ErrBadRequest
 		}
-		return nil, fmt.Errorf("prometheus: %s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+		if json.Unmarshal(body, &e) == nil && e.Error != "" {
+			return nil, errors.Join(fmt.Errorf("prometheus: %s: HTTP %d: %s: %s", path, resp.StatusCode, e.ErrorType, e.Error), wrap)
+		}
+		return nil, errors.Join(fmt.Errorf("prometheus: %s: HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body))), wrap)
 	}
 	return httpx.Limit(resp.Body, httpx.MaxResponseBytes), nil
 }
