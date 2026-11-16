@@ -30,6 +30,10 @@ type reportOptions struct {
 	// PriceCard reprices the scan for a what-if report: a card file or a
 	// preset name. Empty keeps the scan's prices.
 	PriceCard string
+	// LabelDrops turns on label-removal recommendations (S6 item 7). Off,
+	// every label candidate is held as label_drops_off until a precision
+	// review on real data passes.
+	LabelDrops bool
 }
 
 func cmdReport(args []string, stdout, stderr io.Writer) int {
@@ -41,6 +45,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.JSON, "json", "report.json", "where to write the JSON report (- for stdout)")
 	fs.StringVar(&o.HTML, "html", "report.html", "where to write the HTML report, rendered from the JSON (empty: skip)")
 	fs.StringVar(&o.PriceCard, "price-card", "", "what-if: reprice the scan at this price card (a file or a preset: "+strings.Join(cost.Presets(), ", ")+") without rescanning")
+	fs.BoolVar(&o.LabelDrops, "label-drops", false, "recommend label removals (labeldrop when no series merge, aggregate when they merge and sum); off until a precision review on real data passes")
 	fs.IntVar(&o.Top, "top", 50, "recommendations to keep, highest savings per minute of checking first (0: all)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -75,6 +80,7 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	in.LabelDrops = o.LabelDrops
 	if in.Acknowledged, err = acknowledgements(o.Config); err != nil {
 		return err
 	}
