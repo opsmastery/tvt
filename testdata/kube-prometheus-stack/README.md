@@ -6,4 +6,4 @@
 - `values.yaml`: the chart's default values at that version (`helm show values`).
 - `extra-monitors.yaml`: hand-written, not from the chart. Monitors a team adds next to the chart: `payments` and `batch` carry `release: kps` and are selected; `shop` (no release label) and `legacy-jobs` (`release: other`) are not, and must never count (S5 item 8).
 
-Bump the pin only on purpose (`make kps-fixtures KPS_VERSION=x.y.z`), with the golden diffs reviewed in the PR. Tests: `pkg/collect/kube` (`TestResolveKubePrometheusStack`) and `cmd/tvt` (`TestScanSelectedMonitors`).
+Bump the pin only on purpose (`make kps-fixtures KPS_VERSION=x.y.z`), with the golden diffs reviewed in the PR. Tests: `pkg/collect/kube` (`TestResolveKubePrometheusStack`) and `cmd/tvt` (`TestScanSelectedMonitors`; `TestKubePrometheusStack`, S6 item 8: the chart's rules, dashboards and kubelet drops against a hand-checked list of readers, each value checked against `render.yaml` by hand, so a pin bump means re-checking them).
