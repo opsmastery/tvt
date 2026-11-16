@@ -20,6 +20,7 @@ const (
 	GapStorage      = "storage"      // a storage hygiene warning (S5 item 6): no retention.size, or one too close to the volume; never a saving
 	GapMonitors     = "monitors"     // a ServiceMonitor or PodMonitor no Prometheus selects, or one tvt can't decide (S5 item 8); never a saving
 	GapUnmapped     = "unmapped"     // a signal no single pipeline claims (S6 item 4): reported, never proposable
+	GapOverflow     = "overflow"     // a metric with OpenTelemetry overflow series (S6 item 5): its cost is a floor
 )
 
 // SourceAssumed names the gaps of assumed references.
@@ -66,6 +67,8 @@ func sourceGaps(s graph.SourceCoverage) []Gap {
 			kind = GapMonitors
 		case s.Source == scan.SourcePipelines:
 			kind = GapUnmapped
+		case s.Source == scan.SourceOverflow:
+			kind = GapOverflow
 		}
 		var out []Gap
 		for _, line := range strings.Split(s.Gap, "\n") {

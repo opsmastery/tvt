@@ -86,6 +86,11 @@ type Inputs struct {
 	Pipelines       []config.Pipeline
 	LabelMetrics    collect.LabelMetrics
 	LabelMetricsErr string
+	// Overflow lists metrics with OpenTelemetry overflow series (S6 item
+	// 5); OverflowRead says they were looked for, OverflowErr why not.
+	Overflow     []collect.Overflow
+	OverflowRead bool
+	OverflowErr  string
 	// Clients identifies query-log clients the logs can't name.
 	Clients config.Clients
 	// SweepShare overrides DefaultSweepShare when positive.
@@ -201,6 +206,8 @@ type Output struct {
 	// PipelineTargets map every metric, label and stream signal, and every
 	// listed stream, to its pipeline (S6 item 4); nil without pipelines.
 	PipelineTargets []graph.PipelineTarget
+	// OverflowFindings are the metrics with overflow series (S6 item 5).
+	OverflowFindings []graph.OverflowFinding
 }
 
 // Build maps inputs to graph rows. It rejects inputs a scan should never
@@ -473,6 +480,11 @@ func Build(in Inputs) (Output, error) {
 	if pipeSrc.Configured {
 		sources = append(sources, pipeSrc)
 	}
+	var overSrc graph.SourceCoverage
+	out.OverflowFindings, overSrc = overflowFindings(in, out.References)
+	if overSrc.Configured {
+		sources = append(sources, overSrc)
+	}
 	if in.Monitors != nil {
 		var pools []string
 		if in.Scrape != nil {
@@ -499,7 +511,7 @@ func Build(in Inputs) (Output, error) {
 			s.WindowStart = since
 		}
 		out.Sources = append(out.Sources, s)
-		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || s.Source == SourceStorage || s.Source == SourceMonitors || s.Source == SourcePipelines || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
+		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || s.Source == SourceStorage || s.Source == SourceMonitors || s.Source == SourcePipelines || s.Source == SourceOverflow || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
 			continue
 		}
 		sum += s.Coverage

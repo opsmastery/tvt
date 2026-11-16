@@ -72,6 +72,23 @@ label_metrics() {
   printf '}\n'
 }
 if label_metrics > "$TMP" && jq -e . "$TMP" >/dev/null; then keep "$OUT/prometheus/label_metrics.json"; else rm -f "$TMP"; echo "  FAIL label_metrics" >&2; fi
+# Overflow series (S6 item 5): every series carrying otel_metric_overflow="true"
+# over the last 10 minutes, and each such metric's label names, as the test
+# server's overflowRoutes serve them. Metadata reads, not queries.
+overflow() {
+  now=$(date +%s)
+  series=$(curl -fsS -G "$PROM/api/v1/series" --data-urlencode 'match[]={otel_metric_overflow="true"}' \
+    --data-urlencode "start=$((now - 600))" --data-urlencode "end=$now" | jq -c '.data')
+  printf '{"series":%s,"labels":{' "$series"
+  sep=''
+  for m in $(printf '%s' "$series" | jq -r '.[].__name__' | sort -u); do
+    names=$(curl -fsS -G "$PROM/api/v1/labels" --data-urlencode "match[]={__name__=\"$m\"}" \
+      --data-urlencode "start=$((now - 600))" --data-urlencode "end=$now" | jq -c '.data')
+    printf '%s"%s":%s' "$sep" "$m" "$names"; sep=','
+  done
+  printf '}}\n'
+}
+if overflow > "$TMP" && jq -e . "$TMP" >/dev/null; then keep "$OUT/prometheus/overflow.json"; else rm -f "$TMP"; echo "  FAIL overflow" >&2; fi
 # The query log is on the host (tvt-lab mounts it at lab-logs/prometheus);
 # the copy inside the container stopped when the lab moved it.
 tail -n 500 "$LAB_LOGS/prometheus/query.log" > "$TMP" 2>/dev/null || :

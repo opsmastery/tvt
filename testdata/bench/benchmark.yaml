@@ -67,3 +67,13 @@ states:
       prometheus/label_metrics.json; tvt-lab.yaml declares both pipelines. Ground truth's pipelines
       is scored by TestPipelineTargets.
     proven: [prometheus query log, loki query log, grafana router log]
+  - name: overflow
+    dir: overflow
+    scan_time: 2026-11-16T00:24:30Z
+    about: >
+      After the overflow seed (tvt-lab #24; tvt S6 item 5): the shop's spans go through Alloy's
+      spanmetrics connector with customer.id as a dimension and a cardinality limit of 100, so the
+      traces_span_metrics_* metrics carry otel_metric_overflow="true" series, and the viewer's ad hoc
+      customer lookup filters on the capped customer_id. Full snapshot captured Nov 16, 2026 00:24 UTC
+      with prometheus/overflow.json. Ground truth's overflow is scored by TestOverflow.
+    proven: [prometheus query log, loki query log, grafana router log]
