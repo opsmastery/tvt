@@ -40,6 +40,16 @@ type DashboardSource interface {
 	Dashboards(ctx context.Context) ([]Dashboard, error)
 }
 
+// UsageInsightsUID is the uid Grafana Cloud gives every stack's Usage
+// Insights data source (named grafanacloud-<stack>-usage-insights).
+const UsageInsightsUID = "grafanacloud-usage-insights"
+
+// UsageInsightsTag marks tvt's reads of Usage Insights (X-Query-Tags).
+// Reading it is the one query tvt sends through Grafana's data source
+// proxy, the exception to invariant 4: it reads Grafana's own usage
+// events, never a signal of the user's, so it can't make one look read.
+const UsageInsightsTag = "Source=tvt"
+
 // ViewSource reports dashboard loads, for Grafana editions without usage
 // insights (OSS: the router log's GET /api/dashboards/uid/:uid lines).
 type ViewSource interface {
@@ -293,6 +303,9 @@ type Variable struct {
 	Query          string
 	DatasourceUID  string
 	DatasourceType string
+	// Regex is the variable's regex, which extracts or filters its values
+	// (empty when unset).
+	Regex string
 	// Values are the values a custom or constant variable offers. Empty for
 	// other types, whose values come from a backend or the viewer.
 	Values []string

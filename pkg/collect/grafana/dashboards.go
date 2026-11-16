@@ -63,6 +63,7 @@ type rawVariable struct {
 	IncludeAll bool            `json:"includeAll"`
 	Multi      bool            `json:"multi"`
 	AllValue   string          `json:"allValue"`
+	Regex      string          `json:"regex"`
 	Options    []struct {
 		Value json.RawMessage `json:"value"`
 	} `json:"options"`
@@ -205,7 +206,7 @@ func (c *Client) convert(ctx context.Context, raw rawDashboard, h searchHit, dss
 	}
 
 	for _, v := range db.Templating.List {
-		cv := collect.Variable{Name: v.Name, Type: v.Type, Query: variableQuery(v.Query), IncludeAll: v.IncludeAll, Multi: v.Multi, AllValue: v.AllValue}
+		cv := collect.Variable{Name: v.Name, Type: v.Type, Query: variableQuery(v.Query), IncludeAll: v.IncludeAll, Multi: v.Multi, AllValue: v.AllValue, Regex: v.Regex}
 		switch v.Type {
 		case "query":
 			ds := r.resolve(v.Datasource)

@@ -86,6 +86,11 @@ type Inputs struct {
 	Pipelines       []config.Pipeline
 	LabelMetrics    collect.LabelMetrics
 	LabelMetricsErr string
+	// SelectorMetrics maps a label-only selector (SelectorKey) to the
+	// metric names the backend says carry those labels. A selector that
+	// names no metric resolves to these instead of every collected metric.
+	// Nil or missing keys keep that conservative reading.
+	SelectorMetrics map[string][]string
 	// Overflow lists metrics with OpenTelemetry overflow series (S6 item
 	// 5); OverflowRead says they were looked for, OverflowErr why not.
 	Overflow     []collect.Overflow
@@ -250,6 +255,7 @@ func Build(in Inputs) (Output, error) {
 	ids := newIDSet()
 
 	res := newResolver(in.MetricsSource, in.Metrics, in.Labels)
+	res.selectorMetrics = in.SelectorMetrics
 	if in.SweepShare > 0 {
 		res.sweepShare = in.SweepShare
 	}
@@ -515,7 +521,7 @@ func Build(in Inputs) (Output, error) {
 			s.WindowStart = since
 		}
 		out.Sources = append(out.Sources, s)
-		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || s.Source == SourceStorage || s.Source == SourceMonitors || s.Source == SourcePipelines || s.Source == SourceOverflow || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
+		if s.Source == SourceSLOs || s.Source == SourceRunbooks || s.Source == SourceDatasources || s.Source == SourceStorage || s.Source == SourceMonitors || s.Source == SourcePipelines || s.Source == SourceOverflow || s.Source == SourceCloudDirectQueries || strings.HasPrefix(s.Source, SourceSeasonPrefix) {
 			continue
 		}
 		sum += s.Coverage
