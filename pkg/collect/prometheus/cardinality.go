@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -99,23 +100,47 @@ func (c *Client) LabelCardinality(ctx context.Context, metric string) ([]collect
 
 	values := map[string]map[string]struct{}{}
 	series := map[string]int64{}
+	// without[label] holds a hash of each carrying series' other labels;
+	// fulls is every series' hash and has[label] which series carry the
+	// label. A series without the label is itself once it's dropped, so it
+	// can collide with a carrying series that loses it (S6 item 7).
+	without := map[string][]uint64{}
+	has := map[string][]uint64{} // bitset over series index
+	var fulls []uint64
+	var total int64
 	var warnings []string
 	var status string
 	s := map[string]string{} // reused: one map per series was most of the decode's garbage
+	var keys []string
 	err = decodeEnvelopeStream(json.NewDecoder(body), &status, &warnings, func(dec *json.Decoder) error {
 		clear(s)
 		if err := dec.Decode(&s); err != nil {
 			return err
 		}
+		total++
+		keys = keys[:0]
 		for k, v := range s {
 			if k == "__name__" {
 				continue
 			}
+			keys = append(keys, k)
 			if values[k] == nil {
 				values[k] = map[string]struct{}{}
 			}
 			values[k][v] = struct{}{}
 			series[k]++
+		}
+		sort.Strings(keys)
+		i := len(fulls)
+		fulls = append(fulls, seriesHash(s, keys, ""))
+		for _, drop := range keys {
+			without[drop] = append(without[drop], seriesHash(s, keys, drop))
+			b := has[drop]
+			for len(b) <= i/64 {
+				b = append(b, 0)
+			}
+			b[i/64] |= 1 << (i % 64)
+			has[drop] = b
 		}
 		return nil
 	})
@@ -132,10 +157,12 @@ func (c *Client) LabelCardinality(ctx context.Context, metric string) ([]collect
 	out := make([]collect.LabelCardinality, 0, len(values))
 	for label, vals := range values {
 		out = append(out, collect.LabelCardinality{
-			Metric:       metric,
-			Label:        label,
-			Values:       int64(len(vals)),
-			ActiveSeries: series[label],
+			Metric:        metric,
+			Label:         label,
+			Values:        int64(len(vals)),
+			ActiveSeries:  series[label],
+			Series:        total,
+			SeriesWithout: distinctWithout(without[label], has[label], fulls),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -148,6 +175,46 @@ func (c *Client) LabelCardinality(ctx context.Context, metric string) ([]collect
 }
 
 const defaultSeriesLookback = 10 * time.Minute
+
+// distinctWithout counts the distinct series once a label is dropped: the
+// carrying series' reduced hashes, plus every series without the label
+// (bit unset in has) that none of them became. reduced is sorted in place.
+func distinctWithout(reduced []uint64, has []uint64, fulls []uint64) int64 {
+	slices.Sort(reduced)
+	reduced = slices.Compact(reduced)
+	n := int64(len(reduced))
+	for i, h := range fulls {
+		if i/64 < len(has) && has[i/64]&(1<<(i%64)) != 0 {
+			continue
+		}
+		if _, found := slices.BinarySearch(reduced, h); !found {
+			n++
+		}
+	}
+	return n
+}
+
+// seriesHash hashes a series' labels (keys sorted) except drop, with
+// FNV-1a inline: no allocation per series.
+func seriesHash(s map[string]string, keys []string, drop string) uint64 {
+	const prime = 1099511628211
+	h := uint64(14695981039346656037)
+	add := func(str string) {
+		for i := 0; i < len(str); i++ {
+			h ^= uint64(str[i])
+			h *= prime
+		}
+		h *= prime // a 0 separator: h ^= 0 changes nothing
+	}
+	for _, k := range keys {
+		if k == drop {
+			continue
+		}
+		add(k)
+		add(s[k])
+	}
+	return h
+}
 
 // decodeEnvelopeStream walks a Prometheus API envelope without buffering
 // "data". data must be an array; each element is handed to elem, which must

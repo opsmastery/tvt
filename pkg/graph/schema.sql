@@ -159,6 +159,10 @@ CREATE TABLE IF NOT EXISTS costs (
     exemplars     INTEGER NOT NULL DEFAULT 0,
     -- Self-hosted: bytes on disk over retention, replicas included.
     disk_bytes    INTEGER NOT NULL DEFAULT 0,
+    -- Labels (S6 item 7): series that collide when the label is dropped,
+    -- -1 when unknown; summable: a counter or histogram metric.
+    merges        INTEGER NOT NULL DEFAULT -1,
+    summable      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (signal_id, scan_id)
 );
 

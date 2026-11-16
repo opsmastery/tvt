@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 21
+const SchemaVersion = 22
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -431,6 +431,17 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 22 {
+		for _, q := range []string{
+			`ALTER TABLE costs ADD COLUMN merges INTEGER NOT NULL DEFAULT -1`,
+			`ALTER TABLE costs ADD COLUMN summable INTEGER NOT NULL DEFAULT 0`,
+			`UPDATE meta SET value = '22' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -699,7 +710,7 @@ func (s *Store) LastReads(ctx context.Context) ([]SignalRead, error) {
 func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost,
-		        interval_ms, interval_assumed, buckets, exemplars, disk_bytes
+		        interval_ms, interval_assumed, buckets, exemplars, disk_bytes, merges, summable
 		 FROM costs WHERE scan_id = ? ORDER BY signal_id`, scanID)
 	if err != nil {
 		return nil, err
@@ -710,8 +721,11 @@ func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 		var c graph.Cost
 		var observed, interval int64
 		if err := rows.Scan(&c.SignalID, &c.ScanID, &observed, &c.ActiveSeries, &c.DistinctValues, &c.BytesPerDay, &c.SpansPerDay, &c.MonthlyCost,
-			&interval, &c.IntervalAssumed, &c.Buckets, &c.Exemplars, &c.DiskBytes); err != nil {
+			&interval, &c.IntervalAssumed, &c.Buckets, &c.Exemplars, &c.DiskBytes, &c.Merges, &c.Summable); err != nil {
 			return nil, err
+		}
+		if c.MergesKnown = c.Merges >= 0; !c.MergesKnown {
+			c.Merges = 0
 		}
 		c.ObservedAt = fromMillis(observed)
 		c.Interval = time.Duration(interval) * time.Millisecond
@@ -1060,15 +1074,16 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 					ELSE max(refs.last_seen, excluded.last_seen) END,
 				last_scan = excluded.last_scan`},
 		{&sc.cost, `INSERT INTO costs (signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost,
-				interval_ms, interval_assumed, buckets, exemplars, disk_bytes)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				interval_ms, interval_assumed, buckets, exemplars, disk_bytes, merges, summable)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (signal_id, scan_id) DO UPDATE SET
 				observed_at = excluded.observed_at, active_series = excluded.active_series,
 				distinct_values = excluded.distinct_values,
 				bytes_per_day = excluded.bytes_per_day, spans_per_day = excluded.spans_per_day,
 				monthly_cost = excluded.monthly_cost, interval_ms = excluded.interval_ms,
 				interval_assumed = excluded.interval_assumed, buckets = excluded.buckets,
-				exemplars = excluded.exemplars, disk_bytes = excluded.disk_bytes`},
+				exemplars = excluded.exemplars, disk_bytes = excluded.disk_bytes,
+				merges = excluded.merges, summable = excluded.summable`},
 		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start, gap)
 			VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.volume, `INSERT INTO stream_volumes (scan_id, selector, bytes_per_day) VALUES (?, ?, ?)`},
@@ -1178,9 +1193,13 @@ func (sc *Scan) PutCost(ctx context.Context, c graph.Cost) error {
 	if observed.IsZero() {
 		observed = sc.started
 	}
+	merges := int64(-1)
+	if c.MergesKnown {
+		merges = c.Merges
+	}
 	_, err := sc.cost.ExecContext(ctx, c.SignalID, sc.ID, millis(observed),
 		c.ActiveSeries, c.DistinctValues, c.BytesPerDay, c.SpansPerDay, c.MonthlyCost,
-		c.Interval.Milliseconds(), c.IntervalAssumed, c.Buckets, c.Exemplars, c.DiskBytes)
+		c.Interval.Milliseconds(), c.IntervalAssumed, c.Buckets, c.Exemplars, c.DiskBytes, merges, c.Summable)
 	return wrap("cost", c.SignalID, err)
 }
 
