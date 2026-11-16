@@ -240,7 +240,11 @@ func Build(in Inputs) (Output, error) {
 		}
 		id := in.MetricsSource + ":label:" + l.Metric + ":" + l.Label
 		out.Signals = append(out.Signals, graph.Signal{ID: id, Kind: graph.KindLabel, Name: l.Label, Parent: l.Metric, Source: in.MetricsSource})
-		out.Costs = append(out.Costs, graph.Cost{SignalID: id, ActiveSeries: l.ActiveSeries, DistinctValues: l.Values, ObservedAt: in.Start})
+		c := graph.Cost{SignalID: id, ActiveSeries: l.ActiveSeries, DistinctValues: l.Values, ObservedAt: in.Start, Summable: summable(in.Scrape, l.Metric)}
+		if l.Series > 0 {
+			c.Merges, c.MergesKnown = l.Series-l.SeriesWithout, true
+		}
+		out.Costs = append(out.Costs, c)
 	}
 
 	ids := newIDSet()

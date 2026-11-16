@@ -230,6 +230,14 @@ type Cost struct {
 	// DiskBytes is what a metric (or a label's share) holds on disk over
 	// retention, replicas included; set only by a self_hosted price card.
 	DiskBytes int64
+	// Labels (S6 item 7): Merges is how many of the metric's series collide
+	// when the label is dropped, known only when MergesKnown (a series
+	// read; a counts-only source can't tell). Summable: the metric is a
+	// counter or histogram, so merged series can be summed (aggregation)
+	// rather than collide.
+	Merges      int64
+	MergesKnown bool
+	Summable    bool
 }
 
 // Score is a candidate signal's rank in a scan (score.Score): its monthly

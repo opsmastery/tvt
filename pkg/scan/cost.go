@@ -141,3 +141,27 @@ func familyOf(s *collect.Scrape, series string) (string, bool) {
 	}
 	return s.Family(series)
 }
+
+// summable reports whether a metric's series can be summed when a label is
+// dropped (S6 item 7): a counter or histogram by target metadata, else by
+// the exposition suffixes counters and histograms carry (_total, _bucket,
+// _sum, _count), for series no metadata names (an Alloy or OTLP pipeline
+// gives Prometheus none). A gauge, summary quantile or unknown type isn't.
+func summable(s *collect.Scrape, series string) bool {
+	if fam, ok := familyOf(s, series); ok {
+		switch s.Types[fam] {
+		case "counter", "histogram":
+			return true
+		case "summary":
+			return strings.HasSuffix(series, "_sum") || strings.HasSuffix(series, "_count")
+		case "gauge":
+			return false
+		}
+	}
+	for _, suf := range []string{"_total", "_bucket", "_sum", "_count"} {
+		if strings.HasSuffix(series, suf) {
+			return true
+		}
+	}
+	return false
+}
