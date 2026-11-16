@@ -355,6 +355,18 @@ type PipelineTarget struct {
 	Note     string
 }
 
+// OverflowFinding is one metric with OpenTelemetry overflow series (S6
+// item 5): real cardinality is higher than the backend shows, its cost is
+// a floor, and readers that filter or group on a capped label miss the
+// points that overflowed. Readers are consumer IDs, each with the capped
+// labels it uses ("<consumer>\t<label>,<label>").
+type OverflowFinding struct {
+	Signal  string
+	Series  int
+	Capped  []string
+	Readers []string
+}
+
 // SLO coverage finding kinds (S6 item 3).
 const (
 	SLOServiceWithout    = "service_without_slo"

@@ -77,7 +77,7 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 {{if $r.Assumptions}}<b>Assumptions</b><ul>{{range $r.Assumptions}}<li>{{.}}</li>{{end}}</ul>{{end}}
 </div></details>
 </td>
-<td class="num">{{money $r.Savings.Monthly $r.Savings.Currency}}{{if $r.Savings.Approximate}}<br><span class="muted">approx.</span>{{end}}</td>
+<td class="num">{{if $r.CostFloor}}at least {{end}}{{money $r.Savings.Monthly $r.Savings.Currency}}{{if $r.Savings.Approximate}}<br><span class="muted">approx.</span>{{end}}{{if $r.CostFloor}}<br><span class="muted">overflow: a floor</span>{{end}}</td>
 <td class="num">{{$r.CheckMinutes}} min</td>
 <td>{{if $r.Owner}}{{$r.Owner}}{{else}}<span class="muted">unknown</span>{{end}}{{if $r.Pipeline}}<br><span class="muted">pipeline:</span> {{if $r.Proposable}}{{$r.Pipeline}}{{else}}<b>unmapped</b><br><span class="muted">{{$r.PipelineNote}}</span>{{end}}{{end}}</td>
 </tr>
@@ -112,7 +112,7 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 {{range .Confirm}}
 <tr class="confirm" id="{{.ID}}"><td><span class="tag">dormant: confirm</span><br><code>{{.Signal.ID}}</code></td>
 <td>{{.Question}}{{if .Gaps}}<div class="rowgap">Gaps: {{join .Gaps "; "}}</div>{{end}}<div class="muted" style="font-size:12px">Every reader: <code>{{why .Signal.ID}}</code></div></td>
-<td class="num">{{money .Savings.Monthly .Savings.Currency}}</td>
+<td class="num">{{if .CostFloor}}at least {{end}}{{money .Savings.Monthly .Savings.Currency}}</td>
 <td>{{if .Owner}}{{.Owner}}{{else}}<span class="muted">unknown</span>{{end}}{{if .Tier}}<br><span class="muted">tier {{.Tier}}</span>{{end}}</td></tr>
 {{else}}
 <tr><td colspan="4" class="muted">No dormant signals.</td></tr>
@@ -179,6 +179,17 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </table>
 </div>
 {{end}}
+{{end}}
+
+{{if .Overflow}}
+<h2>Overflow series</h2>
+<p class="muted">Metrics an OpenTelemetry SDK or Collector capped at its cardinality limit: real cardinality and cost are higher than shown, and readers that filter or group on a capped label miss the overflowed points. An evidence gap, never a saving.</p>
+<table>
+<thead><tr><th>Metric</th><th class="num">Overflow series</th><th>Capped labels</th><th>Readers on capped labels</th></tr></thead>
+<tbody>
+{{range .Overflow}}<tr><td><code>{{.Metric}}</code><br><span class="muted">{{.Detail}}. Fix: {{.Fix}}</span></td><td class="num">{{.Series}}</td><td>{{range $i, $l := .Capped}}{{if $i}}, {{end}}<code>{{$l}}</code>{{end}}</td><td>{{range .Readers}}<code>{{.Consumer}}</code> ({{range $i, $l := .Labels}}{{if $i}}, {{end}}{{$l}}{{end}})<br>{{else}}<span class="muted">none</span>{{end}}</td></tr>
+{{end}}</tbody>
+</table>
 {{end}}
 
 <h2>SLO coverage</h2>

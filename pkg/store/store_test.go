@@ -1401,3 +1401,24 @@ func TestPipelineTargets(t *testing.T) {
 		t.Errorf("pipeline targets %+v, want %+v", got, targets)
 	}
 }
+
+func TestOverflowFindings(t *testing.T) {
+	s, _ := open(t)
+	findings := []graph.OverflowFinding{
+		{Signal: "prom:metric:a", Series: 1, Capped: []string{"customer_id", "span_name"}, Readers: []string{"qlog:prom:x\tcustomer_id"}},
+		{Signal: "prom:metric:b_bucket", Series: 7, Capped: []string{"customer_id"}},
+	}
+	id := scan(t, s, t0, func(sc *Scan) {
+		for _, f := range findings {
+			must(t, sc.PutOverflowFinding(ctx, f))
+		}
+		if err := sc.PutOverflowFinding(ctx, graph.OverflowFinding{Signal: "prom:metric:c"}); err == nil {
+			t.Error("finding without series accepted")
+		}
+	})
+	got, err := s.OverflowFindings(ctx, id)
+	must(t, err)
+	if !reflect.DeepEqual(got, findings) {
+		t.Errorf("overflow findings %+v, want %+v", got, findings)
+	}
+}

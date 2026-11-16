@@ -265,6 +265,13 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	if in.Rules, err = pc.Rules(ctx); err != nil {
 		return err
 	}
+	// Overflow series (S6 item 5): an evidence gap, so a failed read is a
+	// gap line, never a failed scan.
+	if ov, err := pc.Overflow(ctx); err != nil {
+		in.OverflowErr = err.Error()
+	} else {
+		in.Overflow, in.OverflowRead = ov, true
+	}
 	// Pipeline targets (S6 item 4): which values of the labels pipelines'
 	// handles match on each metric carries. A failure leaves metrics
 	// unmapped with the reason, never the scan failed.
@@ -483,6 +490,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	if len(in.Pipelines) > 0 {
 		fmt.Fprintf(out, "%-12s %s\n", "pipelines", pipelineSummary(in.Pipelines, g.PipelineTargets))
 	}
+	fmt.Fprintf(out, "%-12s %s\n", "overflow", overflowSummary(in, g.OverflowFindings))
 	if in.SLOsConfigured {
 		fmt.Fprintf(out, "%-12s %s\n", "slo coverage", sloSummary(g.SLOFindings, len(in.Owners) > 0))
 	}
@@ -769,6 +777,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 	}
 	for _, t := range g.PipelineTargets {
 		if err := sc.PutPipelineTarget(ctx, t); err != nil {
+			return err
+		}
+	}
+	for _, f := range g.OverflowFindings {
+		if err := sc.PutOverflowFinding(ctx, f); err != nil {
 			return err
 		}
 	}
@@ -1080,6 +1093,21 @@ func humanBytes(n int64) string {
 
 // pipelineSummary is the scan's pipelines line (S6 item 4): signals per
 // pipeline, unmapped signals and streams, rule outputs.
+func overflowSummary(in scan.Inputs, findings []graph.OverflowFinding) string {
+	switch {
+	case in.OverflowErr != "":
+		return "not read: " + in.OverflowErr
+	case len(findings) == 0:
+		return "none"
+	}
+	series, readers := 0, 0
+	for _, f := range findings {
+		series += f.Series
+		readers += len(f.Readers)
+	}
+	return fmt.Sprintf("%d metrics with %d overflow series (cost is a floor), %d readers filter on capped labels", len(findings), series, readers)
+}
+
 func pipelineSummary(ps []config.Pipeline, targets []graph.PipelineTarget) string {
 	per := map[string]int{}
 	var unmapped, streams, rule int

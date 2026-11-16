@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 20
+const SchemaVersion = 21
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -408,6 +408,23 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			    PRIMARY KEY (scan_id, subject)
 			)`,
 			`UPDATE meta SET value = '20' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
+	if from < 21 {
+		for _, q := range []string{
+			`CREATE TABLE IF NOT EXISTS overflow_findings (
+			    scan_id INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+			    signal  TEXT NOT NULL,
+			    series  INTEGER NOT NULL,
+			    capped  TEXT NOT NULL,
+			    readers TEXT NOT NULL,
+			    PRIMARY KEY (scan_id, signal)
+			)`,
+			`UPDATE meta SET value = '21' WHERE key = 'schema_version'`,
 		} {
 			if _, err := tx.ExecContext(ctx, q); err != nil {
 				return err
@@ -830,6 +847,28 @@ func (s *Store) PipelineTargets(ctx context.Context, scanID int64) ([]graph.Pipe
 	return out, rows.Err()
 }
 
+// OverflowFindings returns the overflow findings of scan scanID, by
+// signal.
+func (s *Store) OverflowFindings(ctx context.Context, scanID int64) ([]graph.OverflowFinding, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT signal, series, capped, readers FROM overflow_findings WHERE scan_id = ? ORDER BY signal`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.OverflowFinding
+	for rows.Next() {
+		var f graph.OverflowFinding
+		var capped, readers string
+		if err := rows.Scan(&f.Signal, &f.Series, &capped, &readers); err != nil {
+			return nil, err
+		}
+		f.Capped, f.Readers = lines(capped), lines(readers)
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // SLOFindings returns the SLO coverage findings of scan scanID, by kind
 // and subject.
 func (s *Store) SLOFindings(ctx context.Context, scanID int64) ([]graph.SLOFinding, error) {
@@ -934,6 +973,7 @@ type Scan struct {
 	queryCost   *sql.Stmt
 	sloFinding  *sql.Stmt
 	pipeline    *sql.Stmt
+	overflow    *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -1040,6 +1080,7 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		{&sc.queryCost, `INSERT INTO query_costs (scan_id, consumer_id, queries, samples, bytes) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.sloFinding, `INSERT INTO slo_findings (scan_id, kind, subject, name, detail, fix) VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.pipeline, `INSERT INTO pipeline_targets (scan_id, subject, pipeline, note) VALUES (?, ?, ?, ?)`},
+		{&sc.overflow, `INSERT INTO overflow_findings (scan_id, signal, series, capped, readers) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.score, `INSERT INTO scores (scan_id, signal_id, monthly_cost, usage_weight, strongest, confidence, priority, held)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.load, `INSERT INTO dashboard_loads (scan_id, org_id, dashboard_uid, login, browser, loads, last_at)
@@ -1244,6 +1285,19 @@ func (sc *Scan) PutPipelineTarget(ctx context.Context, t graph.PipelineTarget) e
 	}
 	_, err := sc.pipeline.ExecContext(ctx, sc.ID, t.Subject, t.Pipeline, t.Note)
 	return wrap("pipeline target", t.Subject, err)
+}
+
+// PutOverflowFinding records one metric's overflow finding, once per
+// signal.
+func (sc *Scan) PutOverflowFinding(ctx context.Context, f graph.OverflowFinding) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if f.Signal == "" || f.Series <= 0 {
+		return errors.New("store: overflow finding: Signal and a positive Series are required")
+	}
+	_, err := sc.overflow.ExecContext(ctx, sc.ID, f.Signal, f.Series, strings.Join(f.Capped, "\n"), strings.Join(f.Readers, "\n"))
+	return wrap("overflow finding", f.Signal, err)
 }
 
 // PutSLOFinding records one SLO coverage finding, once per kind and
@@ -1451,4 +1505,12 @@ func decodeReasons(s string) []string {
 	out := strings.Split(s, "\n")
 	sort.Strings(out)
 	return slices.Compact(out)
+}
+
+// lines splits a newline-joined column; "" is none.
+func lines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }

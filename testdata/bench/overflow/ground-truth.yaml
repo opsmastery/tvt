@@ -1,0 +1,723 @@
+# What tvt should conclude about the lab, given 30+ days of history with the
+# viewer running. tvt's golden tests compare a scan of this lab against this file.
+#
+# Classes:
+#   hard_keep         never recommended (alert, recording rule feeding an alert, Loki alert,
+#                     Grafana-managed alert, SLO, runbook query step)
+#   keep_high         on a viewed dashboard
+#   keep_medium       ad hoc queries only
+#   low               only on a dashboard nobody views
+#   drop_metric       no references: recommend dropping
+#   dormant_confirm   no references, but incident-critical by name or tier: ask the owner, never a drop
+#   drop_label        metric is used, but this label is never matched, grouped or joined on
+#   drop_rule         recording rule with no consumers (recommend removing the rule)
+#   route_cold        log stream never queried: recommend cold storage over deletion
+#   line_handoff      a line pattern inside a kept stream that nothing reads: tvt reports it with its
+#                     cost and hands the line-level cut to zeroreads (tvt doesn't generate line filters)
+#   repeated_line     one identical line (no variable fields) repeated as a large share of a stream's
+#                     bytes: tvt reports the repeat rate and estimated saving (S5 item 3)
+#   lower_resolution  scrape interval is finer than any dashboard step uses
+
+metrics:
+  shop_http_requests_total:
+    class: hard_keep
+    why: >
+      ShopHighErrorRate alert; also Shop Overview panels 1-2, the $route variable, and
+      panel 9 through the $counter variable (its current value)
+  shop_http_request_duration_seconds_bucket:
+    class: hard_keep
+    why: recording rule route:shop_http_request_duration_seconds:p99_5m feeds ShopHighLatency
+  shop_payment_queue_depth:
+    class: hard_keep
+    why: ShopPaymentQueueBacklog alert; on no dashboard and never queried (alert-only edge case)
+  shop_order_export_lag_seconds:
+    class: hard_keep
+    why: >
+      Grafana-managed alert "Shop order export lag" (grafana/provisioning/alerting).
+      No Prometheus rule, no dashboard. Its only usage evidence outside the ruler API
+      is Grafana's alert evaluation in the Prometheus query log, every minute from
+      Grafana's IP, which by itself would only rank it as ad hoc usage.
+    source: Grafana ruler API (/api/prometheus/grafana/api/v1/rules) or provisioning API
+  shop_checkout_attempts_total:
+    class: hard_keep
+    why: >
+      Read only by the Sloth SLO shop/checkout-success (slos/shop-checkout.sloth.yml),
+      which is not loaded into Prometheus. No rule, dashboard or query reads it.
+    source: SLO definitions (tvt.yaml slos.paths)
+  shop_payment_gateway_retries_total:
+    class: hard_keep
+    why: >
+      Read only by step 1 of runbooks/payment-queue-backlog.md, the runbook_url of
+      ShopPaymentQueueBacklog. No rule, dashboard or query reads it.
+    source: alert runbook (tvt.yaml runbooks mirror for the tvt-lab GitHub URL)
+  shop_inventory_sync_last_success_timestamp_seconds:
+    class: hard_keep
+    why: >
+      Read only by ShopInventorySyncMissing (staleness or absent()), which returns
+      no series while the sync is healthy. Dropping it, or its job label, would fire
+      the alert. Never a "rule returned nothing for 30 days" finding. Seeded
+      Nov 12, 2026: its 30-day expectations hold from Dec 12, 2026.
+    source: Prometheus rules API (absent() expression; no query-log evidence)
+  route:shop_http_request_duration_seconds:p99_5m:
+    class: hard_keep
+    why: recorded series used by ShopHighLatency and Shop Overview panel 3
+  shop:checkout_errors:count5m:
+    class: hard_keep
+    why: >
+      Recorded by the Loki ruler (loki/rules/fake/shop-checkout.yml) and remote-written
+      into Prometheus, so it has no scrape job; read by ShopCheckoutErrorsFromLogs.
+      Seeded Nov 15, 2026 (rule-efficiency seeds).
+  shop_cart_operations_total:
+    class: keep_high
+    why: Shop Overview panel 4, sum by (op); also an option of panel 9's $counter variable
+  shop_cart_operation_total:
+    class: drop_metric
+    why: >
+      Distractor (S5): one letter off shop_cart_operations_total, a leftover duplicate
+      counter that nothing reads. Prefix or fuzzy matching would wrongly keep it.
+      Seeded Nov 14, 2026.
+  node_cpu_seconds_total:
+    class: keep_high
+    why: Shop Overview panel 5
+  node_memory_MemAvailable_bytes:
+    class: keep_medium
+    why: ad hoc query from the viewer every third round
+  shop_healthcheck_checks_total:
+    class: keep_high
+    why: Shop Overview panel 7 (health check pass rate by probe)
+  shop_healthcheck_duration_seconds_*:
+    class: drop_metric
+    why: emitted but on no dashboard, alert or query (low priority; small)
+  shop_revenue_dollars_total:
+    class: keep_medium
+    why: >
+      Read only by the simulated finance agent (agent/agent.sh): a 90-day query_range of
+      sum by (currency) (rate(shop_revenue_dollars_total[1d])) every 15 minutes. An agent
+      naming a metric is a read. In S8 the 90-day range blocks a 30-day retention proposal.
+      Seeded Nov 14, 2026.
+    source: query log (agent client; Mimir logs its user_agent)
+  alertmanager_alerts:
+    class: keep_high
+    why: Alertmanager Health panel 1, viewed every viewer round
+  alertmanager_notifications_total:
+    class: keep_high
+    why: Alertmanager Health panel 2, viewed every viewer round
+  shop_legacy_queue_depth:
+    class: low
+    why: Legacy Queue dashboard, never viewed
+  shop_legacy_batch_duration_seconds:
+    class: low
+    why: Legacy Queue dashboard, never viewed
+  shop_cache_*:
+    class: drop_metric
+    why: 30 gauges x 2 caches x 16 shards = 960 series, never referenced
+  shop_feature_flag_evaluations_total:
+    class: drop_metric
+    why: high cardinality (flag x variant x user_id), never referenced
+  "*_created":
+    class: drop_metric
+    why: prometheus_client emits a _created series per counter/histogram; never referenced
+  shop_cache_hits_total:
+    class: drop_metric
+    why: only input is the unused recording rule job:shop_cache_hit_ratio:5m
+  shop_cache_requests_total:
+    class: drop_metric
+    why: only input is the unused recording rule job:shop_cache_hit_ratio:5m
+  node_*:
+    class: drop_metric
+    why: every node-exporter metric except node_cpu_seconds_total and node_memory_MemAvailable_bytes
+  # Unread, but incident-critical by name (tvt's dormant rules: error, latency, saturation,
+  # queue depth). Decided Nov 14, 2026 (tvt S4 item 3): the name rules stay, and these show
+  # as "dormant: confirm" rows that ask the owner, never as drop candidates. Exact names
+  # here override the drop_metric globs above.
+  node_filesystem_device_error:
+    class: dormant_confirm
+    why: never read, but an error signal, so the owner is asked before any drop
+  node_network_receive_errs_total:
+    class: dormant_confirm
+    why: never read, but an error signal, so the owner is asked before any drop
+  node_network_transmit_errs_total:
+    class: dormant_confirm
+    why: never read, but an error signal, so the owner is asked before any drop
+  node_network_transmit_queue_length:
+    class: dormant_confirm
+    why: never read, but a queue-depth signal, so the owner is asked before any drop
+  node_nf_conntrack_stat_insert_failed:
+    class: dormant_confirm
+    why: never read, but an error signal, so the owner is asked before any drop
+  node_scrape_collector_duration_seconds:
+    class: dormant_confirm
+    why: never read, but a latency signal, so the owner is asked before any drop
+  node_softnet_backlog_len:
+    class: dormant_confirm
+    why: never read, but a queue-depth signal, so the owner is asked before any drop
+  node_textfile_scrape_error:
+    class: dormant_confirm
+    why: never read, but an error signal, so the owner is asked before any drop
+  node_timex_estimated_error_seconds:
+    class: dormant_confirm
+    why: never read, but an error signal, so the owner is asked before any drop
+  node_timex_pps_error_total:
+    class: dormant_confirm
+    why: never read, but an error signal, so the owner is asked before any drop
+  node_vmstat_oom_kill:
+    class: dormant_confirm
+    why: never read, but a saturation signal, so the owner is asked before any drop
+  shop_cache_connection_errors:
+    class: dormant_confirm
+    why: never read, but an error signal, so the owner is asked before any drop
+  shop_cache_evictions:
+    class: dormant_confirm
+    why: never read, but a saturation signal, so the owner is asked before any drop
+  shop_cache_get_latency_seconds:
+    class: dormant_confirm
+    why: never read, but a latency signal, so the owner is asked before any drop
+  shop_cache_replication_lag_seconds:
+    class: dormant_confirm
+    why: never read, but a queue-depth signal, so the owner is asked before any drop
+  shop_cache_set_latency_seconds:
+    class: dormant_confirm
+    why: never read, but a latency signal, so the owner is asked before any drop
+  shop_healthcheck_duration_seconds_bucket:
+    class: hard_keep
+    why: >
+      ShopHealthcheckSlow (prometheus/rules/healthcheck.yml), the deploy that adds a
+      reader, Nov 15, 2026. Before it: dormant_confirm (see states:).
+  shop_healthcheck_duration_seconds_count:
+    class: dormant_confirm
+    why: never read, but a latency signal, so the owner is asked before any drop
+  shop_healthcheck_duration_seconds_sum:
+    class: dormant_confirm
+    why: never read, but a latency signal, so the owner is asked before any drop
+  shop_http_request_duration_seconds_count:
+    class: dormant_confirm
+    why: never read, but a latency signal, so the owner is asked before any drop
+  shop_http_request_duration_seconds_sum:
+    class: dormant_confirm
+    why: never read, but a latency signal, so the owner is asked before any drop
+  # Named in a runbook's prose or a postmortem, never queried (tvt S4 item 3): dormant, so
+  # the owner is asked, never a drop. Seeded Nov 14, 2026.
+  node_load15:
+    class: dormant_confirm
+    why: named in runbooks/payment-queue-backlog.md prose, outside its query step
+    source: runbook mention
+  node_context_switches_total:
+    class: dormant_confirm
+    why: named in postmortems/2026-10-24-checkout-slowdown.md (tvt.yaml postmortems.paths)
+    source: postmortem mention
+
+labels:
+  shop_cart_operations_total/user_id:
+    class: drop_label
+    why: panel 4 groups by op only; 2000 possible users drive the cardinality
+    check: dropping user_id must not create duplicate series (op stays unique per series after aggregation)
+  shop_inventory_sync_last_success_timestamp_seconds/job:
+    class: hard_keep
+    why: matched by ShopInventorySyncMissing (job="shop"); dropping it would fire the alert
+
+# Every rule in the lab, by name. source is the ruler that evaluates it:
+# prometheus (prometheus/rules/shop.yml), loki (loki/rules) or grafana
+# (grafana/provisioning/alerting). Mimir's rules are under mimir: below.
+rules:
+  ShopHighLatency:
+    source: prometheus
+    group: shop-alerts
+    kind: alert
+    class: hard_keep
+    why: alert
+  ShopHighErrorRate:
+    source: prometheus
+    group: shop-alerts
+    kind: alert
+    class: hard_keep
+    why: alert
+  ShopPaymentQueueBacklog:
+    source: prometheus
+    group: shop-alerts
+    kind: alert
+    class: hard_keep
+    why: alert
+  ShopInventorySyncMissing:
+    source: prometheus
+    group: shop-alerts
+    kind: alert
+    class: hard_keep
+    why: >
+      staleness plus absent() alert on shop_inventory_sync_last_success_timestamp_seconds;
+      returns nothing by design, never broken (parse.UsesAbsence matches it)
+  route:shop_http_request_duration_seconds:p99_5m:
+    source: prometheus
+    group: shop-recording
+    kind: record
+    class: hard_keep
+    why: feeds ShopHighLatency
+  job:shop_cache_hit_ratio:5m:
+    source: prometheus
+    group: shop-recording
+    kind: record
+    class: drop_rule
+    why: no alert, dashboard or query uses it
+  ShopHealthcheckSlow:
+    source: prometheus
+    group: shop-healthcheck
+    kind: alert
+    class: hard_keep
+    why: the deploy that adds a reader (states:); reads shop_healthcheck_duration_seconds_bucket
+  ShopAuditDenials:
+    source: loki
+    group: shop-audit
+    kind: alert
+    class: hard_keep
+    why: Loki alert on {app="shop", component="audit"}
+  Shop order export lag:
+    source: grafana
+    group: shop-grafana-alerts
+    kind: alert
+    class: hard_keep
+    why: Grafana-managed alert on shop_order_export_lag_seconds
+  # Rule-efficiency seeds (Nov 15, 2026; prometheus/rules/rule-efficiency.yml,
+  # loki/rules/fake/shop-checkout.yml, grafana shop-grafana-log-alerts). Every one
+  # reads only signals that were already protected; rule_findings says what's wrong.
+  Shop checkout errors (logs):
+    source: grafana
+    group: shop-grafana-log-alerts
+    kind: alert
+    class: hard_keep
+    why: Grafana-managed alert on {app="shop", component="api", level="error"}, every 30s
+  shop:checkout_errors:count5m:
+    source: loki
+    group: shop-checkout-recording
+    kind: record
+    class: hard_keep
+    why: feeds ShopCheckoutErrorsFromLogs (remote-written into Prometheus)
+  ShopCheckoutErrorsFromLogs:
+    source: prometheus
+    group: shop-checkout-alerts
+    kind: alert
+    class: hard_keep
+    why: alert on the Loki recording rule's output
+  ShopDailyCheckoutsLow:
+    source: prometheus
+    group: shop-daily
+    kind: alert
+    class: hard_keep
+    why: alert ([24h] window every minute)
+  ShopPaymentQueueSpike:
+    source: prometheus
+    group: shop-fast
+    kind: alert
+    class: hard_keep
+    why: alert (5s interval)
+  ShopLegacyExportStalled:
+    source: prometheus
+    group: shop-legacy
+    kind: alert
+    class: hard_keep
+    why: alert on a metric that doesn't exist (broken, not unused)
+  ShopErrorRateHigh:
+    source: prometheus
+    group: shop-legacy
+    kind: alert
+    class: hard_keep
+    why: alert (duplicate of ShopHighErrorRate)
+  ShopAvailabilityBurn:
+    source: prometheus
+    group: shop-slo-burn
+    kind: alert
+    class: hard_keep
+    why: the availability SLO's burn-rate page alert (S6 item 3)
+
+# Rule-efficiency findings (tvt S6 item 1; seeds from tvt Sprint 2 item 12). Report
+# only: tvt never edits rules. Each rule lists exactly the findings tvt must report;
+# any other rule finding on a lab rule is a false positive. no_findings lists rules
+# that must get none (the well-built versions, and absent() and its kin).
+rule_findings:
+  Shop checkout errors (logs):
+    source: grafana
+    findings:
+      - kind: grafana_managed_alert
+        fix: move it to the Loki ruler (or alert on a Loki recording rule)
+      - kind: logql_parses_raw_logs
+        fix: >
+          a Loki recording rule computes the count once a minute; alert on its output
+          (shop:checkout_errors:count5m and ShopCheckoutErrorsFromLogs are the fixed version)
+      - kind: no_line_filter_before_parser
+        fix: add |= "route=/checkout" before | logfmt, so only matching lines are parsed
+  ShopDailyCheckoutsLow:
+    source: prometheus
+    findings:
+      - kind: long_range_window
+        detail: a [24h] range evaluated every 1m
+        fix: evaluate it every 15m or more, or record a shorter window and sum it
+  ShopPaymentQueueSpike:
+    source: prometheus
+    findings:
+      - kind: interval_below_scrape
+        detail: 5s evaluation interval, shop job scraped every 10s
+        fix: evaluate at the scrape interval (10s) or slower
+  ShopLegacyExportStalled:
+    source: prometheus
+    findings:
+      - kind: no_series
+        detail: shop_legacy_export_batches_total has no series (never existed in the lab)
+        fix: the rule is broken, not unused; fix its metric name or delete it
+  # A duplicate pair has no original: tvt flags both copies, each naming the other.
+  ShopErrorRateHigh:
+    source: prometheus
+    findings:
+      - kind: duplicate_rule
+        detail: same expression as ShopHighErrorRate (shop-alerts)
+        fix: keep one
+  ShopHighErrorRate:
+    source: prometheus
+    findings:
+      - kind: duplicate_rule
+        detail: same expression as ShopErrorRateHigh (shop-legacy)
+        fix: keep one
+  # Every Grafana-managed alert on Loki or Prometheus is a finding (tvt S6 item 1),
+  # including the original hard-keep seed.
+  Shop order export lag:
+    source: grafana
+    findings:
+      - kind: grafana_managed_alert
+        fix: move it to the Prometheus ruler
+  job:shop_cache_hit_ratio:5m:
+    source: prometheus
+    findings:
+      - kind: unread_recording_rule
+        fix: remove the rule (it is also drop_rule above)
+  no_findings:
+    - ShopCheckoutErrorsFromLogs
+    - shop:checkout_errors:count5m
+    - ShopInventorySyncMissing
+    - ShopHighLatency
+    - ShopPaymentQueueBacklog
+    - ShopHealthcheckSlow
+    - ShopAuditDenials
+    - route:shop_http_request_duration_seconds:p99_5m
+    - ShopAvailabilityBurn   # a burn-rate alert's 1h window is required, not long_range_window
+
+# Pipelines (tvt Sprint 2 item 14, ADR 0007; S6 item 4 maps signals to them).
+# Names and handles: match tvt's examples/tvt.example.yaml. Each signal maps
+# to exactly the one pipeline whose handles match its labels (metric series
+# labels, or stream labels). Since Nov 15, 2026 22:23 UTC Alloy scrapes the shop
+# and node-exporter (same job and instance labels as before) and ships the
+# shop's logs; Prometheus scrapes itself and the backends.
+pipelines:
+  prometheus-scrape:
+    kind: prometheus
+    files: [prometheus/scrape/lab.yml]
+    handles: ['{job=~"prometheus|loki|grafana|alertmanager"}']
+    jobs: [prometheus, loki, grafana, alertmanager]
+    overflow: [traces_span_metrics_*, target_info]   # the span metrics stay local
+    examples: [prometheus_tsdb_head_series, loki_request_duration_seconds_bucket, grafana_http_request_duration_seconds_bucket, alertmanager_notifications_total]
+  alloy-apps:
+    kind: alloy
+    files: [alloy/config.alloy]
+    handles: ['{job=~"shop|node"}', '{app="shop"}']
+    jobs: [shop, node]
+    streams: ['{app="shop"}']   # every shop stream: api info/warn/error/debug, audit
+    examples: [shop_http_requests_total, shop_cart_operations_total, node_cpu_seconds_total, node_load15]
+  # No pipeline claims the reconciler's stream: the shop container pushes it
+  # straight to Loki (RECONCILER_LOKI_URL), past Alloy. tvt must report it
+  # "unmapped" with its savings, never proposable.
+  unmapped:
+    streams: ['{app="reconciler", component="worker", level="error"}']
+  # Recording-rule outputs are made by the ruler that records them, not by a
+  # pipeline: never "unmapped", and never a pipeline target even when a kept
+  # label matches handles (job:shop_cache_hit_ratio:5m keeps job="shop").
+  rule_outputs: ["route:shop_http_request_duration_seconds:p99_5m", "job:shop_cache_hit_ratio:5m", "shop:checkout_errors:count5m"]
+
+# SLO coverage (tvt S6 item 3). Report only. Services are the lab's owners, as
+# tvt.yaml ownership.owners names them: shop (shop_* metrics, {app="shop"}
+# streams) and reconciler ({app="reconciler"} streams). Paging alerts are
+# severity critical. Each list is exact: anything else tvt lists is wrong.
+slo_coverage:
+  services:
+    shop: {metrics: ["shop_.*"], streams: ['{app="shop"}']}
+    reconciler: {streams: ['{app="reconciler"}']}
+  services_without_slo: [reconciler]
+  # Severity critical and not a burn-rate alert: pages on a threshold.
+  paging_not_burn_rate: [ShopHighErrorRate, ShopPaymentQueueBacklog, ShopPaymentQueueSpike, ShopErrorRateHigh]
+  burn_rate: [ShopAvailabilityBurn]
+  # The checkout SLO declares ShopCheckoutSLOBurn, but no ruler loads it
+  # (the Sloth spec is deliberately not loaded into Prometheus).
+  slos_without_alert: [shop/checkout-success]
+
+# Dashboards and whether people view them. The viewer service loads Shop
+# Overview in a browser; nothing loads Legacy Queue.
+# Declared dependencies outside the rulers (Sprint 2 item 7). tvt.yaml points
+# slos.paths at ./slos and mirrors the runbook URL prefix to ./runbooks.
+slos:
+  shop/checkout-success:
+    format: sloth
+    file: slos/shop-checkout.sloth.yml
+    reads: [shop_checkout_attempts_total]
+  shop/availability:
+    format: sloth
+    file: slos/shop-availability.sloth.yml
+    reads: [shop_http_requests_total]
+runbooks:
+  https://github.com/Opsmastery-Summit/tvt-lab/blob/main/runbooks/payment-queue-backlog.md:
+    alerts: [prometheus/ShopPaymentQueueBacklog]
+    reads: [shop_payment_gateway_retries_total]
+
+dashboards:
+  shop-overview:
+    title: Shop Overview
+    viewed: true
+  legacy-queue:
+    title: Legacy Queue
+    viewed: false
+  alertmanager-health:
+    title: Alertmanager Health
+    viewed: true
+
+# Only with the mimir profile (make up-mimir): what a scan of Mimir
+# (tvt scan --mimir) adds on top of the sections above. The one-shot
+# mimir-rules service loads mimir/rules/shop.yml into Mimir's ruler, namespace
+# tvt-lab. Prometheus remote-writes every series, so Mimir has the same
+# metrics; only the rules differ.
+mimir:
+  rules:
+    route:shop_http_request_duration_seconds:p99_5m:
+      group: shop-recording
+      kind: record
+      class: hard_keep
+      why: >
+        Copy of the Prometheus rule (its series carry ruler=mimir). Its output has the
+        metric name ShopHighLatency and Shop Overview panel 3 read, and tvt matches by
+        name, so it must not recommend removing the rule.
+    job:shop_cache_hit_ratio:5m:
+      group: shop-recording
+      kind: record
+      class: drop_rule
+      why: copy of the unused Prometheus rule; no alert, dashboard or query reads its output
+    NodeLoadHigh:
+      group: shop-recording
+      kind: alert
+      class: hard_keep
+      why: Mimir-only alert
+  metrics:
+    node_load15:
+      class: hard_keep
+      why: >
+        Read only by the Mimir ruler's NodeLoadHigh alert. A --prom scan can't see
+        it (the Prometheus rules API doesn't list Mimir's rules) and ranks it with
+        node_* as drop_metric; a --mimir scan must protect it.
+
+streams:
+  '{app="shop", component="api", level="info"}':
+    class: keep_high
+    why: Shop Overview logs panel, level=~"info|warn|error"
+  '{app="shop", component="api", level="warn"}':
+    class: keep_high
+    why: same panel
+  '{app="shop", component="api", level="error"}':
+    class: hard_keep
+    why: >
+      the Grafana-managed alert "Shop checkout errors (logs)" and the Loki recording rule
+      shop:checkout_errors:count5m (which feeds ShopCheckoutErrorsFromLogs); also the logs
+      panel. keep_high until the rule-efficiency seeds (Nov 15, 2026).
+  '{app="shop", component="audit", level="info"}':
+    class: hard_keep
+    why: Loki alert ShopAuditDenials; also matched by the logs panel
+  '{app="shop", component="api", level="debug"}':
+    class: route_cold
+    why: about 88% of shop log bytes; excluded by the level matchers on panels 6 and 8 and the on-call query; never queried
+  '{app="reconciler", component="worker", level="error"}':
+    class: dormant_confirm
+    why: >
+      Distractor (S5): a background service logging one identical error line every 2s,
+      all day. Nothing reads it, but it's an error stream, so the owner is asked; never a
+      route_cold or a repeated-line saving. Panel 6 (app="shop") doesn't match it.
+      Seeded Nov 14, 2026.
+
+# Line-level findings: patterns inside a stream that is itself kept.
+line_patterns:
+  healthz_success:
+    stream: '{app="shop", component="api", level="info"}'
+    pattern: 'method=GET route=/healthz status=200 duration_ms=<_> probe=<_> replica=<_> request_id=<_> user=-'
+    filter: 'route=/healthz AND status=200'   # what zeroreads should be able to prove and cut
+    class: line_handoff
+    why: >
+      About 64% of the info stream's bytes. Health check pass rate is already a
+      metric (panel 7). No alert or query reads the success lines.
+    tvt_expected: >
+      The report lists the pattern under the info stream with its share of bytes and
+      monthly cost, and points to zeroreads. tvt proposes no config for it and does
+      not recommend dropping or rerouting the stream itself (panels 6 and 8 use it).
+    # The blast radius below is what a line-level cut would have to respect; it is
+    # the expected answer when zeroreads (or a future tvt integration) is run on the lab.
+    blast_radius:
+      blocks: []   # nothing should block this drop
+      value_changes:
+        - consumer: Shop Overview panel 8 (log lines per second by level)
+          why: counts every line in the stream with no line filter, so its info series drops by about 60%
+      not_affected:
+        - consumer: Shop Overview panel 6 (logs panel)
+          why: displays raw lines; fewer health check lines is the point, nothing depends on them
+        - consumer: ad hoc query {app="shop", component="api", level=~"warn|error"} |= "route=/healthz" != "status=200"
+          why: line filters exclude status=200, so it only ever reads failures
+  healthz_failure:
+    stream: '{app="shop", component="api", level="warn"}'
+    pattern: 'method=GET route=/healthz status=503 ... reason=db_ping_timeout'
+    class: keep_medium
+    why: read by the on-call ad hoc query; also rare and cheap
+  startup_burst:
+    stream: '{app="shop", component="api", level="warn"}'
+    pattern: 'msg="deprecated config key ignored, using the default" key=cache.ttl default=300s'
+    class: repeated_line
+    why: >
+      Identical text, logged STARTUP_BURST_LINES (5000) times in a burst on every shop
+      start: within Loki's pattern window (about 3 hours after a start) it is most of the
+      warn stream's lines. tvt reports it with its repeat rate and estimated saving and
+      never proposes dropping or rerouting the stream. Seeded Nov 14, 2026.
+  reconciler_errors:
+    stream: '{app="reconciler", component="worker", level="error"}'
+    pattern: 'reconcile failed: ledger upstream unavailable, will retry'
+    class: dormant_confirm
+    why: >
+      Distractor (S5): identical text repeated all day, but at error level in an error
+      stream. tvt must not report it as a repeated-line saving.
+
+scrape:
+  global_scrape_interval:
+    class: lower_resolution
+    why: 10s scrapes, but every panel uses $__rate_interval at multi-minute steps over 6h
+  alertmanager_job:
+    class: lower_resolution
+    why: >
+      the alertmanager job is scraped every 15s, but its metrics' only reader, the
+      Alertmanager Health dashboard, uses a 1m minimum interval on every panel
+
+# Simulated agent clients (agent/agent.sh, tvt S3 items 5-6). Both query Prometheus
+# directly (the query log shows only their container IP) and Mimir when it runs (its
+# query-frontend log carries user_agent).
+agents:
+  sweep:
+    user_agent: tvt-lab-sweep-agent/1.0 (mcp)
+    query: count by (__name__) ({__name__=~".+"})
+    expect: >
+      a sweep: weak evidence that keeps nothing on its own. Every drop_metric and
+      drop_label above stays a drop despite it. Until tvt treats sweeps as weak
+      (S3 item 6) the scan reads it as touching every metric.
+  finance:
+    user_agent: tvt-lab-finance-agent/1.0 (mcp)
+    query: sum by (currency) (rate(shop_revenue_dollars_total[1d])) over 90 days, step 1d
+    expect: a read of shop_revenue_dollars_total (keep_medium); the 90-day range is retention evidence for S8
+
+# Self-hosted storage (tvt S3 self-hosted price card). Measured on the lab Prometheus,
+# Nov 14, 2026: bytes per sample from
+#   rate(prometheus_tsdb_compaction_chunk_size_bytes_sum[1d])
+#     / rate(prometheus_tsdb_compaction_chunk_samples_sum[1d])
+# = 0.59 (synthetic series compress far better than the 1.5 fallback), with 60,848 head
+# series and 2.25 GB of blocks.
+storage:
+  retention_time: 45d
+  retention_size: 20GB
+  bytes_per_sample: 0.59
+  remote_write: Mimir (make up-mimir), every series
+
+# Edge cases the lab deliberately exercises:
+#   - regex matcher that excludes a stream (level=~"info|warn|error" does not match debug); panels 6
+#     and 8 and the on-call ad hoc query all carry one, because Loki reads every stream a selector
+#     matches, line filters or not
+#   - dashboard template variable referencing a metric (label_values(...))
+#   - transitive hard keep through a recording rule
+#   - recording rule whose own output is unused
+#   - alert-only metric with no dashboard or query
+#   - metric read only by a Grafana-managed alert (invisible to the Prometheus rules API)
+#   - metric read only by a Mimir ruler alert (node_load15; mimir profile only)
+#   - metric read only by an absent() alert that returns nothing while healthy, plus its matched job label
+#   - metric read only by an SLO definition that isn't loaded into Prometheus (Sloth)
+#   - metric read only by a query step in an alert's runbook
+#   - histogram whose _bucket is used but _sum/_count are not
+#   - metrics only named (not queried) in a runbook's prose and in a postmortem: dormant_confirm
+#   - an agent that sweeps every metric name (keeps nothing) and one that reads a single metric over 90 days
+#   - a job scraped at 15s whose only reader is a dashboard with a 1m step
+#   - /healthz: a droppable line pattern inside a kept stream (line-level: reported and handed to zeroreads)
+#   - a query that references /healthz lines but excludes the successful ones (!= "status=200")
+#   - a LogQL metric query over a whole stream whose values change, but don't break, when lines are dropped
+#   - S5 distractors, none of which may change a recommendation: a metric one letter off a read one
+#     (shop_cart_operation_total), a service logging one identical error line all day (reconciler), and
+#     a panel reading its metric through a custom variable (Shop Overview panel 9, ${counter})
+#   - an identical line logged in a burst at startup (repeated_line)
+#   - rule-efficiency cases (rule_findings): a Grafana-managed LogQL alert parsing raw logs every
+#     30s with no line filter, and its well-built version (Loki recording rule plus a Prometheus
+#     alert); a [24h] window every minute; a 5s interval on a 10s scrape; an alert on a metric that
+#     doesn't exist; a duplicate alert
+
+# Lab states (tvt S5 benchmark; also S15's --as-of). The sections above are the
+# current state. Each earlier state lists only what differed, as it was then.
+# Overflow series (tvt S6 item 5). The shop's spans go through Alloy's
+# spanmetrics connector with customer.id as a dimension and
+# aggregation_cardinality_limit 100 (500 customers), so each span metric has
+# overflow series: otel_metric_overflow="true", only job (and le) kept. tvt
+# flags each metric, marks its cost a floor, and warns readers that filter on
+# a capped label. Since Nov 16, 2026 00:06 UTC. Not sent to Cloud.
+overflow:
+  capped: [customer_id, http_route, service_name, span_kind, span_name, status_code]
+  kept: [job]                   # plus le on the buckets
+  metrics:
+    traces_span_metrics_calls_total: {series: 1}
+    traces_span_metrics_duration_seconds_bucket: {series: 7}   # 6 bounds + +Inf
+    traces_span_metrics_duration_seconds_count: {series: 1}
+    traces_span_metrics_duration_seconds_sum: {series: 1}
+  # The viewer's ad hoc customer lookup, every third round (viewer/view.sh).
+  readers_filtering:
+    - query: 'sum(rate(traces_span_metrics_calls_total{customer_id="c-0042"}[5m]))'
+      metric: traces_span_metrics_calls_total
+      labels: [customer_id]
+
+# Grafana Cloud test stack (tvt S6 item 6, Sprint 2 item 11): with
+# ALLOY_OUTPUT=cloud (make cloud), Alloy also forwards a free-tier subset
+# (alloy/outputs/cloud.alloy). Only Alloy's signals go: Prometheus' own jobs
+# (prometheus-scrape) and the reconciler stream (straight to Loki) never
+# reach Cloud. What Cloud has of the seeds, measured Nov 15, 2026:
+cloud:
+  plan: free                    # 10k active series, 50 GB logs a month, 14 days retention
+  jobs: [shop, node]
+  streams: ['{app="shop", component="api", level=~"info|warn|error"}', '{app="shop", component="audit"}']
+  # Seeds that stay local, so a Cloud scan can't be scored on them.
+  absent:
+    metrics: ["*_created", "shop_feature_flag_evaluations_total{user_id}", "traces_span_metrics_*", "target_info"]
+    streams: ['{app="shop", component="api", level="debug"}', '{app="reconciler", component="worker", level="error"}']
+    jobs: [prometheus, loki, grafana, alertmanager]
+  series: ~7000                 # shop ~1.2k + node ~0.6k + shop_cart_operations_total{user_id} ~5k
+  logs_per_day: 570MB
+
+states:
+  before-deploy:
+    until: 2026-11-15
+    about: >
+      Before the deploy that added ShopHealthcheckSlow (prometheus/rules/healthcheck.yml):
+      its histogram had no reader. tvt's benchmark has a frozen snapshot of each side.
+    metrics:
+      shop_healthcheck_duration_seconds_bucket:
+        class: dormant_confirm
+        why: never read, but a latency signal, so the owner is asked before any drop
+    rules_absent: [ShopHealthcheckSlow]
+  before-rule-efficiency:
+    until: 2026-11-15T20:50:00Z
+    about: >
+      Before the rule-efficiency seeds (tvt Sprint 2 item 12): no rule_findings rules beyond
+      job:shop_cache_hit_ratio:5m, and the error stream was read only by the logs panel.
+    streams:
+      '{app="shop", component="api", level="error"}':
+        class: keep_high
+        why: Shop Overview logs panel
+    rules_absent: ["Shop checkout errors (logs)", "shop:checkout_errors:count5m", ShopCheckoutErrorsFromLogs,
+      ShopDailyCheckoutsLow, ShopPaymentQueueSpike, ShopLegacyExportStalled, ShopErrorRateHigh]
+  before-alloy:
+    until: 2026-11-15T22:23:00Z
+    about: >
+      Before Alloy joined the data path (tvt Sprint 2 item 14): Prometheus scraped the shop and
+      node-exporter itself and the shop pushed every log line straight to Loki. No pipelines section.
+    pipelines_absent: true
+  before-slo-coverage:
+    until: 2026-11-15T21:50:00Z
+    about: >
+      Before the SLO coverage seeds (tvt S6 item 3): no availability SLO and no burn-rate alert.
+    rules_absent: [ShopAvailabilityBurn]
+    slos_absent: [shop/availability]

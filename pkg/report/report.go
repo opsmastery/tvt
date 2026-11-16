@@ -14,7 +14,7 @@ import (
 
 // Version is the JSON report's schema version. Readers (the HTML report,
 // propose, check) refuse a version they don't know.
-const Version = 9
+const Version = 10
 
 // Actions a recommendation can propose.
 const (
@@ -79,6 +79,9 @@ type Report struct {
 	// SLOCoverage is the SLO coverage report (S6 item 3, version 8).
 	// Report only.
 	SLOCoverage SLOCoverage `json:"slo_coverage"`
+	// Overflow lists metrics with OpenTelemetry overflow series (S6 item 5,
+	// version 10).
+	Overflow []OverflowRow `json:"overflow"`
 	// Pipelines are the pipeline targets (S6 item 4, version 9).
 	Pipelines Pipelines `json:"pipelines"`
 	// Held are candidates tvt can't recommend yet, by reason
@@ -124,6 +127,8 @@ type Totals struct {
 	RuleFindings int `json:"rule_findings"`
 	// SLOFindings counts every SLO coverage finding (S6 item 3).
 	SLOFindings int `json:"slo_findings"`
+	// Overflow counts metrics with overflow series (S6 item 5).
+	Overflow int `json:"overflow"`
 }
 
 // Recommendation is one proposed change and everything needed to check it.
@@ -154,6 +159,9 @@ type Recommendation struct {
 	Pipeline     string `json:"pipeline,omitempty"`
 	PipelineNote string `json:"pipeline_note,omitempty"`
 	Proposable   bool   `json:"proposable"`
+	// CostFloor: the metric has OpenTelemetry overflow series (S6 item 5),
+	// so its real cost, and the saving, are higher than shown.
+	CostFloor bool `json:"cost_floor,omitempty"`
 	// DismissedReason says why, for a dismissed recommendation.
 	DismissedReason string `json:"dismissed_reason,omitempty"`
 	Score           Score  `json:"score"`
@@ -178,6 +186,8 @@ type Confirm struct {
 	// Pipeline and PipelineNote: as on a recommendation (S6 item 4).
 	Pipeline     string `json:"pipeline,omitempty"`
 	PipelineNote string `json:"pipeline_note,omitempty"`
+	// CostFloor: as on a recommendation (S6 item 5).
+	CostFloor bool `json:"cost_floor,omitempty"`
 	// Gaps are the unacknowledged gaps in the sources that could have
 	// shown a reader; Acknowledged are the accepted ones, with reasons.
 	Gaps         []string `json:"gaps"`
@@ -292,6 +302,9 @@ type Input struct {
 	QueryCosts []graph.QueryCost
 	// SLOFindings are the scan's SLO coverage findings (store.SLOFindings).
 	SLOFindings []graph.SLOFinding
+	// OverflowFindings are the scan's overflow findings
+	// (store.OverflowFindings).
+	OverflowFindings []graph.OverflowFinding
 	// PipelineTargets are the scan's pipeline targets
 	// (store.PipelineTargets).
 	PipelineTargets []graph.PipelineTarget
@@ -396,6 +409,8 @@ func Build(in Input, limit int) Report {
 	})
 	r.Confirm = confirmRows(in.Signals, costs, gs, listed, in.Scan, limit)
 	r.Pipelines = pipelineTargets(r.Recommendations, r.Confirm, in.PipelineTargets, in.StreamVolumes, gs)
+	r.Overflow = overflow(in.OverflowFindings, r.Recommendations, r.Confirm, gs)
+	r.Totals.Overflow = len(r.Overflow)
 	if limit > 0 && len(r.Recommendations) > limit {
 		r.Recommendations = r.Recommendations[:limit]
 	}
