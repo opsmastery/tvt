@@ -8,7 +8,7 @@ Last updated: November 12, 2026.
 
 - **Read-only.** `tvt` never writes to your backends. Every change is a pull request a human reviews and merges.
 - **Fail closed.** If `tvt` can't prove a signal is unused, it keeps it. Alerts, recording rules, SLOs and viewed dashboards are hard keeps. A query `tvt` can't parse, or a data source it doesn't read yet, counts as a reader, never as "no reader".
-- **Records are never cut.** Audit logs, deploy and change events, Kubernetes audit and agent tool-call spans are records: never sampled, collapsed or dropped.
+- **Records are never cut.** Audit logs, deploy and change events, Kubernetes audit and agent tool-call spans are records: never sampled, collapsed or dropped. Their large content attributes can be capped and identity attributes removed, but the span and its outcome stay.
 - **Runs on your side.** A single binary. Reports and the usage graph stay on your machine; `tvt` talks only to the backends you configure and your Git host.
 - **Owners decide.** Every drop is a draft PR assigned to the signal's owner and moves forward only after they confirm. The confirmation is bound to the evidence they saw: if the evidence changes, it's asked again. Drops are staged through a cheap archive first, with a revert ready. Rarely used is treated as dormant, not unused: the metric nobody touched all year may be the one you need at 3am.
 - **Reduce before drop.** The least-lossy action that keeps every reader working wins: remove a label or bucket its values, aggregate, downsample or shorten retention, scrape less often, collapse repeats with a count, sample, reroute, and only then drop.
