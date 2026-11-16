@@ -58,7 +58,7 @@ func fixture() Input {
 			{SignalID: "prom:metric:queried", MonthlyCost: 80},
 			{SignalID: "prom:metric:stale", MonthlyCost: 30},
 			{SignalID: "prom:label:unread:pod", MonthlyCost: 60},
-			{SignalID: "prom:label:kept:pod", MonthlyCost: 20},
+			{SignalID: "prom:label:kept:pod", MonthlyCost: 20, Merges: 3, MergesKnown: true, Summable: true},
 			{SignalID: "prom:metric:alerted", MonthlyCost: 999},
 			{SignalID: `loki:stream:{app="shop"}`, MonthlyCost: 12},
 		},
@@ -95,7 +95,9 @@ func byID(r Report) map[string]Recommendation {
 }
 
 func TestBuildRecommendsOnlyTrustedCandidates(t *testing.T) {
-	r := Build(fixture(), 0)
+	in := fixture()
+	in.LabelDrops = true
+	r := Build(in, 0)
 	got := byID(r)
 	for _, id := range []string{"drop:prom:metric:alerted", "drop:prom:metric:viewed", "drop:prom:metric:node_errors", "drop:prom:metric:fresh", "reroute:loki:stream:*"} {
 		if _, ok := got[id]; ok {
@@ -107,7 +109,7 @@ func TestBuildRecommendsOnlyTrustedCandidates(t *testing.T) {
 	}
 	if rec, ok := got["label_removal:prom:label:kept:pod"]; !ok {
 		t.Error("a label of a kept metric wasn't recommended")
-	} else if len(rec.Assumptions) == 0 || !strings.Contains(rec.Assumptions[0], "never a plain labeldrop") {
+	} else if rec.Removal != "aggregate" || rec.Merges != 3 || !slices.ContainsFunc(rec.Assumptions, func(a string) bool { return strings.Contains(a, "never a plain labeldrop") }) {
 		t.Errorf("label row assumptions = %v", rec.Assumptions)
 	}
 	if r.Held["new"] != 1 || len(r.Held) != 1 {
@@ -212,7 +214,7 @@ func TestReportGapsAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"version":10`, `"overflow":[]`, `"overflow":0`, `"pipelines":{"pipelines":[],"unmapped":{"name":"unmapped","recommendations":0,"savings":0},"unmapped_streams":[]}`, `"slo_coverage":{"services_without_slo":[],"paging_not_burn_rate":[],"slos_without_alert":[]}`, `"slo_findings":0`, `"line_findings":[]`, `"rules":[]`, `"query_load":{"queries":0,"samples":0,"bytes":0,"clients":[],"top":[]}`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
+	for _, key := range []string{`"version":11`, `"overflow":[]`, `"overflow":0`, `"pipelines":{"pipelines":[],"unmapped":{"name":"unmapped","recommendations":0,"savings":0},"unmapped_streams":[]}`, `"slo_coverage":{"services_without_slo":[],"paging_not_burn_rate":[],"slos_without_alert":[]}`, `"slo_findings":0`, `"line_findings":[]`, `"rules":[]`, `"query_load":{"queries":0,"samples":0,"bytes":0,"clients":[],"top":[]}`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
 		`"savings"`, `"risk_if_wrong"`, `"assumptions"`, `"status":"open"`, `"savings_per_minute"`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("JSON has no %s", key)
@@ -641,5 +643,44 @@ func TestOverflowReport(t *testing.T) {
 	}
 	if !strings.Contains(page.String(), "Overflow series") || !strings.Contains(page.String(), "at least") {
 		t.Error("HTML lacks the overflow section or the cost floor")
+	}
+}
+
+// Label drop safety (S6 item 7): off by default; held when unchecked or
+// when series merge on a metric that can't be summed; a labeldrop only
+// when every series stays unique.
+func TestLabelDropSafety(t *testing.T) {
+	cases := []struct {
+		name    string
+		on      bool
+		cost    graph.Cost
+		held    string
+		removal string
+	}{
+		{"off", false, graph.Cost{MergesKnown: true}, HeldLabelDropsOff, ""},
+		{"unchecked", true, graph.Cost{}, HeldLabelUnknown, ""},
+		{"gauge merges", true, graph.Cost{Merges: 4, MergesKnown: true}, HeldLabelMerges, ""},
+		{"counter merges", true, graph.Cost{Merges: 4, MergesKnown: true, Summable: true}, "", "aggregate"},
+		{"unique", true, graph.Cost{MergesKnown: true}, "", "labeldrop"},
+		{"unique gauge", true, graph.Cost{MergesKnown: true, ActiveSeries: 9}, "", "labeldrop"},
+	}
+	for _, c := range cases {
+		in := fixture()
+		in.LabelDrops = c.on
+		for i := range in.Costs {
+			if in.Costs[i].SignalID == "prom:label:kept:pod" {
+				mc := c.cost
+				mc.SignalID, mc.MonthlyCost = in.Costs[i].SignalID, in.Costs[i].MonthlyCost
+				in.Costs[i] = mc
+			}
+		}
+		r := Build(in, 0)
+		rec, ok := byID(r)["label_removal:prom:label:kept:pod"]
+		switch {
+		case c.held != "" && (ok || r.Held[c.held] != 1):
+			t.Errorf("%s: recommended %v, held %v; want held %s", c.name, ok, r.Held, c.held)
+		case c.held == "" && (!ok || rec.Removal != c.removal):
+			t.Errorf("%s: recommended %v, removal %q; want %s", c.name, ok, rec.Removal, c.removal)
+		}
 	}
 }

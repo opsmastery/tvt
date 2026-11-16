@@ -27,6 +27,21 @@ Only `candidate` signals with a score above zero confidence. Hard keeps, keep_hi
 
 `downsample` and `finding` are reserved for S5 and S6.
 
+### Label removals (S6 item 7)
+
+Label removals are off unless `tvt report --label-drops` is given; without it every label candidate is held as `label_drops_off`. They stay behind the flag until a precision review on real data passes.
+
+With the flag, tvt checks whether the metric's series stay unique without the label. During the series read for label cardinality, `prometheus.Client.LabelCardinality` counts, per label, the distinct series once that label is removed (`collect.LabelCardinality.SeriesWithout`); merges = series − series without (schema v22 `costs.merges`, -1 when unknown, and `costs.summable`). Each label row then has a `removal`:
+
+| Merges | Metric type | Result |
+| --- | --- | --- |
+| unknown (no series read: a Mimir scan, whose cardinality API gives counts, not series) | any | held `label_drop_unchecked` |
+| 0 | any | `removal: "labeldrop"`: a plain `labeldrop` keeps every series |
+| more than 0 | counter or histogram (metadata type, else a `_total`/`_bucket`/`_sum`/`_count` name; a summary only for `_sum`/`_count`) | `removal: "aggregate"` with `merges`: the colliding series must be summed (`sum without(label)` or the pipeline's aggregation), never a plain labeldrop, which would make series collide and lose samples |
+| more than 0 | gauge, summary quantile, unknown | held `label_drop_merges`: there's no correct way to merge them |
+
+The HTML row shows the removal next to the action. Golden: `TestBenchmarkLabelDrops` (the lab's `user_id` on `shop_cart_operations_total` is `aggregate`, its merge count worked out from the recorded series); the benchmark runs with the flag on.
+
 ## Dormant: confirm
 
 A dormant signal is unread but looks incident-critical: its name says error, latency, saturation or queue depth, its owner's tier is 0 or 1, a runbook or postmortem names it without querying it, or its owner has a season the window missed.

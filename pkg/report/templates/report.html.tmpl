@@ -62,7 +62,7 @@ summary { cursor:pointer; color:var(--accent); }
 {{range $i, $r := .Recommendations}}
 <tr class="rec" id="{{$r.ID}}">
 <td class="num">{{inc $i}}</td>
-<td><span class="tag">{{$r.Action}}</span><br><code>{{$r.Signal.ID}}</code></td>
+<td><span class="tag">{{$r.Action}}</span>{{if $r.Removal}} <span class="tag">{{$r.Removal}}{{if $r.Merges}}: {{$r.Merges}} series merge{{end}}</span>{{end}}<br><code>{{$r.Signal.ID}}</code></td>
 <td>{{$r.Claim}}<br><b>Check:</b> {{$r.CheapestCheck}}
 {{if $r.Evidence.Gaps}}<div class="rowgap">Gaps: {{join $r.Evidence.Gaps "; "}}</div>{{end}}
 {{if $r.Evidence.Acknowledged}}<div class="muted" style="font-size:12px">Acknowledged: {{join $r.Evidence.Acknowledged "; "}}</div>{{end}}
