@@ -27,6 +27,8 @@ type Object struct {
 	Labels     map[string]string
 	// Spec is the object's spec, decoded generically.
 	Spec map[string]any
+	// Data is a ConfigMap's data (dashboards, datasource provisioning).
+	Data map[string]string
 	// File is where it came from.
 	File string
 }
@@ -86,8 +88,9 @@ type manifest struct {
 		Namespace string            `yaml:"namespace"`
 		Labels    map[string]string `yaml:"labels"`
 	} `yaml:"metadata"`
-	Spec  map[string]any `yaml:"spec"`
-	Items []manifest     `yaml:"items"`
+	Spec  map[string]any    `yaml:"spec"`
+	Data  map[string]string `yaml:"data"`
+	Items []manifest        `yaml:"items"`
 }
 
 func loadFile(path string) ([]Object, error) {
@@ -110,7 +113,7 @@ func loadFile(path string) ([]Object, error) {
 		}
 		out = append(out, Object{
 			APIVersion: m.APIVersion, Kind: m.Kind, Namespace: m.Metadata.Namespace, Name: m.Metadata.Name,
-			Labels: m.Metadata.Labels, Spec: m.Spec, File: path,
+			Labels: m.Metadata.Labels, Spec: m.Spec, Data: m.Data, File: path,
 		})
 	}
 	for {
