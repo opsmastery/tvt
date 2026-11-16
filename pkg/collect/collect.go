@@ -389,3 +389,33 @@ type LinePattern struct {
 	// last plus one step. Zero when there were no samples.
 	Window time.Duration
 }
+
+// Overflow is one metric with series an OpenTelemetry SDK or Collector
+// wrote past its cardinality limit (S6 item 5): once a metric has as many
+// attribute sets as the limit allows, new ones are aggregated into one
+// series carrying otel.metric.overflow="true" and none of the capped
+// attributes. Real cardinality is higher than the backend shows, and those
+// points lost their labels.
+type Overflow struct {
+	Metric string
+	// Series is how many overflow series the metric has (a histogram's
+	// buckets each count).
+	Series int
+	// Kept are the label names the overflow series still carry, besides
+	// __name__ and the marker (job, instance, le: resource attributes and
+	// the histogram bound).
+	Kept []string
+	// Labels are the label names the metric's series carry, overflow or
+	// not. A label in Labels but not Kept is capped.
+	Labels []string
+}
+
+// OverflowSource lists metrics with overflow series.
+type OverflowSource interface {
+	Overflow(ctx context.Context) ([]Overflow, error)
+}
+
+// OverflowLabels are the overflow marker as it reaches a Prometheus-
+// compatible backend: otel.metric.overflow with dots translated (the
+// default), or kept as is by a UTF-8 aware writer.
+var OverflowLabels = []string{"otel_metric_overflow", "otel.metric.overflow"}

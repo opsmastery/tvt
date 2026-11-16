@@ -41,6 +41,26 @@
         ]
       }
     },
+    "overflow": {
+      "evidence": {
+        "found": 79,
+        "total": 79,
+        "score": 1,
+        "missed": []
+      },
+      "recommendations": {
+        "true_positives": 305,
+        "false_positives": 0,
+        "false_negatives": 2,
+        "precision": 1,
+        "recall": 0.9935,
+        "wrong": [],
+        "missed": [
+          "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
+          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend"
+        ]
+      }
+    },
     "pipelines": {
       "evidence": {
         "found": 79,

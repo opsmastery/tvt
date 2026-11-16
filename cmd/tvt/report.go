@@ -213,6 +213,9 @@ func readLatest(ctx context.Context, path string) (report.Input, store.ScanInfo,
 	if in.PipelineTargets, err = st.PipelineTargets(ctx, info.ID); err != nil {
 		return in, info, err
 	}
+	if in.OverflowFindings, err = st.OverflowFindings(ctx, info.ID); err != nil {
+		return in, info, err
+	}
 	if in.RuleCosts, err = st.RuleCosts(ctx, info.ID); err != nil {
 		return in, info, err
 	}
