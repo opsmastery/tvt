@@ -14,7 +14,7 @@ import (
 
 // Version is the JSON report's schema version. Readers (the HTML report,
 // propose, check) refuse a version they don't know.
-const Version = 10
+const Version = 11
 
 // Actions a recommendation can propose.
 const (
@@ -162,6 +162,11 @@ type Recommendation struct {
 	// CostFloor: the metric has OpenTelemetry overflow series (S6 item 5),
 	// so its real cost, and the saving, are higher than shown.
 	CostFloor bool `json:"cost_floor,omitempty"`
+	// Removal is how a label_removal row removes the label (S6 item 7):
+	// labeldrop when every series stays unique without it, aggregate when
+	// series merge but can be summed. Merges is how many collide.
+	Removal string `json:"removal,omitempty"`
+	Merges  int64  `json:"merges,omitempty"`
 	// DismissedReason says why, for a dismissed recommendation.
 	DismissedReason string `json:"dismissed_reason,omitempty"`
 	Score           Score  `json:"score"`
@@ -305,6 +310,10 @@ type Input struct {
 	// OverflowFindings are the scan's overflow findings
 	// (store.OverflowFindings).
 	OverflowFindings []graph.OverflowFinding
+	// LabelDrops turns on label_removal recommendations (tvt report
+	// --label-drops; S6 item 7): off until a precision review on real data,
+	// so label rows are held as label_drops_off.
+	LabelDrops bool
 	// PipelineTargets are the scan's pipeline targets
 	// (store.PipelineTargets).
 	PipelineTargets []graph.PipelineTarget
@@ -396,6 +405,15 @@ func Build(in Input, limit int) Report {
 	for _, rec := range recs {
 		if rec.Action == ActionLabelRemoval && dropped[rec.Signal.Parent] {
 			continue
+		}
+		if rec.Action == ActionLabelRemoval {
+			if held := labelDrop(&rec, costs[rec.Signal.ID], in.LabelDrops); held != "" {
+				if r.Held == nil {
+					r.Held = map[string]int{}
+				}
+				r.Held[held]++
+				continue
+			}
 		}
 		r.Recommendations = append(r.Recommendations, rec)
 	}
@@ -497,6 +515,39 @@ func question(s graph.Signal, row Confirm, meta Scan) string {
 		who, what, meta.WindowDays, meta.StartedAt.UTC().Format("2006-01-02"), s.Dormant, money)
 }
 
+// Held reasons for label removals (S6 item 7).
+const (
+	HeldLabelDropsOff = "label_drops_off"      // tvt report without --label-drops
+	HeldLabelUnknown  = "label_drop_unchecked" // no series read: uniqueness without the label unknown
+	HeldLabelMerges   = "label_drop_merges"    // series would merge, and the metric can't be summed
+)
+
+// labelDrop decides a label_removal row (S6 item 7): held (the reason)
+// when label drops are off, when uniqueness without the label wasn't
+// measured, or when dropping it merges series of a metric that can't be
+// summed (a gauge, a summary quantile, an unknown type); else it sets how
+// to remove it. Fails closed: unknown is held, never a plain labeldrop.
+func labelDrop(rec *Recommendation, c graph.Cost, on bool) string {
+	switch {
+	case !on:
+		return HeldLabelDropsOff
+	case !c.MergesKnown:
+		return HeldLabelUnknown
+	case c.Merges > 0 && !c.Summable:
+		return HeldLabelMerges
+	case c.Merges == 0:
+		rec.Removal = "labeldrop"
+		rec.Assumptions = append(rec.Assumptions, fmt.Sprintf(
+			"every series stays unique without %s (checked against %d active series): a plain labeldrop merges nothing", rec.Signal.Name, c.ActiveSeries))
+	default:
+		rec.Removal, rec.Merges = "aggregate", c.Merges
+		rec.Assumptions = append(rec.Assumptions, fmt.Sprintf(
+			"dropping %s merges %d series: aggregate them (sum without(%s), in a recording rule or at ingest), never a plain labeldrop, which would collide series and lose samples",
+			rec.Signal.Name, c.Merges, rec.Signal.Name))
+	}
+	return ""
+}
+
 func heldReason(sc graph.Score) string {
 	if sc.Held != "" {
 		return sc.Held
@@ -525,10 +576,7 @@ func recommend(s graph.Signal, sc graph.Score, refs []graph.Reference, consumers
 	}
 	rec.ID = rec.Action + ":" + s.ID
 	rowGaps := gs.forSignal(s, listed)
-	if s.Kind == graph.KindLabel {
-		rec.Assumptions = append(rec.Assumptions,
-			"removing the label merges series that differ only in it: it needs aggregation (a recording rule or ingest-time aggregation), never a plain labeldrop, which would collide series and lose samples")
-	}
+
 	if s.Kind == graph.KindStream {
 		rec.Assumptions = append(rec.Assumptions,
 			"stream selectors overlap, so this saving may count bytes another stream row also counts",

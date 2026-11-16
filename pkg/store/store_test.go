@@ -797,10 +797,18 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 	sc.Abort()
 }
 
-// v15Drops turns a current database's tables back into version 14's.
-var v15Drops = []string{
-	`ALTER TABLE refs DROP COLUMN first_scan`,
+// v22Drops turns a current database's columns back into version 21's
+// (versions 16-21 only added tables, which CREATE TABLE IF NOT EXISTS adds).
+var v22Drops = []string{
+	`ALTER TABLE costs DROP COLUMN merges`,
+	`ALTER TABLE costs DROP COLUMN summable`,
 }
+
+// v15Drops turns a current database's tables back into version 14's
+// (v22Drops first).
+var v15Drops = append(append([]string{}, v22Drops...),
+	`ALTER TABLE refs DROP COLUMN first_scan`,
+)
 
 // v14Drops turns a current database's tables back into version 13's
 // (v15Drops first).
@@ -1420,5 +1428,55 @@ func TestOverflowFindings(t *testing.T) {
 	must(t, err)
 	if !reflect.DeepEqual(got, findings) {
 		t.Errorf("overflow findings %+v, want %+v", got, findings)
+	}
+}
+
+// Label drop safety (S6 item 7): merges round-trip, unknown stays unknown,
+// and a version 21 database's rows read as unknown, never as "no merges".
+func TestCostMerges(t *testing.T) {
+	s, path := open(t)
+	id := scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, graph.Signal{ID: "prom:metric:m", Kind: graph.KindMetric, Name: "m", Source: "prom"}))
+		for _, l := range []string{"a", "b", "c"} {
+			must(t, sc.PutSignal(ctx, graph.Signal{ID: "prom:label:m:" + l, Kind: graph.KindLabel, Name: l, Parent: "m", Source: "prom"}))
+		}
+		must(t, sc.PutCost(ctx, graph.Cost{SignalID: "prom:label:m:a", Merges: 0, MergesKnown: true, Summable: true}))
+		must(t, sc.PutCost(ctx, graph.Cost{SignalID: "prom:label:m:b", Merges: 12, MergesKnown: true}))
+		must(t, sc.PutCost(ctx, graph.Cost{SignalID: "prom:label:m:c"}))
+	})
+	costs, err := s.Costs(ctx, id)
+	must(t, err)
+	got := map[string]graph.Cost{}
+	for _, c := range costs {
+		got[c.SignalID] = c
+	}
+	if a := got["prom:label:m:a"]; !a.MergesKnown || a.Merges != 0 || !a.Summable {
+		t.Errorf("a %+v", a)
+	}
+	if b := got["prom:label:m:b"]; !b.MergesKnown || b.Merges != 12 || b.Summable {
+		t.Errorf("b %+v", b)
+	}
+	if c := got["prom:label:m:c"]; c.MergesKnown || c.Merges != 0 {
+		t.Errorf("c %+v: want unknown", c)
+	}
+	s.Close()
+
+	// Back to version 21, then upgrade: the old rows are unknown.
+	raw, err := sql.Open("sqlite", path)
+	must(t, err)
+	for _, q := range append(v22Drops, `UPDATE meta SET value = '21' WHERE key = 'schema_version'`) {
+		_, err := raw.Exec(q)
+		must(t, err)
+	}
+	raw.Close()
+	s, err = Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	costs, err = s.Costs(ctx, id)
+	must(t, err)
+	for _, c := range costs {
+		if c.MergesKnown || c.Summable {
+			t.Errorf("upgraded %s: %+v, want unknown", c.SignalID, c)
+		}
 	}
 }
