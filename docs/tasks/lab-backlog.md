@@ -56,6 +56,7 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 ## S15
 
 - A lab "release" that renames a shop metric a dashboard reads: a readers-broken finding naming the panel and the release.
+- The synthetic coding-agent emitter (S7) also calls a telemetry query tool: an `execute_tool` span and a `tool_result` log whose `tool_parameters` hold a PromQL query on a shop metric. Ground truth: that metric is read by client `agent`, and a reduction rule deleting `tool_parameters` from both fails `check`.
 
 ## S16
 

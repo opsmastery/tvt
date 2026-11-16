@@ -56,7 +56,7 @@ Some continuous-mode work lands right after the MVP's code is complete, before v
 - Cost by team or service from `team`/`service`/`namespace` labels and an ownership map.
 - Slack and webhook alerts.
 - `tvt verify`: re-check sources on a schedule, fail on a new reader of dropped data or on config drift, and confirm each merged change reached its expected end state by querying the backend directly.
-- AI agent and MCP query logs as usage evidence; agent skill files and alert-triggered workflows that run queries are declared readers.
+- AI agent and MCP query logs as usage evidence, including the query arguments of telemetry-reading tool calls in agent telemetry, which tvt's own proposals cap rather than delete; agent skill files and alert-triggered workflows that run queries are declared readers.
 - Incident evidence: read incident timelines (PagerDuty, incident.io, Grafana IRM, Opsgenie) and postmortems, and promote anything queried during an incident into the protection manifest through a reviewed PR that links the postmortem. Protection doesn't expire. `check` holds a drop while an incident is open on the owning service or during a declared change freeze.
 - A read-only MCP server over the usage graph (`why_kept`, `consumers_of`, `savings_if_dropped`), an agent skill that teaches agents to use it, and a contract test that the CLI, report and MCP give the same answers.
 - Point-in-time reports (`tvt report --as-of <scan>`): what `tvt` knew when an owner approved a change.
