@@ -267,6 +267,20 @@ CREATE TABLE IF NOT EXISTS pipeline_targets (
     PRIMARY KEY (scan_id, subject)
 );
 
+-- Overflow findings (graph.OverflowFinding, S6 item 5): metrics with
+-- otel.metric.overflow series. capped: label names, one per line; readers:
+-- "<consumer>\t<labels>" per line, the consumers filtering or grouping on a
+-- capped label. signal has no foreign key: the overflow can name a metric
+-- the scan holds no row for.
+CREATE TABLE IF NOT EXISTS overflow_findings (
+    scan_id INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    signal  TEXT NOT NULL,
+    series  INTEGER NOT NULL,
+    capped  TEXT NOT NULL,
+    readers TEXT NOT NULL,
+    PRIMARY KEY (scan_id, signal)
+);
+
 -- Dashboard loads in a scan's window, per login and kind. browser = 1 is a
 -- view from the dashboard page; 0 is an API client other than tvt.
 CREATE TABLE IF NOT EXISTS dashboard_loads (

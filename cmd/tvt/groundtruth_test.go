@@ -64,6 +64,20 @@ type groundTruth struct {
 	// Pipelines maps signals to the pipeline that ingests them (S6 item 4):
 	// per pipeline name, plus the special keys unmapped and rule_outputs.
 	Pipelines map[string]yaml.Node `yaml:"pipelines"`
+	// Overflow lists metrics with OpenTelemetry overflow series and the
+	// readers filtering on a capped label (S6 item 5).
+	Overflow struct {
+		Capped  []string `yaml:"capped"`
+		Kept    []string `yaml:"kept"`
+		Metrics map[string]struct {
+			Series int `yaml:"series"`
+		} `yaml:"metrics"`
+		ReadersFiltering []struct {
+			Query  string   `yaml:"query"`
+			Metric string   `yaml:"metric"`
+			Labels []string `yaml:"labels"`
+		} `yaml:"readers_filtering"`
+	} `yaml:"overflow"`
 }
 
 // gtPipeline is one pipeline's expected targets, or ground truth's
