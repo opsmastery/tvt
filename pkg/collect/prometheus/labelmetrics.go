@@ -2,6 +2,7 @@ package prometheus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -62,6 +63,37 @@ func (c *Client) LabelMetrics(ctx context.Context, labels []string) (collect.Lab
 	}
 	if truncated != nil {
 		return out, truncated
+	}
+	return out, nil
+}
+
+// SelectorMetrics returns, for each selector (a label-only selector such
+// as {asserts_metric_request="total"}), the metric names carrying those
+// labels over the last SeriesLookback, from /api/v1/label/__name__/values
+// with match[]: a metadata read, which the query log doesn't record. A
+// selector the server refuses (HTTP 400) is left out, so it keeps the
+// conservative reading; other errors fail the call.
+func (c *Client) SelectorMetrics(ctx context.Context, selectors []string) (map[string][]string, error) {
+	lookback := c.SeriesLookback
+	if lookback <= 0 {
+		lookback = defaultSeriesLookback
+	}
+	end := c.now()
+	out := make(map[string][]string, len(selectors))
+	for _, s := range selectors {
+		q := url.Values{"match[]": {s}, "start": {strconv.FormatInt(end.Add(-lookback).Unix(), 10)}, "end": {strconv.FormatInt(end.Unix(), 10)}}
+		var names []string
+		if _, err := getJSON(ctx, c, "/api/v1/label/__name__/values", q, &names); err != nil {
+			if errors.Is(err, ErrBadRequest) {
+				continue
+			}
+			return nil, err
+		}
+		slices.Sort(names)
+		if names == nil {
+			names = []string{}
+		}
+		out[s] = names
 	}
 	return out, nil
 }

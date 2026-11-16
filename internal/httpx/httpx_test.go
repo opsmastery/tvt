@@ -139,3 +139,21 @@ func TestRedirectAllowed(t *testing.T) {
 		t.Error("11th redirect followed")
 	}
 }
+
+func TestBasicAuth(t *testing.T) {
+	if got := BasicAuth("", "tok"); got != "tok" {
+		t.Errorf("no user: %q, want the token unchanged", got)
+	}
+	cred := BasicAuth("3775056", "glc_x")
+	req, err := NewRequest(context.Background(), "https://example.net/api/prom", "/api/v1/rules", nil, cred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, p, ok := req.BasicAuth(); !ok || u != "3775056" || p != "glc_x" {
+		t.Errorf("basic auth = %q %q %v", u, p, ok)
+	}
+	req, _ = NewRequest(context.Background(), "https://example.net", "/x", nil, "glsa_y")
+	if got := req.Header.Get("Authorization"); got != "Bearer glsa_y" {
+		t.Errorf("bearer = %q", got)
+	}
+}
