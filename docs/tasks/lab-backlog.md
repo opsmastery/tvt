@@ -31,6 +31,7 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 - A pipeline repo (or directory) for the lab's Alloy config, and a Fluent Bit container that tails the shop's debug log and ships it to Loki. Record which pipeline owns each signal.
 - An audit stream, and a span with `gen_ai.operation.name=execute_tool` for a simulated agent rollback that succeeds: both are records.
 - A Collector pipeline with a `batch` processor (S7 never writes one; S16 flags it).
+- A synthetic coding-agent emitter on the GenAI conventions (interaction, llm_request and tool spans; tool_result, tool_decision and api_request logs; token and cost delta counters carrying `session.id` and `user.email`), every content flag on. Ground truth: content attributes unread (cap), `session.id` on delta counters (aggregate in the ordered pipeline), successful tool spans are records (keep the span), `api_request` logs unread (drop). Synthetic only: no real agent or prompts.
 
 ## S8
 
