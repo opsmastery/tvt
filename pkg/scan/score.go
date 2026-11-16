@@ -15,7 +15,20 @@ const (
 	SourceMimirQueryLog = "mimir query log"
 	SourceLokiQueryLog  = "loki query log"
 	SourceGrafanaLog    = "grafana router log"
+	// SourceGrafanaUsageInsights is Grafana Cloud's view events, in place
+	// of the router log.
+	SourceGrafanaUsageInsights = "grafana usage insights"
+	// SourceCloudDirectQueries is the gap Grafana Cloud leaves: queries
+	// sent straight to its Mimir and Loki APIs are logged without text. A
+	// gap, not a log, so it is left out of LogCoverage.
+	SourceCloudDirectQueries = "grafana cloud direct queries"
 )
+
+// viewCoverage is the coverage of whichever view source the scan read:
+// the router log (OSS) or Usage Insights (Cloud).
+func viewCoverage(coverage map[string]float64) float64 {
+	return max(coverage[SourceGrafanaLog], coverage[SourceGrafanaUsageInsights])
+}
 
 // History is what earlier scans in the store know about signals; the zero
 // value is a first scan.
@@ -90,7 +103,7 @@ func scoreCandidates(in Inputs, signals []graph.Signal, consumers []graph.Consum
 		if s.Class != string(score.ClassCandidate) {
 			continue
 		}
-		cov := (coverage[queryLogSource(s.Source)] + coverage[SourceGrafanaLog]) / 2
+		cov := (coverage[queryLogSource(s.Source)] + viewCoverage(coverage)) / 2
 		input := score.Input{
 			SignalID:    s.ID,
 			MonthlyCost: monthly[s.ID],

@@ -5,6 +5,7 @@ package httpx
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -68,7 +69,10 @@ func NewRequest(ctx context.Context, baseURL, path string, q url.Values, token s
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "tvt/"+version.Version)
-	if token != "" {
+	switch {
+	case strings.HasPrefix(token, basicPrefix):
+		req.Header.Set("Authorization", token)
+	case token != "":
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	return req, nil
@@ -108,4 +112,18 @@ func (l *limited) Read(p []byte) (int, error) {
 	}
 	l.left -= int64(n)
 	return n, err
+}
+
+// basicPrefix marks a token built by BasicAuth.
+const basicPrefix = "Basic "
+
+// BasicAuth returns a credential that NewRequest sends as HTTP basic auth
+// (user:token) instead of a bearer token. Grafana Cloud's Prometheus and
+// Loki endpoints need it: the user is the stack's instance ID and the
+// token an access policy token. An empty user returns token unchanged.
+func BasicAuth(user, token string) string {
+	if user == "" {
+		return token
+	}
+	return basicPrefix + base64.StdEncoding.EncodeToString([]byte(user+":"+token))
 }
