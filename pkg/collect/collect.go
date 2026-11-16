@@ -147,6 +147,12 @@ type LabelCardinality struct {
 	Label        string
 	Values       int64
 	ActiveSeries int64
+	// Series is the metric's series in the read; SeriesWithout how many
+	// distinct series remain with this label removed (S6 item 7). Fewer
+	// means dropping the label merges series: a plain labeldrop would
+	// collide them. Both 0 when unknown (a source that gives counts only).
+	Series        int64
+	SeriesWithout int64
 }
 
 // RuleKind distinguishes alerting from recording rules.

@@ -289,6 +289,7 @@ func scanState(t *testing.T, st benchState, dir string) (scanGraph, report.Repor
 		t.Fatal(err)
 	}
 	in.Now = st.ScanTime
+	in.LabelDrops = true // the benchmark scores label removals (S6 item 7)
 	r := report.Build(in, 0)
 
 	gt := parseGroundTruth(t, testutil.ReadFile(t, filepath.Join(dir, "ground-truth.yaml")))
