@@ -85,7 +85,7 @@ func sourceGaps(s graph.SourceCoverage) []Gap {
 
 func isQueryLog(source string) bool {
 	switch source {
-	case scan.SourcePromQueryLog, scan.SourceMimirQueryLog, scan.SourceLokiQueryLog, scan.SourceGrafanaLog:
+	case scan.SourcePromQueryLog, scan.SourceMimirQueryLog, scan.SourceLokiQueryLog, scan.SourceGrafanaLog, scan.SourceGrafanaUsageInsights:
 		return true
 	}
 	return false
@@ -143,7 +143,8 @@ func (g *gaps) unmatched() []Acknowledgement {
 }
 
 // forSignal are the gaps in the sources that could have shown s read:
-// its backend's query log, Grafana's router log, and the definition
+// its backend's query log, Grafana's router log or Usage Insights, Grafana
+// Cloud's direct API queries, and the definition
 // sources (datasources tvt can't parse, SLO files, runbooks). A backend
 // whose query log source wasn't even listed counts as unconfigured.
 func (g *gaps) forSignal(s graph.Signal, listed map[string]bool) []Gap {
@@ -152,7 +153,7 @@ func (g *gaps) forSignal(s graph.Signal, listed map[string]bool) []Gap {
 	if ql != "" && !listed[ql] {
 		out = append(out, g.ack(Gap{Source: ql, Kind: GapUnconfigured, Text: ql + " not configured"}))
 	}
-	for _, n := range []string{ql, scan.SourceGrafanaLog, scan.SourceDatasources, scan.SourceSLOs, scan.SourceRunbooks} {
+	for _, n := range []string{ql, scan.SourceGrafanaLog, scan.SourceGrafanaUsageInsights, scan.SourceCloudDirectQueries, scan.SourceDatasources, scan.SourceSLOs, scan.SourceRunbooks} {
 		if n != "" {
 			out = append(out, g.bySource[n]...)
 		}

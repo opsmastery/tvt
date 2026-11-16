@@ -44,6 +44,10 @@ func TestServeRejectsWritesAndQueries(t *testing.T) {
 		{"GET", "/loki/api/v1/query_range", 403, ""},
 		{"GET", "/api/ds/query", 403, ""},
 		{"GET", "/api/datasources/proxy/uid/prom/api/v1/series", 403, ""},
+		// Usage Insights is the one proxy read allowed, and only tagged.
+		{"GET", "/api/datasources/proxy/uid/" + collect.UsageInsightsUID + "/loki/api/v1/query_range", 403, ""},
+		{"GET", "/api/datasources/proxy/uid/grafanacloud-logs/loki/api/v1/query_range", 403, collect.UsageInsightsTag},
+		{"GET", "/api/datasources/proxy/uid/" + collect.UsageInsightsUID + "-x/loki/api/v1/query_range", 403, collect.UsageInsightsTag},
 		// A probe marker is allowed only as itself, tagged, on its own
 		// backend's instant-query endpoint (Prometheus or Mimir, or Loki).
 		{"GET", "/api/v1/query?query=" + url.QueryEscape(collect.ProbeQuery("ab12")), 403, ""},

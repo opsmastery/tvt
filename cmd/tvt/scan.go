@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/grafana"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/kube"
@@ -82,6 +83,9 @@ type scanOptions struct {
 	// AllowInsecureToken permits sending a token over plain http to a host
 	// that is not loopback.
 	AllowInsecureToken bool
+	// GrafanaEdition is "oss" (the default) or "cloud". On Grafana Cloud,
+	// dashboard views come from Usage Insights instead of the router log.
+	GrafanaEdition string
 }
 
 // stringList is a repeatable string flag.
@@ -108,6 +112,7 @@ func cmdScan(args []string, stdout, stderr io.Writer) int {
 	fs.IntVar(&o.LabelTop, "label-top", 50, "collect per-label cardinality for this many of the largest metrics")
 	fs.StringVar(&o.Config, "config", "", "tvt.yaml with external_consumers and ownership (optional)")
 	fs.BoolVar(&o.AllowInsecureToken, "allow-insecure-token", false, "send tokens over plain http to non-loopback hosts (not recommended)")
+	fs.StringVar(&o.GrafanaEdition, "grafana-edition", "oss", "oss, or cloud: dashboard views from Usage Insights, and TVT_PROM_USER/TVT_LOKI_USER sent with the tokens as basic auth")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -236,7 +241,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	// Metrics: cardinality, labels on the largest metrics, rules. Mimir has
 	// no TSDB status, so its cardinality comes from the cardinality API; its
 	// rules from the same Prometheus-compatible endpoint.
-	pc := prometheus.New(o.Prom, getenv("TVT_PROM_TOKEN"))
+	pc := prometheus.New(o.Prom, promToken(getenv))
 	pc.HTTP, pc.Now = scanHTTP, scanNow
 	var card collect.CardinalitySource = pc
 	in.MetricsSource = "prom"
@@ -326,7 +331,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	// index volume API: a cost input, not protection, so a failure is
 	// reported and the scan goes on without stream costs.
 	if o.Loki != "" {
-		lc := loki.New(o.Loki, getenv("TVT_LOKI_TOKEN"))
+		lc := loki.New(o.Loki, lokiToken(getenv))
 		lc.HTTP, lc.Now = scanHTTP, scanNow
 		rules, err := lc.Rules(ctx)
 		if err != nil {
@@ -412,10 +417,55 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			plural(len(in.Runbooks), "link", "links"), failed)
 	}
 
+	// Label-only selectors in rules and panels ({asserts_metric_request=
+	// "total"}): ask the backend which metrics carry those labels, so they
+	// don't protect every metric. A failure keeps the conservative reading.
+	var exprs []string
+	for _, r := range in.Rules {
+		if len(r.Queries) > 0 { // Grafana-managed: one query per datasource
+			for _, q := range r.Queries {
+				if lang, _ := collect.QueryLanguage(q.DatasourceType); lang == "promql" {
+					exprs = append(exprs, q.Expr)
+				}
+			}
+		} else if r.Language == "promql" {
+			exprs = append(exprs, r.Expr)
+		}
+	}
+	for _, d := range in.Dashboards {
+		for _, p := range d.Panels {
+			for _, q := range p.Queries {
+				if lang, _ := collect.QueryLanguage(q.DatasourceType); lang == "promql" {
+					exprs = append(exprs, q.Expr)
+				}
+			}
+		}
+	}
+	if sels := scan.LabelOnlySelectors(exprs); len(sels) > 0 {
+		sm, err := pc.SelectorMetrics(ctx, sels)
+		if err != nil {
+			fmt.Fprintf(out, "%-12s %s not resolved (%v): they read every metric\n", "selectors", plural(len(sels), "label-only selector", "label-only selectors"), err)
+		} else {
+			in.SelectorMetrics = sm
+			fmt.Fprintf(out, "%-12s %d of %s resolved to the metrics carrying their labels\n", "selectors", len(sm), plural(len(sels), "label-only selector", "label-only selectors"))
+		}
+	}
+
 	// Usage evidence. Each source is recorded, configured or not, so the
 	// report can say what the scan couldn't see.
 	grafanaLog := graph.SourceCoverage{Source: sourceGrafanaLog}
-	if len(o.GrafanaLogs) > 0 {
+	if o.cloud() {
+		grafanaLog.Source = scan.SourceGrafanaUsageInsights
+		ui := &grafana.UsageInsights{Client: gc, ExcludeUsers: []string{login}, OrgID: in.OrgID, Now: scanNow}
+		if in.Views, err = ui.DashboardViews(ctx, since); err != nil {
+			return err
+		}
+		if grafanaLog.Coverage, err = ui.Coverage(ctx, since); err != nil {
+			return err
+		}
+		grafanaLog.Configured = true
+		fmt.Fprintf(out, "%-12s %s, coverage %s\n", "usage ins.", plural(len(in.Views), "dashboard view", "dashboard views"), percent(grafanaLog.Coverage))
+	} else if len(o.GrafanaLogs) > 0 {
 		rl := &grafana.RouterLog{Paths: o.GrafanaLogs, ExcludeUsers: []string{login}, OrgID: in.OrgID, Now: scanNow}
 		if in.Views, err = rl.DashboardViews(ctx, since); err != nil {
 			return err
@@ -437,6 +487,15 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	}
 
 	in.Sources = []graph.SourceCoverage{grafanaLog}
+	if o.cloud() {
+		// Grafana Cloud logs queries sent straight to Mimir and Loki
+		// without their text, so their readers can't be attributed.
+		in.Sources = append(in.Sources, graph.SourceCoverage{
+			Source: scan.SourceCloudDirectQueries, Configured: true, Coverage: 0, WindowStart: since,
+			Gap: "queries sent straight to Grafana Cloud's Mimir and Loki APIs (scripts, agents, other API clients) are logged without their text, so tvt can't see what they read",
+		})
+		fmt.Fprintf(out, "%-12s not readable: Grafana Cloud logs direct API queries without their text (listed as a gap)\n", "api queries")
+	}
 	for _, ql := range qlogs {
 		src, queries, err := ql.read(ctx, since, nonce, o.ProbeWait, out)
 		if err != nil {
@@ -842,7 +901,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 // mimirAPI returns Mimir's Prometheus-compatible API root.
 func mimirAPI(base string) string {
 	u, err := url.Parse(base)
-	if err != nil || strings.HasSuffix(strings.TrimSuffix(u.Path, "/"), "/prometheus") {
+	if err != nil {
+		return base
+	}
+	// Grafana Cloud's endpoint (/api/prom) is already the API root.
+	if p := strings.TrimSuffix(u.Path, "/"); strings.HasSuffix(p, "/prometheus") || strings.HasSuffix(p, "/api/prom") {
 		return base
 	}
 	return u.JoinPath("prometheus").String()
@@ -902,7 +965,30 @@ func (o scanOptions) validate() error {
 	if o.ProbeWait < 0 {
 		return errors.New("--probe-wait must not be negative")
 	}
+	switch o.GrafanaEdition {
+	case "", "oss":
+	case "cloud":
+		if len(o.GrafanaLogs) > 0 {
+			return errors.New("--grafana-log is for Grafana OSS; on Grafana Cloud, views come from Usage Insights")
+		}
+	default:
+		return fmt.Errorf("--grafana-edition must be oss or cloud, not %q", o.GrafanaEdition)
+	}
 	return nil
+}
+
+// cloud reports whether the scan reads Grafana Cloud.
+func (o scanOptions) cloud() bool { return o.GrafanaEdition == "cloud" }
+
+// promToken and lokiToken are the backends' credentials: the token alone
+// as a bearer token, or with TVT_PROM_USER / TVT_LOKI_USER (Grafana
+// Cloud's instance IDs) as basic auth.
+func promToken(getenv func(string) string) string {
+	return httpx.BasicAuth(getenv("TVT_PROM_USER"), getenv("TVT_PROM_TOKEN"))
+}
+
+func lokiToken(getenv func(string) string) string {
+	return httpx.BasicAuth(getenv("TVT_LOKI_USER"), getenv("TVT_LOKI_TOKEN"))
 }
 
 // checkTokenTransport refuses to send a bearer token over plain http to a
@@ -973,7 +1059,7 @@ func (o scanOptions) queryLogs(getenv func(string) string) []*queryLog {
 	if len(o.PromQueryLogs) > 0 {
 		prom.reader = &prometheus.QueryLog{Paths: o.PromQueryLogs, Now: scanNow}
 		if o.Prom != "" {
-			c := prometheus.New(o.Prom, getenv("TVT_PROM_TOKEN"))
+			c := prometheus.New(o.Prom, promToken(getenv))
 			c.HTTP = scanHTTP
 			prom.probe = c
 		} else {
@@ -984,7 +1070,7 @@ func (o scanOptions) queryLogs(getenv func(string) string) []*queryLog {
 		m := &queryLog{source: sourceMimirQueryLog, flag: "mimir-query-log", label: "mimir log"}
 		if len(o.MimirQueryLogs) > 0 {
 			m.reader = &mimir.QueryLog{Paths: o.MimirQueryLogs, Now: scanNow}
-			c := prometheus.New(mimirAPI(o.Mimir), getenv("TVT_PROM_TOKEN"))
+			c := prometheus.New(mimirAPI(o.Mimir), promToken(getenv))
 			c.HTTP = scanHTTP
 			m.probe = c
 		}
@@ -999,7 +1085,7 @@ func (o scanOptions) queryLogs(getenv func(string) string) []*queryLog {
 		l := &queryLog{source: sourceLokiQueryLog, flag: "loki-query-log", label: "loki log"}
 		if len(o.LokiQueryLogs) > 0 {
 			l.reader = &loki.QueryLog{Paths: o.LokiQueryLogs, Now: scanNow}
-			c := loki.New(o.Loki, getenv("TVT_LOKI_TOKEN"))
+			c := loki.New(o.Loki, lokiToken(getenv))
 			c.HTTP = scanHTTP
 			l.probe = c
 		}

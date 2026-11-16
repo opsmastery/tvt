@@ -73,6 +73,10 @@ type varValues struct {
 	// values by default (a multi-value or "All" variable), so in a regex
 	// matcher they match only themselves.
 	escaped bool
+	// notMetricName: the variable's values can never be a metric name
+	// (query_result() lines), so as a metric name it selects nothing. As a
+	// label value it is still unknown (any).
+	notMetricName bool
 }
 
 // refKey identifies one graph reference.
@@ -101,6 +105,9 @@ type resolver struct {
 	// outright and restricting no label, selects more than this share of
 	// the collected series is a sweep.
 	sweepShare float64
+	// selectorMetrics: label-only selectors resolved by the backend
+	// (Inputs.SelectorMetrics).
+	selectorMetrics map[string][]string
 }
 
 // DefaultSweepShare is the share of series above which a query is a sweep.
@@ -297,13 +304,20 @@ func (r *resolver) resolveMetric(q query, pr parse.Ref, failed bool) {
 // second result holds reasons for an assumed reading.
 func (r *resolver) matchNames(ms []parse.Matcher, vars map[string]varValues, includeRecorded bool) ([]string, []string) {
 	var reasons []string
-	if !hasNameMatcher(ms) {
-		reasons = append(reasons, "selector names no metric, so every metric with its labels")
-	}
 	metrics := r.metrics
-	if includeRecorded {
-		metrics = append(append([]string(nil), r.metrics...), r.recorded...)
-		sort.Strings(metrics)
+	if k, ok := SelectorKey(ms); ok && r.selectorMetrics[k] != nil {
+		// The backend said which metrics carry these labels: those, still
+		// filtered by any __name__ matcher below. Recording-rule outputs
+		// it stores are among them.
+		metrics = r.selectorMetrics[k]
+	} else {
+		if !hasNameMatcher(ms) {
+			reasons = append(reasons, "selector names no metric, so every metric with its labels")
+		}
+		if includeRecorded {
+			metrics = append(append([]string(nil), r.metrics...), r.recorded...)
+			sort.Strings(metrics)
+		}
 	}
 	var out []string
 	for _, name := range metrics {
@@ -327,6 +341,9 @@ func (r *resolver) namesMatch(name string, ms []parse.Matcher, vars map[string]v
 			continue
 		}
 		op, values := m.Op, []string{m.Value}
+		if m.Variable && m.Op == parse.MatchEqual && notMetricName(m.Value, vars) {
+			return false, reasons // the variable holds a value, never a name
+		}
 		if m.Variable {
 			vs, ok := expandVars(m.Value, vars, isRegex(m.Op))
 			if !ok {
@@ -621,6 +638,12 @@ func dashboardVars(d collect.Dashboard, metrics []string) map[string]varValues {
 			if lang, _ := collect.QueryLanguage(v.DatasourceType); lang == "promql" {
 				if names, ok := metricNameValues(v.Query, metrics); ok {
 					vv = varValues{values: names, any: len(names) == 0}
+				} else if queryResultRe.MatchString(v.Query) && (v.Regex == "" || capturesSampleValue(v.Regex)) {
+					// query_result() yields whole result lines ({...} value
+					// timestamp), which can't be a metric name, and a regex
+					// such as {} (.*) .* extracts the sample value: used in an
+					// expression it's a value.
+					vv = varValues{any: true, notMetricName: true}
 				}
 			}
 		}
@@ -634,6 +657,7 @@ func dashboardVars(d collect.Dashboard, metrics []string) map[string]varValues {
 }
 
 var metricsFuncRe = regexp.MustCompile(`^\s*metrics\((.*)\)\s*$`)
+var queryResultRe = regexp.MustCompile(`^\s*query_result\(`)
 var nameValuesRe = regexp.MustCompile(`^\s*label_values\(\s*(?:[^,]*,\s*)?__name__\s*\)\s*$`)
 
 // metricNameValues resolves a variable whose values are metric names
@@ -659,12 +683,19 @@ func metricNameValues(q string, metrics []string) ([]string, bool) {
 }
 
 // chains adds, for every reference to a recording rule's output, a
-// reference to each of the rule's inputs with Via set to that rule: metric
-// → recording rule → alert resolves end to end, through any depth of
-// rules. The input reference carries the reader's evidence class and the
-// labels both read (labels the reader reads on the output can come from the
-// input).
+// reference to each of the rule's inputs with Via set to the rule that
+// reads that input: metric → recording rule → alert resolves end to end,
+// through any depth of rules. The input reference carries the reader's
+// evidence class and the labels read along the way (labels the reader
+// reads on the output can come from the input).
+//
+// Each rule's inputs, direct and through other rules, are worked out once
+// (closures) and reused by every reader of its output. Walking the chain
+// again per reader, as tvt first did, re-walked a shared subtree every
+// time a label set below it grew: on Grafana Cloud's Knowledge Graph
+// rules (hundreds of rules sharing outputs) that ran for many minutes.
 func (r *resolver) chains() {
+	closures := r.closures()
 	consumers := make([]string, 0, len(r.direct))
 	for c := range r.direct {
 		consumers = append(consumers, c)
@@ -672,45 +703,131 @@ func (r *resolver) chains() {
 	sort.Strings(consumers)
 	for _, c := range consumers {
 		for _, k := range append([]refKey(nil), r.direct[c]...) {
-			r.follow(c, *r.refs[k])
+			out := *r.refs[k]
+			for _, rule := range r.recordedBy[out.SignalID] {
+				if rule == c {
+					continue // a rule reading its own output depends on nothing new
+				}
+				for _, in := range closures[rule] {
+					if in.Via == c {
+						continue // a cycle back through the reader itself
+					}
+					r.merge(graph.Reference{
+						SignalID:   in.SignalID,
+						ConsumerID: c,
+						Via:        in.Via,
+						LastSeen:   out.LastSeen, // the reader's last read, not the rule's
+						Actor:      out.Actor,
+						Evidence:   r.consumerEvd[c],
+						Labels:     append(append([]graph.LabelRef(nil), in.Labels...), out.Labels...),
+						AllLabels:  in.AllLabels || out.AllLabels,
+						Assumed:    in.Assumed || out.Assumed,
+						// A rule's input labels reach the reader only if they
+						// survive every rule and the reader.
+						ResultLabels: in.ResultLabels && out.ResultLabels,
+						Reasons:      append(append([]string(nil), in.Reasons...), out.Reasons...),
+						// A sweep of a rule's output sweeps its inputs.
+						Sweep: out.Sweep,
+					})
+				}
+			}
 		}
 	}
 }
 
-// follow adds the references through each rule writing out's signal and
-// goes on from each one only when that changed what is stored: an input
-// shared by several rules is walked again only to carry labels, reasons or
-// flags it hasn't seen, so the work is bounded by what can be merged, not
-// by the number of paths, and cycles end once a lap adds nothing.
-func (r *resolver) follow(consumer string, out graph.Reference) {
-	for _, rule := range r.recordedBy[out.SignalID] {
-		if rule == consumer {
-			continue // a rule reading its own output depends on nothing new
-		}
-		for _, k := range r.direct[rule] {
-			in := *r.refs[k]
-			ref := graph.Reference{
-				SignalID:   in.SignalID,
-				ConsumerID: consumer,
-				Via:        rule,
-				LastSeen:   out.LastSeen, // the reader's last read, not the rule's
-				Actor:      out.Actor,
-				Evidence:   r.consumerEvd[consumer],
-				Labels:     append(append([]graph.LabelRef(nil), in.Labels...), out.Labels...),
-				AllLabels:  in.AllLabels || out.AllLabels,
-				Assumed:    in.Assumed || out.Assumed,
-				// A rule's input labels reach the reader only if they
-				// survive both the rule and the reader.
-				ResultLabels: in.ResultLabels && out.ResultLabels,
-				Reasons:      append(append([]string(nil), in.Reasons...), out.Reasons...),
-				// A sweep of a rule's output sweeps its inputs.
-				Sweep: out.Sweep,
-			}
-			if k, changed := r.merge(ref); changed {
-				r.follow(consumer, *r.refs[k])
+// closureKey is one input of a rule's closure: the signal and the rule
+// that reads it directly.
+type closureKey struct{ signal, via string }
+
+// closures returns, for every recording rule, every signal it reads
+// directly or through the rules writing its inputs, each with the rule
+// that reads it directly (Via), the union of labels read along the way,
+// and ResultLabels only when the labels survive every rule. It iterates
+// to a fixpoint, so cycles end once a lap adds nothing. Entries are sorted
+// by signal and Via.
+func (r *resolver) closures() map[string][]graph.Reference {
+	var rules []string
+	seen := map[string]bool{}
+	for _, writers := range r.recordedBy {
+		for _, w := range writers {
+			if !seen[w] {
+				seen[w] = true
+				rules = append(rules, w)
 			}
 		}
 	}
+	sort.Strings(rules)
+	cl := map[string]map[closureKey]*graph.Reference{}
+	add := func(rule string, ref graph.Reference) bool {
+		m := cl[rule]
+		if m == nil {
+			m = map[closureKey]*graph.Reference{}
+			cl[rule] = m
+		}
+		k := closureKey{ref.SignalID, ref.Via}
+		cur := m[k]
+		if cur == nil {
+			ref.Labels = sortLabels(append([]graph.LabelRef(nil), ref.Labels...))
+			ref.Reasons = sortStrings(append([]string(nil), ref.Reasons...))
+			m[k] = &ref
+			return true
+		}
+		n, nr := len(cur.Labels), len(cur.Reasons)
+		before := *cur
+		cur.Labels = sortLabels(append(append([]graph.LabelRef(nil), cur.Labels...), ref.Labels...))
+		cur.Reasons = sortStrings(append(append([]string(nil), cur.Reasons...), ref.Reasons...))
+		cur.AllLabels = cur.AllLabels || ref.AllLabels
+		cur.Assumed = cur.Assumed || ref.Assumed
+		cur.ResultLabels = cur.ResultLabels || ref.ResultLabels
+		return len(cur.Labels) != n || len(cur.Reasons) != nr || cur.AllLabels != before.AllLabels ||
+			cur.Assumed != before.Assumed || cur.ResultLabels != before.ResultLabels
+	}
+	snapshot := func(rule string) []graph.Reference {
+		out := make([]graph.Reference, 0, len(cl[rule]))
+		for _, ref := range cl[rule] {
+			out = append(out, *ref)
+		}
+		return out
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, rule := range rules {
+			for _, k := range r.direct[rule] {
+				in := *r.refs[k]
+				in.Via, in.ConsumerID = rule, rule
+				changed = add(rule, in) || changed
+				for _, writer := range r.recordedBy[in.SignalID] {
+					if writer == rule {
+						continue // a rule reading its own output depends on nothing new
+					}
+					for _, deep := range snapshot(writer) {
+						changed = add(rule, graph.Reference{
+							SignalID:     deep.SignalID,
+							ConsumerID:   rule,
+							Via:          deep.Via,
+							Labels:       append(append([]graph.LabelRef(nil), deep.Labels...), in.Labels...),
+							AllLabels:    deep.AllLabels || in.AllLabels,
+							Assumed:      deep.Assumed || in.Assumed,
+							ResultLabels: deep.ResultLabels && in.ResultLabels,
+							Reasons:      append(append([]string(nil), deep.Reasons...), in.Reasons...),
+						}) || changed
+					}
+				}
+			}
+		}
+	}
+	out := map[string][]graph.Reference{}
+	for _, rule := range rules {
+		refs := snapshot(rule)
+		sort.Slice(refs, func(i, j int) bool {
+			if refs[i].SignalID != refs[j].SignalID {
+				return refs[i].SignalID < refs[j].SignalID
+			}
+			return refs[i].Via < refs[j].Via
+		})
+		out[rule] = refs
+	}
+	return out
 }
 
 // labelRefs adds, for every reference to a metric, a reference to each
@@ -849,4 +966,39 @@ func shownLabels(templates []string, tagKeys string) []string {
 		}
 	}
 	return sortStrings(out)
+}
+
+// notMetricName reports whether value is exactly one variable whose
+// values can never be a metric name.
+func notMetricName(value string, vars map[string]varValues) bool {
+	locs := varRefRe.FindAllStringSubmatchIndex(value, -1)
+	if len(locs) != 1 || locs[0][0] != 0 || locs[0][1] != len(value) {
+		return false
+	}
+	return vars[varRefAt(value, locs[0]).name].notMetricName
+}
+
+// capturesSampleValue reports whether a query_result variable's regex
+// captures the sample value: its first capture group comes right after
+// the label set's closing brace, as in Grafana's usual {} (.*) .*.
+func capturesSampleValue(regex string) bool {
+	r := strings.TrimSpace(regex)
+	if strings.HasPrefix(r, "/") {
+		if i := strings.LastIndex(r, "/"); i > 0 {
+			r = r[1:i]
+		}
+	}
+	for i := 0; i < len(r); i++ {
+		if r[i] == '\\' {
+			i++
+			continue
+		}
+		if r[i] == '(' && !strings.HasPrefix(r[i:], "(?") {
+			before := strings.TrimRight(r[:i], " ")
+			before = strings.TrimSuffix(before, `\s+`)
+			before = strings.TrimSuffix(before, `\s*`)
+			return strings.HasSuffix(before, "}")
+		}
+	}
+	return false
 }

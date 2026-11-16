@@ -1,0 +1,55 @@
+name: cloud-nightly
+
+# A scan and report against the Grafana Cloud test stack (docs/grafana-cloud.md).
+# Skips when the repo has no TVT_CLOUD_* secrets, so forks stay green.
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    env:
+      HAVE_CLOUD: ${{ secrets.TVT_CLOUD_TOKEN != '' && secrets.TVT_CLOUD_GRAFANA_TOKEN != '' }}
+    steps:
+      - name: Skip without the Cloud secrets
+        if: env.HAVE_CLOUD != 'true'
+        run: echo "TVT_CLOUD_* secrets not set; skipping the Cloud scan."
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: env.HAVE_CLOUD == 'true'
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        if: env.HAVE_CLOUD == 'true'
+        with:
+          go-version-file: go.mod
+      - name: Build
+        if: env.HAVE_CLOUD == 'true'
+        run: make build
+      - name: Scan and report the Cloud test stack
+        if: env.HAVE_CLOUD == 'true'
+        env:
+          TVT_GRAFANA_TOKEN: ${{ secrets.TVT_CLOUD_GRAFANA_TOKEN }}
+          TVT_PROM_USER: ${{ secrets.TVT_CLOUD_PROM_USER }}
+          TVT_PROM_TOKEN: ${{ secrets.TVT_CLOUD_TOKEN }}
+          TVT_LOKI_USER: ${{ secrets.TVT_CLOUD_LOKI_USER }}
+          TVT_LOKI_TOKEN: ${{ secrets.TVT_CLOUD_TOKEN }}
+          GRAFANA_URL: ${{ secrets.TVT_CLOUD_GRAFANA_URL }}
+          PROM_URL: ${{ secrets.TVT_CLOUD_PROM_URL }}
+          LOKI_URL: ${{ secrets.TVT_CLOUD_LOKI_URL }}
+        run: |
+          ./bin/tvt scan --grafana-edition cloud --grafana "$GRAFANA_URL" \
+            --mimir "$PROM_URL" --loki "$LOKI_URL" \
+            --config examples/tvt.cloud.yaml --db cloud.db
+          ./bin/tvt report --db cloud.db --json report.json --html report.html
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: env.HAVE_CLOUD == 'true'
+        with:
+          name: cloud-report
+          path: |
+            report.json
+            report.html
+          retention-days: 14
