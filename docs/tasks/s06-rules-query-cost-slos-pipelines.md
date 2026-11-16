@@ -16,7 +16,7 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md`, `docs/query-lo
 3. **SLO coverage report.** From the SLOs and rules read in Sprint 2: services with no SLO, paging alerts that aren't burn-rate alerts, and SLOs with no alert. Report only.
 4. **Pipeline targets** (ADR 0007). Read `pipelines:` from `tvt.yaml` and match each signal against every pipeline's `handles:` selectors. Exactly one match is its target; none or two is "unmapped", reported with its savings but not proposable, and recorded as a gap. Every report row shows its target pipeline or "unmapped". Golden test against the `pipelines:` section of the lab ground truth.
 5. **Overflow series are an evidence gap.** When series with `otel.metric.overflow="true"` exist, real cardinality is higher than the backend shows and those points lost their labels. Flag the metric, mark its cost as a floor, and warn any reader that filters on a capped dimension.
-6. **The report on Grafana Cloud.** Run `tvt scan` and `tvt report` against the Cloud test stack in the nightly job from Sprint 2 item 11: costs from the provisioned usage data source's billing metrics and Grafana Cloud list prices (negotiated rates as a `tvt.yaml` override), and the Cloud gaps (Usage Insights missing on the plan, direct Loki API queries) in the header.
+6. **The report on Grafana Cloud.** Done Nov 16 (`docs/grafana-cloud.md`). Run `tvt scan` and `tvt report` against the Cloud test stack in the nightly job from Sprint 2 item 11: costs from the provisioned usage data source's billing metrics and Grafana Cloud list prices (negotiated rates as a `tvt.yaml` override), and the Cloud gaps (Usage Insights missing on the plan, direct Loki API queries) in the header.
 
 ## Should have
 
