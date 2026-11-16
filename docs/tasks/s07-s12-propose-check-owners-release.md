@@ -86,3 +86,4 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 3. **Docs for every command.**
 4. **The README claim:** "Every signal tvt marks unread had no reader in your evidence window, and every gap is listed. If you find a reader we missed, that's a bug, and the benchmark gets a new case."
 5. **Sensitive content note.** In the report, unread attributes whose names mark them as prompts, responses, emails or host paths are flagged beside their saving. tvt reads key names and sizes only, never values.
+6. **tvt's own telemetry stays lean.** Signal names and query text stay out of tvt's telemetry by default (the spec's detail level). When opted in, attributes are capped at 512 characters with a truncated marker, and no per-scan or per-signal identifier goes on a metric, so a tvt scan of its own telemetry finds nothing to cut.
