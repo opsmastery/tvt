@@ -179,6 +179,9 @@ func newLabAt(t *testing.T, dir string, override map[string]http.HandlerFunc) la
 			promOverride[path] = h
 		}
 	}
+	for path, h := range overflowRoutes(t, dir, "", promOverride["/api/v1/series"]) {
+		promOverride[path] = h
+	}
 	prom := fixtureServerAt(t, dir, map[string]string{
 		"/api/v1/status/tsdb":      "prometheus/tsdb.json",
 		"/api/v1/rules":            "prometheus/rules.json",
@@ -267,6 +270,66 @@ func labelMetricsRoutes(t *testing.T, dir string) map[string]http.HandlerFunc {
 		reply(w, recorded[m[1]][v])
 	}
 	return routes
+}
+
+// overflowRoutes answer the overflow reader (S6 item 5) from the snapshot's
+// prometheus/overflow.json ({"series": [...], "labels": {metric: [names]}},
+// recorded by capture-fixtures.sh): /api/v1/series for an
+// otel.metric.overflow match, and /api/v1/labels for a metric's names. A
+// snapshot without the file has no overflow series. Other series requests
+// go to next (nil: none expected). prefix is "/prometheus" for Mimir.
+func overflowRoutes(t *testing.T, dir, prefix string, next http.HandlerFunc) map[string]http.HandlerFunc {
+	t.Helper()
+	var rec struct {
+		Series []map[string]string `json:"series"`
+		Labels map[string][]string `json:"labels"`
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "prometheus/overflow.json"))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		t.Fatal(err)
+	default:
+		if err := json.Unmarshal(b, &rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply := func(w http.ResponseWriter, data any) {
+		json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": data})
+	}
+	nameRe := regexp.MustCompile(`^\{__name__="([^"]+)"\}$`)
+	return map[string]http.HandlerFunc{
+		prefix + "/api/v1/series": func(w http.ResponseWriter, r *http.Request) {
+			m := r.URL.Query().Get("match[]")
+			switch {
+			case m == `{otel_metric_overflow="true"}`:
+				reply(w, cmpNil(rec.Series))
+			case m == `{"otel.metric.overflow"="true"}`:
+				reply(w, []map[string]string{}) // recorded with dots translated
+			case next != nil:
+				next(w, r)
+			default:
+				t.Errorf("unexpected series match[] %q", m)
+				http.NotFound(w, r)
+			}
+		},
+		prefix + "/api/v1/labels": func(w http.ResponseWriter, r *http.Request) {
+			m := nameRe.FindStringSubmatch(r.URL.Query().Get("match[]"))
+			if m == nil {
+				t.Errorf("labels match[] %q: not one metric name", r.URL.Query().Get("match[]"))
+				http.NotFound(w, r)
+				return
+			}
+			reply(w, cmpNil(rec.Labels[m[1]]))
+		},
+	}
+}
+
+func cmpNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }
 
 // patternsRoute serves the snapshot's recorded pattern API answers
@@ -727,17 +790,19 @@ func TestScanLab(t *testing.T) {
 	// recorded as not configured. SLO definitions and runbooks are read in
 	// full: the Sloth SLO and the ShopPaymentQueueBacklog runbook. So are
 	// the datasources of every dashboard and Grafana rule query. The lab's
-	// Prometheus has a retention.size, so its storage has no warning.
+	// Prometheus has a retention.size, so its storage has no warning. The
+	// snapshot predates the overflow seed: overflow series were looked for
+	// and none found (S6 item 5).
 	srcs, err := st.Sources(ctx, info.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(srcs) != 7 || l.probes.Load() != 1 {
+	if len(srcs) != 8 || l.probes.Load() != 1 {
 		t.Fatalf("sources = %+v, probes %d", srcs, l.probes.Load())
 	}
 	for _, s := range srcs {
 		// Every lab dashboard and Grafana rule query is Prometheus or Loki.
-		if s.Source == scan.SourceSLOs || s.Source == scan.SourceRunbooks || s.Source == scan.SourceDatasources || s.Source == scan.SourceStorage {
+		if s.Source == scan.SourceSLOs || s.Source == scan.SourceRunbooks || s.Source == scan.SourceDatasources || s.Source == scan.SourceStorage || s.Source == scan.SourceOverflow {
 			// The lab config names no owners, so SLO coverage can't list
 			// services without an SLO (S6 item 3).
 			gap := s.Gap
@@ -800,8 +865,9 @@ func TestScanLabMimir(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := &testutil.MimirNames{T: t, Names: testutil.LoadMimirNames(t, filepath.Join(lab, "mimir/label_values_name_by_prefix.json")), Top: top}
-	mimirSrv := fixtureServer(t, map[string]string{"/prometheus/api/v1/rules": "mimir/rules.json"},
-		map[string]http.HandlerFunc{testutil.MimirLabelValuesPath: names.ServeHTTP})
+	mimirRoutes := overflowRoutes(t, lab, "/prometheus", nil)
+	mimirRoutes[testutil.MimirLabelValuesPath] = names.ServeHTTP
+	mimirSrv := fixtureServer(t, map[string]string{"/prometheus/api/v1/rules": "mimir/rules.json"}, mimirRoutes)
 
 	db := filepath.Join(t.TempDir(), "tvt.db")
 	o := labOptions(l, db)
@@ -1056,8 +1122,10 @@ func TestScanQueryLogsMimirLoki(t *testing.T) {
 	}
 	names := &testutil.MimirNames{T: t, Names: testutil.LoadMimirNames(t, filepath.Join(lab, "mimir/label_values_name_by_prefix.json")), Top: top}
 	mimirProbes := &atomic.Int32{}
-	mimirSrv := fixtureServer(t, map[string]string{"/prometheus/api/v1/rules": "mimir/rules.json"},
-		map[string]http.HandlerFunc{testutil.MimirLabelValuesPath: names.ServeHTTP, "/prometheus/api/v1/query": probeSink(t, "", mimirProbes)})
+	mimirRoutes := overflowRoutes(t, lab, "/prometheus", nil)
+	mimirRoutes[testutil.MimirLabelValuesPath] = names.ServeHTTP
+	mimirRoutes["/prometheus/api/v1/query"] = probeSink(t, "", mimirProbes)
+	mimirSrv := fixtureServer(t, map[string]string{"/prometheus/api/v1/rules": "mimir/rules.json"}, mimirRoutes)
 
 	db := filepath.Join(t.TempDir(), "tvt.db")
 	o := labOptions(l, db)

@@ -212,7 +212,7 @@ func TestReportGapsAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"version":9`, `"pipelines":{"pipelines":[],"unmapped":{"name":"unmapped","recommendations":0,"savings":0},"unmapped_streams":[]}`, `"slo_coverage":{"services_without_slo":[],"paging_not_burn_rate":[],"slos_without_alert":[]}`, `"slo_findings":0`, `"line_findings":[]`, `"rules":[]`, `"query_load":{"queries":0,"samples":0,"bytes":0,"clients":[],"top":[]}`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
+	for _, key := range []string{`"version":10`, `"overflow":[]`, `"overflow":0`, `"pipelines":{"pipelines":[],"unmapped":{"name":"unmapped","recommendations":0,"savings":0},"unmapped_streams":[]}`, `"slo_coverage":{"services_without_slo":[],"paging_not_burn_rate":[],"slos_without_alert":[]}`, `"slo_findings":0`, `"line_findings":[]`, `"rules":[]`, `"query_load":{"queries":0,"samples":0,"bytes":0,"clients":[],"top":[]}`, `"rule_findings":0`, `"claim"`, `"evidence"`, `"cheapest_check"`, `"check_minutes"`, `"downstream"`,
 		`"savings"`, `"risk_if_wrong"`, `"assumptions"`, `"status":"open"`, `"savings_per_minute"`} {
 		if !strings.Contains(string(b), key) {
 			t.Errorf("JSON has no %s", key)
@@ -592,5 +592,54 @@ func TestPipelineTargetsReport(t *testing.T) {
 		if !strings.Contains(page.String(), s) {
 			t.Errorf("HTML lacks %q", s)
 		}
+	}
+}
+
+func TestOverflowReport(t *testing.T) {
+	in := Input{
+		Scan: Scan{ID: 1, StartedAt: time.Date(2026, 11, 16, 1, 0, 0, 0, time.UTC), Currency: "USD"},
+		Signals: []graph.Signal{
+			{ID: "prom:metric:a", Kind: graph.KindMetric, Name: "a", Source: "prom", Class: "candidate"},
+			{ID: "prom:metric:b", Kind: graph.KindMetric, Name: "b", Source: "prom", Class: "candidate"},
+		},
+		Costs: []graph.Cost{{SignalID: "prom:metric:a", MonthlyCost: 10}, {SignalID: "prom:metric:b", MonthlyCost: 4}},
+		Scores: []graph.Score{
+			{SignalID: "prom:metric:a", Confidence: 1, Priority: 10},
+			{SignalID: "prom:metric:b", Confidence: 1, Priority: 4},
+		},
+		Sources: []graph.SourceCoverage{{Source: scan.SourceOverflow, Configured: true, Coverage: 1,
+			Gap: "a: 1 overflow series (otel.metric.overflow): real cardinality is higher than shown, cost is a floor; capped labels customer_id"}},
+		OverflowFindings: []graph.OverflowFinding{
+			{Signal: "prom:metric:a", Series: 1, Capped: []string{"customer_id"}, Readers: []string{"qlog:prom:x\tcustomer_id"}},
+		},
+	}
+	r := Build(in, 0)
+	if r.Totals.Overflow != 1 || len(r.Overflow) != 1 {
+		t.Fatalf("overflow %+v, total %d", r.Overflow, r.Totals.Overflow)
+	}
+	o := r.Overflow[0]
+	if o.Metric != "a" || o.Series != 1 || len(o.Readers) != 1 || o.Readers[0].Consumer != "qlog:prom:x" || o.Readers[0].Labels[0] != "customer_id" || o.Detail == "" || o.Fix == "" {
+		t.Errorf("row %+v", o)
+	}
+	for _, rec := range r.Recommendations {
+		floor := rec.Signal.ID == "prom:metric:a"
+		gap := slices.ContainsFunc(rec.Evidence.Gaps, func(g string) bool { return strings.Contains(g, "overflow series") })
+		if rec.CostFloor != floor || gap != floor {
+			t.Errorf("%s: cost floor %v, overflow gap %v", rec.Signal.ID, rec.CostFloor, gap)
+		}
+	}
+	if !slices.ContainsFunc(r.Gaps, func(g Gap) bool { return g.Kind == GapOverflow }) {
+		t.Errorf("header gaps %+v: want an overflow gap", r.Gaps)
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page strings.Builder
+	if err := RenderHTMLFromJSON(&page, b); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(page.String(), "Overflow series") || !strings.Contains(page.String(), "at least") {
+		t.Error("HTML lacks the overflow section or the cost floor")
 	}
 }
