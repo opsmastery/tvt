@@ -261,6 +261,9 @@ func (c *Client) convert(ctx context.Context, raw rawDashboard, h searchHit, dss
 			}
 			src := p
 			if p.LibraryPanel != nil && p.LibraryPanel.UID != "" {
+				if c == nil {
+					return fmt.Errorf("panel %d (%q) %w", p.ID, p.Title, errLibraryPanelFile)
+				}
 				model, err := c.libraryPanel(ctx, p.LibraryPanel.UID, libs)
 				if err != nil {
 					return err
