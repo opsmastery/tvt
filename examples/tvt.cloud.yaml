@@ -1,0 +1,6 @@
+# tvt.yaml for a Grafana Cloud stack (docs/grafana-cloud.md).
+# Credentials never go here: they come from TVT_GRAFANA_TOKEN,
+# TVT_PROM_USER / TVT_PROM_TOKEN and TVT_LOKI_USER / TVT_LOKI_TOKEN.
+
+# List prices for Grafana Cloud Pro, pay as you go (pkg/cost/presets).
+pricecard: grafana-cloud

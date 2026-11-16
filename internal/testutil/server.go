@@ -39,6 +39,12 @@ func forbidden(r *http.Request) bool {
 			return false
 		}
 	}
+	// Usage Insights (Grafana Cloud's view events) is read through the
+	// data source proxy, tagged as tvt's own; nothing else may be.
+	if strings.HasPrefix(path, "/api/datasources/proxy/uid/"+collect.UsageInsightsUID+"/loki/api/v1/query_range") &&
+		r.Header.Get("X-Query-Tags") == collect.UsageInsightsTag {
+		return false
+	}
 	for _, suffix := range []string{"/api/v1/query", "/api/v1/query_range"} {
 		if strings.HasSuffix(path, suffix) {
 			return true

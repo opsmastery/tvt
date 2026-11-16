@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -102,5 +103,34 @@ func TestLabelMetricsError(t *testing.T) {
 	})})
 	if got, err := New(srv.URL, "").LabelMetrics(context.Background(), []string{"job"}); err == nil || got != nil {
 		t.Errorf("got %v, %v: want an error and nothing", got, err)
+	}
+}
+
+func TestSelectorMetrics(t *testing.T) {
+	now := time.Date(2026, 11, 16, 22, 0, 0, 0, time.UTC)
+	srv := testutil.Serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/label/__name__/values" {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.URL.Query().Get("match[]") {
+		case `{asserts_metric_request="total"}`:
+			fmt.Fprint(w, `{"status":"success","data":["b_total","a_total"]}`)
+		case `{team="none"}`:
+			fmt.Fprint(w, `{"status":"success","data":[]}`)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"status":"error","errorType":"bad_data","error":"vector selector must contain at least one non-empty matcher"}`)
+		}
+	}))
+	c := New(srv.URL, "")
+	c.Now = func() time.Time { return now }
+	got, err := c.SelectorMetrics(context.Background(), []string{`{asserts_metric_request="total"}`, `{team="none"}`, `{x=~".*"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{`{asserts_metric_request="total"}`: {"a_total", "b_total"}, `{team="none"}`: {}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v (a refused selector is left out)", got, want)
 	}
 }

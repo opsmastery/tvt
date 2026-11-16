@@ -1,0 +1,21 @@
+{
+ "status": "success",
+ "data": {
+  "resultType": "streams",
+  "result": [
+   {
+    "stream": {
+     "detected_level": "info",
+     "instance_type": "grafana",
+     "service_name": "grafana"
+    },
+    "values": [
+     [
+      "1794867152510373797",
+      "logger=usageinsights.events t=2026-11-16T22:12:32.510318859Z level=info msg=\"Usage insights event\" insight_logs=true eventName=dashboard-view folderName=GrafanaCloud dashboardName=Billing/Usage dashboardUid=6bab3e39-ef89-44f3-bb03-e0f8ab2bb238 orgId=1 orgName=\"Main Org.\" timestamp=2026-11-16T22:12:32.46432556Z tokenId=redacted username=jason userId=redacted totalQueries=0 cachedQueries=0"
+     ]
+    ]
+   }
+  ]
+ }
+}

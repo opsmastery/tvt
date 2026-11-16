@@ -1085,6 +1085,8 @@ func TestMimirAPI(t *testing.T) {
 		"http://mimir:9009/prometheus": "http://mimir:9009/prometheus",
 		"http://gw/mimir/prometheus/":  "http://gw/mimir/prometheus/",
 		"https://gw/tenant-a":          "https://gw/tenant-a/prometheus",
+		"https://prometheus-prod-67-prod-us-west-0.grafana.net/api/prom": "https://prometheus-prod-67-prod-us-west-0.grafana.net/api/prom",
+		"%zz": "%zz",
 	} {
 		if got := mimirAPI(in); got != want {
 			t.Errorf("mimirAPI(%q) = %q, want %q", in, got, want)

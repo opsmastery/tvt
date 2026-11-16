@@ -58,9 +58,17 @@ func (e *httpError) Error() string {
 
 // getJSON GETs path (relative to BaseURL) and decodes the body into v.
 func (c *Client) getJSON(ctx context.Context, path string, q url.Values, v any) error {
+	return c.getJSONWith(ctx, path, q, nil, v)
+}
+
+// getJSONWith is getJSON with extra request headers.
+func (c *Client) getJSONWith(ctx context.Context, path string, q url.Values, hdr map[string]string, v any) error {
 	req, err := httpx.NewRequest(ctx, c.BaseURL, path, q, c.Token)
 	if err != nil {
 		return fmt.Errorf("grafana: %s: %w", path, err)
+	}
+	for k, val := range hdr {
+		req.Header.Set(k, val)
 	}
 
 	resp, err := c.httpClient().Do(req)
