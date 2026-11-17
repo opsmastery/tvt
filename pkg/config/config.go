@@ -99,6 +99,9 @@ type Pipeline struct {
 	// series and log streams this pipeline ingests.
 	Handles   []string `yaml:"handles"`
 	Reviewers []string `yaml:"reviewers"`
+	// Checkout is a local checkout of Repo (relative to tvt.yaml): tvt
+	// scan reads the pipeline's rewrites from Files there (S7 item 9).
+	Checkout string `yaml:"checkout"`
 }
 
 // Records declares records: metrics entries are anchored regexes, streams
@@ -298,6 +301,11 @@ func Load(path string) (*Config, error) {
 	}
 	for i, p := range c.Kubernetes.Manifests {
 		c.Kubernetes.Manifests[i] = relTo(dir, p)
+	}
+	for i, p := range c.Pipelines {
+		if p.Checkout != "" {
+			c.Pipelines[i].Checkout = relTo(dir, p.Checkout)
+		}
 	}
 	if isPath(c.PriceCard) {
 		c.PriceCard = relTo(dir, c.PriceCard)
