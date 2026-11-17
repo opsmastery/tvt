@@ -24,6 +24,9 @@ type Drop struct {
 	// that sees OTel names (Otelcol) matches every OTel name that
 	// translates to one of them (OtelConditions, S7 item 9).
 	PromNames bool
+	// Collector is the target Collector's version, when known: it picks
+	// the OTTL form (OTTLFormFor, S7 item 7).
+	Collector string
 }
 
 // Regex is the relabel regex that matches exactly d.Metrics (anchored by
