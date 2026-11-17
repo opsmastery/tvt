@@ -129,6 +129,10 @@ type Records struct {
 type HelmValues struct {
 	File string `yaml:"file"`
 	Path string `yaml:"path"`
+	// Defaults is the chart's own values.yaml (helm show values) at the
+	// deployed version, a path in the repo: Helm replaces lists, so a new
+	// list key in File starts with the chart's default rules from it.
+	Defaults string `yaml:"defaults"`
 }
 
 // Clients identifies query-log clients.

@@ -1,0 +1,13 @@
+# A team's kube-prometheus-stack overlay (tvt S7 item 3 fixture).
+grafana:
+  enabled: true
+kubelet:
+  serviceMonitor:
+    interval: 30s
+kubeApiServer:
+  serviceMonitor:
+    metricRelabelings:
+      # The team's own rule, which replaced the chart's default.
+      - action: drop
+        regex: apiserver_watch_events_sizes_bucket
+        sourceLabels: [__name__]
