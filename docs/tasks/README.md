@@ -10,7 +10,7 @@ From Sprint 3 on, sprints are two working days, each with one theme. They're ord
 | S4 | [s04](s04-report-v1.md) | Report v1 | First report in under 30 minutes on the lab | Done Nov 14 |
 | S5 | [s05](s05-benchmark-and-log-findings.md) | Benchmark and log findings | Benchmark baseline recorded; a deliberately broken parser change fails CI | Done Nov 15 |
 | S6 | [s06](s06-rules-query-cost-slos-pipelines.md) | Rules, query cost, SLOs, pipelines | All rule and pipeline findings match ground truth; the report runs on the Grafana Cloud test stack | Done Nov 16 (item 6 on the Grafana Cloud test stack, `docs/grafana-cloud.md`) |
-| S7 | [s07](s07-writers.md) | Writers | `propose` opens a draft PR against the lab pipelines repo for each writer kind | In progress (PRs #93–#122): code done except records for spans; open: the done-when on the live lab (needs tvt-lab seeds and a `GITHUB_TOKEN` run) |
+| S7 | [s07](s07-writers.md) | Writers | `propose` opens a draft PR against the lab pipelines repo for each writer kind | In progress (PRs #93–#122): code done (records for spans moved to S8 item 13); open: the done-when on the live lab (needs tvt-lab seeds and a `GITHUB_TOKEN` run) |
 | S8 | [s08](s08-check-safety-gate.md) | `check`, the safety gate | Every unsafe case in ground truth is refused, with the reason in the `check` output | Next. Before it: the OTTL corpus test (ADR 0012) |
 | S9 | [s09](s09-owner-workflow.md) | Owner workflow | A lab drop goes from draft to ready only after a recorded confirmation, and changing its evidence reopens it | Planned |
 | S10 | [s10](s10-reduce-before-drop.md) | Reduce before drop | For each lab finding, `propose` picks the least-lossy action that `check` accepts | Planned |

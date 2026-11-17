@@ -50,6 +50,7 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 - A Collector filter that reads an attribute a later processor sets (`check` refuses it), an uncast status-code comparison and a regex statement with no `where` (S16 flags both).
 - The expected worst-case detection delay for each lab alert, and a scrape interval change that pushes one past its objective.
+- Span records (S8 item 13), as trace pipeline fixtures beside the agent's real spans. Refused: a `filter` on `span.attributes["success"] == true` in the traces pipeline, a `probabilistic_sampler` on the traces pipeline, `tail_sampling` with no policy that keeps `execute_tool` spans, and a `transform` that deletes `gen_ai.tool.call.id`. Accepted: a cap on `tool_parameters` (truncated with a marker attribute). Ground truth names each with its expected `check` result.
 - A routing connector that routes on a span attribute, a count connector that turns shop error logs into a metric an alert reads, and a statement using an experimental OTTL function: the routing attribute and the counted stream are protected, and S16 reports the upgrade risk.
 
 ## S9
