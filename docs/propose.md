@@ -48,6 +48,15 @@ Each rule sits in a marked block (S7 item 10):
 
 `evidence` is a short hash of the scan and the recommendations' evidence; S9 binds approvals to it. Every existing tvt block in a file is removed before the new ones go in, so a rerun replaces the last proposal instead of stacking on it, and every other byte of the file is kept. The patch starts with the recommendations it carries and their claims; `git apply` skips that text.
 
+## Label removals on delta counters
+
+A `label_removal` recommendation on an OTel Collector pipeline (S7 item 8) is written as an ordered pipeline, never a plain label drop. Removing a per-session label (`session.id`, `user.email`) from a delta counter merges every session into one series. After `delta_to_cumulative` that breaks the counter; before it, the merged deltas must be summed over a window, because sessions export separately and `delta_to_cumulative` keeps one point per stream and interval. So tvt adds, just ahead of `delta_to_cumulative` in each metrics pipeline:
+
+1. `transform/tvt_aggregate`: `delete_matching_keys(datapoint.attributes, "^session[^A-Za-z0-9:]+id$") where <the metric's conditions>`, one statement per label, matching the OTel attribute names that translate to the Prometheus label.
+2. `interval/tvt` with `interval: 60s` (the OTel SDKs' default export interval), which sums each merged stream's deltas over the window.
+
+Checked on a live otelcol-contrib 0.165.0 with two sessions sending 5 and 3 tokens a round for three rounds. With the window, the cumulative series read 8, 16, 24 whether the sessions exported together or apart. Without it, apart, it read 5, 10, 15: one session lost each round. A pipeline with no `delta_to_cumulative` is refused (no delta counter to protect), and so is a Collector before v0.122.0 (the oldest the ordered pipeline was validated on). A custom build gets `transformprocessor` and `intervalprocessor` added to its manifest. Pseudonymising an ID (SHA256 cut to 16 hex characters) instead of deleting it waits for a recommendation that asks for it.
+
 ## OTTL by Collector version
 
 `pipelines[].version` in `tvt.yaml` records the Collector version (S7 item 7), and picks how the filter's conditions are written. Each boundary was checked with `otelcol-contrib validate` on the real image, and both forms were run on live Collectors, which dropped exactly the matching metric:

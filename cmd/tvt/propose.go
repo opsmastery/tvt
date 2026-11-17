@@ -149,7 +149,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		switch {
 		case !rec.Proposable:
 			skipped = append(skipped, proposal{Rec: rec, Note: "not proposable: " + cmp.Or(rec.PipelineNote, "no pipeline")})
-		case !(rec.Action == report.ActionDrop && rec.Signal.Kind == string(graph.KindMetric)) && !(rec.Action == report.ActionReroute && rec.Signal.Kind == string(graph.KindStream)):
+		case !(rec.Action == report.ActionDrop && rec.Signal.Kind == string(graph.KindMetric)) && !(rec.Action == report.ActionReroute && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionLabelRemoval && rec.Signal.Kind == string(graph.KindLabel)):
 			skipped = append(skipped, proposal{Rec: rec, Note: "no writer for " + rec.Action + " of a " + rec.Signal.Kind + " yet"})
 		default:
 			byPipeline[rec.Pipeline] = append(byPipeline[rec.Pipeline], rec)
@@ -212,6 +212,10 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 				skipped = append(skipped, proposal{Rec: rec, Note: "a prometheus-operator pipeline carries metrics; no writer for reroute there"})
 				continue
 			}
+			if rec.Action == report.ActionLabelRemoval {
+				skipped = append(skipped, proposal{Rec: rec, Note: "no writer for label removals in prometheus-operator pipelines yet"})
+				continue
+			}
 			drops = append(drops, rec)
 		}
 		w, s, diff := proposeMonitors(p, drops, jobs, root, scan, check)
@@ -232,6 +236,10 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 	for _, rec := range recs {
 		if rec.Action == report.ActionReroute {
 			skipped = append(skipped, proposal{Rec: rec, Note: "no writer for stream reroutes in " + p.Kind + " pipelines yet"})
+			continue
+		}
+		if rec.Action == report.ActionLabelRemoval && p.Kind != "otelcol" {
+			skipped = append(skipped, proposal{Rec: rec, Note: "no writer for label removals in " + p.Kind + " pipelines yet"})
 			continue
 		}
 		drops = append(drops, rec)
@@ -464,15 +472,41 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 		return nil, skipped, ""
 	}
 	var ok []report.Recommendation
+	var labels []report.Recommendation
 	for _, rec := range recs {
+		if rec.Action == report.ActionLabelRemoval {
+			if _, matchable := propose.OtelConditions(rec.Signal.Parent); !matchable {
+				skipped = append(skipped, proposal{Rec: rec, Note: "its metric may be one series of an OTel histogram"})
+				continue
+			}
+			labels = append(labels, rec)
+			continue
+		}
 		if _, matchable := propose.OtelConditions(rec.Signal.Name); !matchable {
 			skipped = append(skipped, proposal{Rec: rec, Note: "may be one series of an OTel histogram, which a collector can't drop alone"})
 			continue
 		}
 		ok = append(ok, rec)
 	}
-	if len(ok) == 0 {
+	if len(ok) == 0 && len(labels) == 0 {
 		return nil, skipped, ""
+	}
+	// Label removals: the ordered pipeline for delta counters (S7 item 8).
+	var agg *propose.Aggregate
+	if len(labels) > 0 {
+		a := propose.Aggregate{ID: p.Name + "/labels", Scan: scan, Collector: p.Version, Labels: map[string][]string{}}
+		d := dropOf(a.ID, labels, scan)
+		a.Evidence = d.Evidence
+		var names []string
+		for _, rec := range labels {
+			a.Labels[rec.Signal.Parent] = append(a.Labels[rec.Signal.Parent], rec.Signal.Name)
+			if !slices.Contains(names, rec.Signal.Name) {
+				names = append(names, rec.Signal.Name)
+			}
+		}
+		slices.Sort(names)
+		a.Reason = fmt.Sprintf("%s unread on %d %s", strings.Join(names, ", "), len(a.Labels), map[bool]string{true: "metric", false: "metrics"}[len(a.Labels) == 1])
+		agg = &a
 	}
 	var b strings.Builder
 	var failure string
@@ -491,10 +525,14 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 		if len(pipes) == 0 {
 			continue
 		}
-		d := dropOf(p.Name, ok, scan)
-		d.PromNames = true
-		d.Collector = p.Version
-		out, err := propose.Otelcol(src, pipes, d)
+		var dp *propose.Drop
+		if len(ok) > 0 {
+			d := dropOf(p.Name, ok, scan)
+			d.PromNames = true
+			d.Collector = p.Version
+			dp = &d
+		}
+		out, err := propose.OtelcolChanges(src, pipes, dp, agg)
 		if err == nil {
 			err = check(root, f, out)
 		}
@@ -512,14 +550,21 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 		note(form.Note)
 	}
 	if failure == "" {
-		d := dropOf(p.Name, ok, scan)
-		mdiff, err := ensureFilterBuild(p, root, d, note)
+		d := dropOf(p.Name, append(slices.Clone(ok), labels...), scan)
+		var modules []string
+		if len(ok) > 0 {
+			modules = append(modules, propose.FilterProcessorModule)
+		}
+		if agg != nil {
+			modules = append(modules, propose.TransformProcessorModule, propose.IntervalProcessorModule)
+		}
+		mdiff, err := ensureFilterBuild(p, root, d, modules, note)
 		if err != nil {
 			failure = "the Collector build can't take filter/tvt: " + err.Error()
 		}
 		b.WriteString(mdiff)
 	}
-	for _, rec := range ok {
+	for _, rec := range append(slices.Clone(ok), labels...) {
 		if failure != "" {
 			skipped = append(skipped, proposal{Rec: rec, Note: failure})
 		} else {
@@ -627,7 +672,7 @@ func copyTree(src, dst string) error {
 // manifest is pipelines[].build, or a builder-config.yaml next to one of
 // the pipeline's files. With none, the distribution is assumed to be
 // otelcol-contrib, which has the filter processor, and the patch says so.
-func ensureFilterBuild(p config.Pipeline, root string, d propose.Drop, note func(string)) (string, error) {
+func ensureFilterBuild(p config.Pipeline, root string, d propose.Drop, modules []string, note func(string)) (string, error) {
 	path := p.Build
 	if path == "" {
 		for _, f := range p.Files {
@@ -639,21 +684,32 @@ func ensureFilterBuild(p config.Pipeline, root string, d propose.Drop, note func
 		}
 	}
 	if path == "" {
-		note("no ocb builder manifest (pipelines[].build, or builder-config.yaml next to the config): assumed otelcol-contrib, which includes the filter processor")
+		note("no ocb builder manifest (pipelines[].build, or builder-config.yaml next to the config): assumed otelcol-contrib, which includes the processors tvt writes")
 		return "", nil
 	}
 	src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
 	if err != nil {
 		return "", err
 	}
-	out, version, err := propose.EnsureProcessor(src, propose.FilterProcessorModule, d)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", path, err)
-	}
-	if version == "" {
-		note(path + ": already includes the filter processor")
-	} else {
-		note(fmt.Sprintf("%s: adds the filter processor %s (rebuild the Collector with ocb before deploying)", path, version))
+	out := src
+	for i, m := range modules {
+		bm := d
+		bm.ID = fmt.Sprintf("%s/%d", d.ID, i)
+		ensure := propose.EnsureProcessorKeep
+		if i == 0 {
+			ensure = propose.EnsureProcessor // removes tvt's old blocks, once
+		}
+		next, version, err := ensure(out, m, bm)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", path, err)
+		}
+		short := m[strings.LastIndex(m, "/")+1:]
+		if version == "" {
+			note(path + ": already includes " + short)
+		} else {
+			note(fmt.Sprintf("%s: adds %s %s (rebuild the Collector with ocb before deploying)", path, short, version))
+		}
+		out = next
 	}
 	return propose.Diff(path, src, out), nil
 }

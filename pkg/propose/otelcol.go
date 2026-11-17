@@ -51,11 +51,37 @@ func Otelcol(src []byte, pipelines []string, d Drop) ([]byte, error) {
 	if len(pipelines) == 0 {
 		return nil, fmt.Errorf("propose: drop %s: no pipeline to put it in", d.ID)
 	}
+	return OtelcolChanges(src, pipelines, &d, nil)
+}
+
+// OtelcolChanges writes a drop, an aggregation or both into a collector
+// config in one pass (each writer alone would remove the other's blocks):
+// existing tvt blocks and tvt's flow-list entries are removed once, then
+// each change is added.
+func OtelcolChanges(src []byte, pipelines []string, d *Drop, a *Aggregate) ([]byte, error) {
 	out, _, err := stripBlocks(src, "#")
 	if err != nil {
 		return nil, err
 	}
 	if out, err = stripOtelRefs(out); err != nil {
+		return nil, err
+	}
+	if d != nil {
+		if out, err = otelAddFilter(out, pipelines, *d); err != nil {
+			return nil, err
+		}
+	}
+	if a != nil {
+		if out, err = otelAddAggregate(out, pipelines, *a); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// otelAddFilter adds the filter processor to a config with no tvt blocks.
+func otelAddFilter(out []byte, pipelines []string, d Drop) ([]byte, error) {
+	if err := d.validateOtel(); err != nil {
 		return nil, err
 	}
 	root, err := otelRoot(out)
@@ -244,13 +270,13 @@ func stripOtelRefs(src []byte) ([]byte, error) {
 			continue
 		}
 		for _, item := range pr.Content {
-			if item.Value != OtelcolProcessor {
+			if !slices.Contains(tvtProcessors, item.Value) {
 				continue
 			}
 			// The entry and the ", " after it, as tvt wrote them.
 			l := lines[item.Line-1]
 			start := item.Column - 1
-			n := len(OtelcolProcessor)
+			n := len(item.Value)
 			rest := l[start+n:]
 			trimmed := strings.TrimLeft(rest, " ")
 			if strings.HasPrefix(trimmed, ",") {
