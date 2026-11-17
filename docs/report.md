@@ -236,3 +236,29 @@ The scan makes one finding per metric: overflow series count, capped labels, and
 The report (version 10): `overflow` lists each metric with `series`, `capped`, `readers` (consumer and the capped labels it uses), `detail` and `fix`; `totals.overflow` counts them. Each recommendation and confirm row on such a metric (or one of its labels) has `cost_floor: true`, a "cost is a floor" assumption and the `overflow` gap (acknowledgeable). The HTML shows "at least" on those savings and an "Overflow series" section. Never a recommendation or a saving. Golden: `TestOverflow` on the benchmark's `overflow` state against tvt-lab's `overflow:` (each metric, its series and capped labels, and the viewer's customer lookup as the one reader filtering on `customer_id`).
 
 Readers check `version` (now 10: 2 made gaps structured, 3 added `services`, 4 added `scan.repriced_from`, 5 added `line_findings`, 6 added `rules` and `totals.rule_findings`, 7 added `query_load`, 8 added `slo_coverage` and `totals.slo_findings`, 9 added `pipelines` and each row's pipeline, 10 added `overflow`, `totals.overflow` and each row's `cost_floor`) and refuse one they don't know.
+
+## Protection manifest
+
+`tvt report --config tvt.yaml --manifest-dir DIR` also writes one protection manifest per pipeline repo (S7 item 1, ADR 0003 and 0007) to `DIR/<repo>/.tvt/protect.json`, where `<repo>` is the repo path from `tvt.yaml` `pipelines:` with every character but letters, digits, `.`, `_` and `-` replaced by `_`. `tvt check` reads it in that repo's CI, offline, with no credentials; `tvt propose` commits it with its PRs.
+
+A manifest lists every hard keep, keep_high and dormant signal that one of the repo's pipelines handles (records join with S7 item 2), each with its pipeline, owner and protectors: the readers behind its class, declared evidence first, never a sweep. It carries names and kinds only, never query text or values. `generated_at` is the scan's start, and `tvt check` fails a manifest older than its max age. Signals no single pipeline claims are in no manifest, because they're never proposed. Output is sorted and deterministic, so a refresh diffs cleanly.
+
+```json
+{
+  "version": 1,
+  "repo": "github.com/Opsmastery-Summit/tvt-lab",
+  "pipelines": ["alloy-apps", "fluentbit-shop-debug", "otelcol-agent", "prometheus-scrape"],
+  "generated_at": "2026-11-17T07:06:36Z",
+  "scan": 1,
+  "signals": [
+    {"id": "prom:metric:shop_payment_queue_depth", "kind": "metric", "name": "shop_payment_queue_depth",
+     "pipeline": "alloy-apps", "class": "hard_keep", "owner": "shop",
+     "protectors": [{"consumer": "...", "kind": "alert_rule", "name": "ShopPaymentQueueBacklog",
+                     "evidence": "declared", "source": "rules API", "exact": true}]}
+  ],
+  "decisions": [],
+  "acknowledged": []
+}
+```
+
+`decisions` holds owner decisions once the owner workflow exists (S9).
