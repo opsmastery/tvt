@@ -27,6 +27,8 @@ Only recommendations that are `proposable` (mapped to exactly one pipeline), `dr
 - **Prometheus** (`kind: prometheus`): one `metric_relabel_configs` drop rule per scrape job, naming the metrics that job carries. The block ID is `<pipeline>/<job>`.
 - **Alloy** (`kind: alloy`): one `rule` block in each `prometheus.relabel` component the jobs' `prometheus.scrape` components forward to, naming every metric for the pipeline. The block ID is the pipeline's name.
 
+- **OpenTelemetry Collector** (`kind: otelcol`), library only for now: `propose.Otelcol` adds a `filter/tvt` processor with one exact `metric.name == "<name>"` condition per metric and `error_mode: ignore` (a condition that fails to evaluate keeps the data), and lists it first in each metrics pipeline it drops from. In a flow-style list (`[a, b]`) tvt's entry can't carry marker lines, so a rerun takes `filter/tvt` out of the list before writing again. The command skips otelcol pipelines for now: the filter needs the names the receivers emit, and the report holds the backend's names after Prometheus translation (units, `_total`). Mapping them is S7 item 9.
+
 Each rule sits in a marked block (S7 item 10):
 
 ```
