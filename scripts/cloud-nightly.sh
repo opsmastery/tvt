@@ -19,13 +19,18 @@
 #   security add-generic-password -U -s tvt-cloud -a cloud-token -w
 #
 # Reports go to $TVT_CLOUD_OUT (default ~/tvt-cloud/<date>/), kept 14 days.
+#
+# install copies this script to ~/tvt-cloud/bin and the job builds from its
+# own clone in ~/tvt-cloud/tvt: macOS won't let a launchd job read a
+# checkout on an external volume (/Volumes/...) without Full Disk Access.
 set -euo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="${TVT_CLOUD_OUT:-$HOME/tvt-cloud}"
+REPO="${TVT_CLOUD_REPO:-$OUT/tvt}"
 LABEL=com.opsmastery.tvt-cloud-nightly
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 ENVFILE="${TVT_CLOUD_ENV:-$HOME/.config/tvt/cloud.env}"
-OUT="${TVT_CLOUD_OUT:-$HOME/tvt-cloud}"
 KEEP_DAYS=14
 export PATH="/usr/local/go/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 
@@ -71,7 +76,12 @@ run() {
 }
 
 install() {
-  mkdir -p "$HOME/Library/LaunchAgents" "$OUT"
+  mkdir -p "$HOME/Library/LaunchAgents" "$OUT/bin"
+  if [[ ! -d "$REPO/.git" ]]; then
+    git clone --quiet "$(git -C "$HERE" remote get-url origin)" "$REPO"
+  fi
+  cp "$HERE/scripts/cloud-nightly.sh" "$OUT/bin/cloud-nightly.sh"
+  chmod +x "$OUT/bin/cloud-nightly.sh"
   cat >"$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -79,7 +89,7 @@ install() {
 <dict>
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
-  <array><string>$REPO/scripts/cloud-nightly.sh</string></array>
+  <array><string>$OUT/bin/cloud-nightly.sh</string></array>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>17</integer></dict>
   <key>StandardOutPath</key><string>$OUT/nightly.log</string>
@@ -89,7 +99,7 @@ install() {
 EOF
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
-  echo "installed $PLIST (daily at 02:17 local; log $OUT/nightly.log)"
+  echo "installed $PLIST (daily at 02:17 local; builds from $REPO; log $OUT/nightly.log)"
 }
 
 uninstall() {
