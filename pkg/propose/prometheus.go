@@ -149,9 +149,19 @@ func promBlock(indent string, d Drop, withKey bool) string {
 		fmt.Fprintf(&b, "%smetric_relabel_configs:\n", indent)
 		item = indent + "  "
 	}
-	fmt.Fprintf(&b, "%s- source_labels: [__name__]\n", item)
-	fmt.Fprintf(&b, "%s  regex: %s\n", item, strconv.Quote(d.Regex()))
-	fmt.Fprintf(&b, "%s  action: drop\n", item)
+	if len(d.Metrics) > 0 {
+		fmt.Fprintf(&b, "%s- source_labels: [__name__]\n", item)
+		fmt.Fprintf(&b, "%s  regex: %s\n", item, strconv.Quote(d.Regex()))
+		fmt.Fprintf(&b, "%s  action: drop\n", item)
+	}
+	for _, l := range d.Labels {
+		// Emptying a label removes it, on these metrics only.
+		fmt.Fprintf(&b, "%s- source_labels: [__name__]\n", item)
+		fmt.Fprintf(&b, "%s  regex: %s\n", item, strconv.Quote(l.Regex()))
+		fmt.Fprintf(&b, "%s  target_label: %s\n", item, l.Label)
+		fmt.Fprintf(&b, "%s  replacement: \"\"\n", item)
+		fmt.Fprintf(&b, "%s  action: replace\n", item)
+	}
 	fmt.Fprintf(&b, "%s# %s\n", indent, endMarker)
 	return b.String()
 }
@@ -194,11 +204,23 @@ func checkPromDrop(src []byte, job string, d Drop) error {
 		if mrc == nil {
 			break
 		}
-		for _, r := range mrc.Content {
-			if a, re := value(r, "action"), value(r, "regex"); a != nil && re != nil && a.Value == "drop" && re.Value == d.Regex() {
-				return nil
+		has := func(action, regex, target string) bool {
+			for _, r := range mrc.Content {
+				if str(r, "action") == action && str(r, "regex") == regex && str(r, "target_label") == target {
+					return true
+				}
+			}
+			return false
+		}
+		if len(d.Metrics) > 0 && !has("drop", d.Regex(), "") {
+			break
+		}
+		for _, l := range d.Labels {
+			if !has("replace", l.Regex(), l.Label) {
+				return fmt.Errorf("propose: job %s: the edited config lost the rule removing %s", job, l.Label)
 			}
 		}
+		return nil
 	}
 	return fmt.Errorf("propose: job %s: the edited config lost the drop rule", job)
 }
