@@ -560,3 +560,24 @@ func TestProposeAlloyRoutes(t *testing.T) {
 		t.Errorf("the reroute was skipped:\n%s", out.String())
 	}
 }
+
+// TestProposeFluentBitClassic: a fluentbit pipeline whose file is classic
+// .conf gets the rewrite_tag as a [FILTER] section.
+func TestProposeFluentBitClassic(t *testing.T) {
+	root := t.TempDir()
+	b, err := os.ReadFile("../../pkg/propose/testdata/fluent-bit-cold.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "fluent-bit.conf"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sel := `{app="shop", component="api", level="debug"}`
+	rec := report.Recommendation{ID: "reroute:loki:stream:" + sel, Action: report.ActionReroute,
+		Signal: report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel}, Proposable: true}
+	p := config.Pipeline{Name: "fb", Kind: "fluentbit", Files: []string{"fluent-bit.conf"}, Cold: "cold"}
+	written, skipped, diff := proposeFluentBit(p, []report.Recommendation{rec}, root, 3, func(string, string, []byte) error { return nil })
+	if len(written) != 1 || len(skipped) != 0 || !strings.Contains(diff, "+[FILTER]") || !strings.Contains(diff, "+    Rule         $log ^.*$ tvt.cold.shop.debug false") {
+		t.Errorf("written %d skipped %+v\n%s", len(written), skipped, diff)
+	}
+}
