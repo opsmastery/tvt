@@ -1,4 +1,8 @@
-# Task brief: Sprint 1 remainder and testing groundwork
+# S1: collectors, store, `tvt scan`, test groundwork
+
+**Status:** Done Nov 10 (PRs #1–#10, `v0.0.1-rc.1`).
+
+**Done when:** each item below is merged through its own PR with CI green, `make race` passes, and `tvt scan` runs against the live lab with Prometheus and with Mimir (details under "Done when" at the end).
 
 Written Nov 10, 2026. That session has Go, module downloads and the live tvt-lab, which this brief's author didn't. Work in this order, **one branch and one PR per numbered item, each with `--base main`**. Read `CLAUDE.md`, `docs/ROADMAP.md`, `docs/query-logs.md` and the [testing strategy](https://claude.ai/artifact/KLacfcEbfNS9WmaXZHEdWk) first.
 
