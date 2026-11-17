@@ -55,3 +55,63 @@ func TestFirstLines(t *testing.T) {
 		t.Errorf("%q", got)
 	}
 }
+
+func TestKubernetesSchemas(t *testing.T) {
+	root := t.TempDir()
+	if err := writeSchemas(root); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"monitoring.coreos.com/servicemonitor_v1.json", "monitoring.coreos.com/podmonitor_v1.json", "fluentbit.fluent.io/clusterfilter_v1alpha2.json", "fluentbit.fluent.io/clusteroutput_v1alpha2.json"} {
+		if _, err := os.Stat(filepath.Join(root, SchemaDir, filepath.FromSlash(f))); err != nil {
+			t.Error(err)
+		}
+	}
+	if n := Unchecked("Summary: 3 resources found in 1 file - Valid: 2, Invalid: 0, Errors: 0, Skipped: 1"); n != 1 {
+		t.Errorf("unchecked %d", n)
+	}
+}
+
+// TestKubernetesLive runs kubeconform in its image on the kube-prometheus-
+// stack render, the Fluent Operator fixture and a broken ServiceMonitor.
+func TestKubernetesLive(t *testing.T) {
+	if os.Getenv("TVT_TEST_VALIDATORS") == "" {
+		t.Skip("set TVT_TEST_VALIDATORS=1 to run the pipelines' validators")
+	}
+	root, done, err := Scratch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer done()
+	copyFile := func(src, dst string) {
+		b, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(root, dst), b, 0o644)
+	}
+	copyFile("../../testdata/kube-prometheus-stack/render.yaml", "render.yaml")
+	copyFile("../propose/testdata/fluent-operator.yaml", "fo.yaml")
+	os.WriteFile(filepath.Join(root, "bad.yaml"), []byte(`apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata: {name: x}
+spec:
+  selector: {}
+  endpoints:
+    - port: http
+      metricRelabelings:
+        - action: drop
+          sourceLabel: [__name__]
+`), 0o644)
+	o := Options{NoNative: true}
+	ctx := context.Background()
+	for _, f := range []string{"render.yaml", "fo.yaml"} {
+		if r := Run(ctx, "kubernetes", root, f, o); !r.Ran || !r.OK {
+			t.Errorf("%s: %+v", f, r)
+		} else {
+			t.Logf("%s: %s", f, FirstLines(r.Output, 2))
+		}
+	}
+	if r := Run(ctx, "kubernetes", root, "bad.yaml", o); !r.Ran || r.OK || !strings.Contains(r.Output, "sourceLabel") {
+		t.Errorf("bad: %+v", r)
+	}
+}
