@@ -29,7 +29,7 @@ Status is Done, In progress or Planned, with the sprint from `docs/tasks/README.
 | `tvt report` | Ranks recommendations by savings per minute of checking; HTML and JSON | Done (S4) |
 | `tvt why <signal>` | Every reader of a signal, with its source, first and last seen, and whether it's exact or inferred | Done (S4) |
 | `tvt init` | Asks for each backend, tests the URL, token scope and log settings, and writes `tvt.yaml` | Planned (by S12) |
-| `tvt propose` | Writes Prometheus `metric_relabel_configs`, Prometheus Operator `ServiceMonitor`/`PodMonitor` `metricRelabelings` (Helm overlays keep the chart's default drops), Alloy `prometheus.relabel`/`loki.process`, OTel Collector `filter`/`transform` or Fluent Bit filters into the pipeline's repo, one PR per repo | Planned (S7) |
+| `tvt propose` | Writes Prometheus `metric_relabel_configs`, Prometheus Operator `ServiceMonitor`/`PodMonitor` `metricRelabelings` (Helm overlays keep the chart's default drops), Alloy `prometheus.relabel`/`loki.process`, OTel Collector `filter`/`transform` or Fluent Bit filters into the pipeline's repo, one PR per repo | In progress (S7): Prometheus and Alloy drops as patches |
 | `tvt check` | CI gate: fails a config PR that would break an alert, SLO, viewed dashboard or record, or that lacks an acknowledged evidence gap | Planned (S8) |
 
 MVP scope in more detail:

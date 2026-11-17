@@ -805,8 +805,13 @@ var v22Drops = append(append([]string{}, v23Drops...),
 )
 
 // v23Drops turns a current database's tables back into version 22's.
-var v23Drops = []string{
+var v23Drops = append(append([]string{}, v24Drops...),
 	`ALTER TABLE signals DROP COLUMN record`,
+)
+
+// v24Drops turns a current database's tables back into version 23's.
+var v24Drops = []string{
+	`ALTER TABLE pipeline_targets DROP COLUMN jobs`,
 }
 
 // v15Drops turns a current database's tables back into version 14's
@@ -1511,5 +1516,34 @@ func TestRecordUpgrade(t *testing.T) {
 	defer s2.Close()
 	if sigs, err = s2.Signals(ctx, id); err != nil || len(sigs) != 1 || sigs[0].Record != "" {
 		t.Fatalf("upgraded signals %+v, %v: want one, not a record", sigs, err)
+	}
+}
+
+// TestPipelineJobsUpgrade: a pipeline target's jobs round-trip (S7 item
+// 3), and a version 23 database upgrades with no jobs recorded.
+func TestPipelineJobsUpgrade(t *testing.T) {
+	s, path := open(t)
+	id := scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, graph.Signal{ID: "prom:metric:a", Kind: graph.KindMetric, Name: "a", Source: "prom"}))
+		must(t, sc.PutPipelineTarget(ctx, graph.PipelineTarget{Subject: "prom:metric:a", Pipeline: "scrape", Jobs: []string{"node", "shop"}}))
+	})
+	ts, err := s.PipelineTargets(ctx, id)
+	must(t, err)
+	if len(ts) != 1 || strings.Join(ts[0].Jobs, ",") != "node,shop" {
+		t.Fatalf("targets %+v", ts)
+	}
+	s.Close()
+	raw, err := sql.Open("sqlite", path)
+	must(t, err)
+	for _, q := range append(append([]string{}, v24Drops...), `UPDATE meta SET value = '23' WHERE key = 'schema_version'`) {
+		_, err := raw.Exec(q)
+		must(t, err)
+	}
+	raw.Close()
+	s2, err := Open(ctx, path)
+	must(t, err)
+	defer s2.Close()
+	if ts, err = s2.PipelineTargets(ctx, id); err != nil || len(ts) != 1 || ts[0].Jobs != nil || ts[0].Pipeline != "scrape" {
+		t.Fatalf("upgraded targets %+v, %v: want one, with no jobs", ts, err)
 	}
 }
