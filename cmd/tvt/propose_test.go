@@ -581,3 +581,28 @@ func TestProposeFluentBitClassic(t *testing.T) {
 		t.Errorf("written %d skipped %+v\n%s", len(written), skipped, diff)
 	}
 }
+
+// TestProposeFluentBitHelm: a fluentbit pipeline with helm_values gets the
+// reroute in the overlay's config.filters, starting from the chart's
+// default filters.
+func TestProposeFluentBitHelm(t *testing.T) {
+	root := t.TempDir()
+	for src, dst := range map[string]string{
+		"../../pkg/propose/testdata/fluent-bit-values.yaml": "values.yaml",
+		"../../testdata/fluent-bit-chart/values.yaml":       "chart-values.yaml",
+	} {
+		b, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(root, dst), b, 0o644)
+	}
+	sel := `{app="shop", component="api", level="debug"}`
+	rec := report.Recommendation{ID: "reroute:loki:stream:" + sel, Action: report.ActionReroute,
+		Signal: report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel}, Proposable: true}
+	p := config.Pipeline{Name: "fb", Kind: "fluentbit", Cold: "cold", HelmValues: &config.HelmValues{File: "values.yaml", Defaults: "chart-values.yaml"}}
+	written, skipped, diff := proposeFluentBitHelm(p, []report.Recommendation{rec}, root, 3, func(string, string, []byte) error { return nil })
+	if len(written) != 1 || len(skipped) != 0 || !strings.Contains(diff, "+        Name kubernetes") || !strings.Contains(diff, "+        Rule         $log ^.*$ tvt.cold.shop.debug false") {
+		t.Errorf("written %d skipped %+v\n%s", len(written), skipped, diff)
+	}
+}

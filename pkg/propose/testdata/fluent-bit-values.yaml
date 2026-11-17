@@ -1,0 +1,21 @@
+# A team's fluent/fluent-bit overlay (tvt S7 item 3 fixture): a static
+# tail input for one app's debug file, Loki and a cold output.
+config:
+  inputs: |
+    [INPUT]
+        Name tail
+        Tag shop.debug
+        Path /var/log/shop/debug.log
+
+  outputs: |
+    [OUTPUT]
+        Name loki
+        Match shop.debug
+        Host loki
+        Labels app=shop, component=api, level=debug
+
+    [OUTPUT]
+        Name file
+        Alias cold
+        Match tvt.cold.*
+        Path /tmp/cold

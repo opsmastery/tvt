@@ -226,8 +226,10 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		switch {
 		case !ok:
 			return skipAll("no --checkout for " + p.Repo)
+		case p.HelmValues != nil:
+			return proposeFluentBitHelm(p, recs, root, scan, check)
 		case len(p.Files) == 0:
-			return skipAll("pipeline " + p.Name + " lists no files (Helm values aren't written yet)")
+			return skipAll("pipeline " + p.Name + " lists no files or helm_values")
 		}
 		return proposeFluentBit(p, recs, root, scan, check)
 	}
@@ -667,6 +669,15 @@ func (v *validator) check(ctx context.Context, p config.Pipeline) checkFunc {
 			v.notes = append(v.notes, fmt.Sprintf("%s %s: not validated (--validate off)", p.Repo, file))
 			return nil
 		}
+		if p.HelmValues != nil && file == p.HelmValues.File {
+			// A values file isn't the pipeline's config: the chart renders
+			// it. tvt checked the edit against the joined config itself.
+			if v.o.Validate == "require" {
+				return fmt.Errorf("not validated (--validate require): Helm values; render the chart with helm template to check")
+			}
+			v.notes = append(v.notes, fmt.Sprintf("%s %s: NOT VALIDATED: Helm values; render the chart with helm template to check", p.Repo, file))
+			return nil
+		}
 		if v.copies == nil {
 			v.copies = map[string]string{}
 		}
@@ -1098,4 +1109,63 @@ func fluentRoutes(file string) func([]byte, []propose.Route) ([]byte, error) {
 		return propose.FluentBitClassicRoutes
 	}
 	return propose.FluentBitRoutes
+}
+
+// proposeFluentBitHelm writes stream reroutes into the fluent/fluent-bit
+// chart's values (helm_values): a rewrite_tag [FILTER] in config.filters,
+// created from the chart's default filters (helm_values.defaults) when
+// the overlay doesn't set it, since Helm replaces the string.
+func proposeFluentBitHelm(p config.Pipeline, recs []report.Recommendation, root string, scan int64, check checkFunc) (written, skipped []proposal, diff string) {
+	hv := p.HelmValues
+	var ok []report.Recommendation
+	var routes []propose.Route
+	for _, rec := range recs {
+		if rec.Action != report.ActionReroute {
+			skipped = append(skipped, proposal{Rec: rec, Note: "a fluentbit pipeline carries logs; no writer for " + rec.Action + " there"})
+			continue
+		}
+		if p.Cold == "" {
+			skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + p.Name + " names no cold output (tvt.yaml pipelines[].cold)"})
+			continue
+		}
+		labels, err := selectorLabels(rec.Signal.Name)
+		if err != nil {
+			skipped = append(skipped, proposal{Rec: rec, Note: err.Error()})
+			continue
+		}
+		d := dropOf(rec.ID, []report.Recommendation{rec}, scan)
+		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold})
+		ok = append(ok, rec)
+	}
+	fail := func(note string) ([]proposal, []proposal, string) {
+		for _, rec := range ok {
+			skipped = append(skipped, proposal{Rec: rec, Note: note})
+		}
+		return nil, skipped, ""
+	}
+	if len(routes) == 0 {
+		return nil, skipped, ""
+	}
+	if hv.Defaults == "" {
+		return fail("helm_values.defaults names no chart values.yaml; without it tvt can't keep the chart's default filters, which Helm would replace")
+	}
+	src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(hv.File)))
+	if err != nil {
+		return fail(err.Error())
+	}
+	defaults, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(hv.Defaults)))
+	if err != nil {
+		return fail(err.Error())
+	}
+	out, err := propose.FluentBitHelmRoutes(src, defaults, hv.Path, routes)
+	if err == nil {
+		err = check(root, hv.File, out)
+	}
+	if err != nil {
+		return fail(hv.File + ": " + err.Error())
+	}
+	for _, rec := range ok {
+		written = append(written, proposal{Rec: rec})
+	}
+	return written, skipped, propose.Diff(hv.File, src, out)
 }
