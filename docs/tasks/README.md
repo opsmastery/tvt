@@ -10,18 +10,26 @@ From Sprint 3 on, sprints are two working days, each with one theme. They're ord
 | S4 | [s04](s04-report-v1.md) | Report v1 | First report in under 30 minutes on the lab | Done Nov 14 |
 | S5 | [s05](s05-benchmark-and-log-findings.md) | Benchmark and log findings | Benchmark baseline recorded; a deliberately broken parser change fails CI | Done Nov 15 |
 | S6 | [s06](s06-rules-query-cost-slos-pipelines.md) | Rules, query cost, SLOs, pipelines | All rule and pipeline findings match ground truth; the report runs on the Grafana Cloud test stack | Done Nov 16 (item 6 on the Grafana Cloud test stack, `docs/grafana-cloud.md`) |
-| S7–S12 | [s07–s12](s07-s12-propose-check-owners-release.md) | Writers, `check`, owner workflow, reduce before drop, savings ledger, release candidate | `v0.1.0-rc1` tagged; the MVP gate rehearsed on the lab | Next. ADRs 0003 and 0009–0013 accepted Nov 16. tvt-lab's S7 seeds done Nov 17. Before S8: the OTTL corpus test (ADR 0012) |
-| S13–S16 | [s13–s16](s13-s16-alert-noise-agents-collector.md) | Continuous-mode work pulled forward: alert noise, agents and history, Collector and conventions | Each sprint's seeded cases reported correctly | Planned |
+| S7 | [s07](s07-writers.md) | Writers | `propose` opens a draft PR against the lab pipelines repo for each writer kind | In progress (PRs #93–#118); open: items 2 (spans), 3 (PRs, with S9), 8 (pseudonymised IDs), 9 (OTel `attributes`, label renames) |
+| S8 | [s08](s08-check-safety-gate.md) | `check`, the safety gate | Every unsafe case in ground truth is refused, with the reason in the `check` output | Next. Before it: the OTTL corpus test (ADR 0012) |
+| S9 | [s09](s09-owner-workflow.md) | Owner workflow | A lab drop goes from draft to ready only after a recorded confirmation, and changing its evidence reopens it | Planned |
+| S10 | [s10](s10-reduce-before-drop.md) | Reduce before drop | For each lab finding, `propose` picks the least-lossy action that `check` accepts | Planned |
+| S11 | [s11](s11-savings-ledger.md) | Savings ledger | The MVP gate is rehearsed on the lab: merge a tvt PR, and the next scan records measured savings | Planned |
+| S12 | [s12](s12-release-candidate.md) | Release candidate | `v0.1.0-rc1` is tagged, and the install guide works on a clean machine | Planned |
+| S13 | [s13](s13-alert-noise-1.md) | Alert noise I | Lab alert findings match ground truth | Planned |
+| S14 | [s14](s14-alert-noise-2.md) | Alert noise II | Each seeded noisy alert lands in the right class | Planned |
+| S15 | [s15](s15-agents-and-history.md) | Agents and history | `--as-of` shows each lab state with no leakage, and MCP and CLI answers match | Planned |
+| S16 | [s16](s16-collector-and-conventions.md) | Collector and conventions | Seeded Collector and rename cases are reported correctly | Planned |
 
 ## How these files are written
 
 Every task file follows the same shape, so status can be read the same way everywhere.
 
-- **File name:** `sNN-<theme>.md`, or `sNN-sMM-<theme>.md` for a group of sprints. Lab seeds go in `lab-backlog.md`, decisions in `docs/adr/`.
-- **Top of the file:** `# SNN: theme`, then a `**Status:**` line, then a `**Done when:**` line. In a group file, each `## SNN: theme` section has its own two lines.
+- **File name:** one file per sprint, `sNN-<theme>.md`, the theme in lowercase words joined by hyphens. Lab seeds go in `lab-backlog.md`, decisions in `docs/adr/`.
+- **Top of the file:** `# SNN: theme`, then a `**Status:**` line, then a `**Done when:**` line, before anything else.
 - **Status values:** Planned, Next, In progress, or Done with the date and the PRs. Open carry-overs are named on the same line ("Done Nov 16; open: items 8–10").
-- **Sections:** `## Before you start`, `## Must have (in this order)`, `## Should have`. In a group file, numbered items are must-haves in order unless marked "(should have)".
-- **Items:** numbered, one bold sentence first. What shipped for each item is recorded in `CLAUDE.md`'s Status section, not repeated here.
+- **Sections:** `## Before you start` (what to read and what must be merged first), `## Must have (in this order)`, `## Should have`, in that order. Sprint-specific sections (Grafana Cloud, groundwork for the next sprint) go after them.
+- **Items:** numbered, one bold sentence first, then a short done note when it applies ("Done Nov 17 for patches; open: PRs"), then the spec. What shipped in detail is recorded in `CLAUDE.md`'s Status section, not repeated here.
 - **No schedule.** Done dates are history and stay. Planned dates, partners and pricing stay out of the repo.
 - **The table above** is the index. Change a sprint's row in the same PR that changes its file's Status line.
 
