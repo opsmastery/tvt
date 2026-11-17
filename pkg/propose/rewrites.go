@@ -2,6 +2,7 @@ package propose
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -41,8 +42,127 @@ func Rewrites(kind, file string, src []byte) ([]Rewrite, error) {
 		return alloyRewrites(file, src)
 	case "prometheus":
 		return promRewrites(file, src)
+	case "otelcol":
+		return otelRewrites(file, src)
 	}
 	return nil, nil
+}
+
+// OTel Collector rewrites: transform statements and metricstransform
+// transforms that change metric names in a metrics pipeline. tvt follows
+// an exact rename (set(metric.name, "new") where metric.name == "old";
+// metricstransform include: old, match_type: strict, action: update,
+// new_name: new) and treats anything else that touches a name (a pattern
+// replace, a templated or computed new name, a where clause that isn't
+// one exact name) as a rule it can't follow. Which metrics pass it isn't
+// known from the config, so an unfollowable rule covers every metric the
+// pipeline carries (All).
+var (
+	otelNameTarget = regexp.MustCompile(`^\s*([A-Za-z_]+)\(\s*(?:metric\.)?name\s*,`)
+	otelExactSet   = regexp.MustCompile(`^\s*set\(\s*(?:metric\.)?name\s*,\s*"([^"\\$]+)"\s*\)\s+where\s+(?:metric\.)?name\s*==\s*"([^"\\]+)"\s*$`)
+)
+
+func otelRewrites(file string, src []byte) ([]Rewrite, error) {
+	root, err := otelRoot(src)
+	if err != nil {
+		return nil, err
+	}
+	// Processors in metrics pipelines.
+	used := map[string]bool{}
+	if all := value(value(root, "service"), "pipelines"); all != nil && all.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(all.Content); i += 2 {
+			name := all.Content[i].Value
+			if name != "metrics" && !strings.HasPrefix(name, "metrics/") {
+				continue
+			}
+			if pr := value(all.Content[i+1], "processors"); pr != nil {
+				for _, it := range pr.Content {
+					used[it.Value] = true
+				}
+			}
+		}
+	}
+	procs := value(root, "processors")
+	if procs == nil || procs.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	var out []Rewrite
+	for i := 0; i+1 < len(procs.Content); i += 2 {
+		id, cfg := procs.Content[i].Value, procs.Content[i+1]
+		if !used[id] {
+			continue
+		}
+		typ, _, _ := strings.Cut(id, "/")
+		comp := "processor " + id
+		switch typ {
+		case "transform":
+			for _, st := range otelStatements(value(cfg, "metric_statements")) {
+				m := otelNameTarget.FindStringSubmatch(st)
+				if m == nil {
+					continue
+				}
+				if e := otelExactSet.FindStringSubmatch(st); e != nil {
+					out = append(out, Rewrite{File: file, Component: comp, From: e[2], To: e[1], All: true})
+					continue
+				}
+				out = append(out, Rewrite{File: file, Component: comp, Unfollowable: fmt.Sprintf("%s on the metric name: %s", m[1], shorten(st)), All: true})
+			}
+		case "metricstransform":
+			ts := value(cfg, "transforms")
+			if ts == nil {
+				continue
+			}
+			for _, t := range ts.Content {
+				newName := str(t, "new_name")
+				if newName == "" && value(t, "new_name") == nil {
+					continue // label operations only
+				}
+				include, match, action := str(t, "include"), str(t, "match_type"), str(t, "action")
+				if match == "" {
+					match = "strict"
+				}
+				switch {
+				case action == "insert":
+					continue // a copy under the new name: the old name is still stored
+				case match == "strict" && action == "update" && include != "" && !strings.Contains(newName, "$"):
+					out = append(out, Rewrite{File: file, Component: comp, From: include, To: newName, All: true})
+				default:
+					out = append(out, Rewrite{File: file, Component: comp, Unfollowable: fmt.Sprintf("%s %s rename of %q to %q", match, action, include, newName), All: true})
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// otelStatements flattens metric_statements: plain strings, or groups
+// with a statements list.
+func otelStatements(n *yaml.Node) []string {
+	if n == nil || n.Kind != yaml.SequenceNode {
+		return nil
+	}
+	var out []string
+	for _, it := range n.Content {
+		switch it.Kind {
+		case yaml.ScalarNode:
+			out = append(out, it.Value)
+		case yaml.MappingNode:
+			if sts := value(it, "statements"); sts != nil {
+				for _, st := range sts.Content {
+					out = append(out, st.Value)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func shorten(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) > 80 {
+		return s[:77] + "..."
+	}
+	return s
 }
 
 // rule is one relabel rule, as far as tvt reads it.
