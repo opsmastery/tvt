@@ -19,6 +19,7 @@ import (
 
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 	"github.com/Opsmastery-Summit/tvt/pkg/propose"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/validate"
@@ -148,7 +149,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		switch {
 		case !rec.Proposable:
 			skipped = append(skipped, proposal{Rec: rec, Note: "not proposable: " + cmp.Or(rec.PipelineNote, "no pipeline")})
-		case rec.Action != report.ActionDrop || rec.Signal.Kind != string(graph.KindMetric):
+		case !(rec.Action == report.ActionDrop && rec.Signal.Kind == string(graph.KindMetric)) && !(rec.Action == report.ActionReroute && rec.Signal.Kind == string(graph.KindStream)):
 			skipped = append(skipped, proposal{Rec: rec, Note: "no writer for " + rec.Action + " of a " + rec.Signal.Kind + " yet"})
 		default:
 			byPipeline[rec.Pipeline] = append(byPipeline[rec.Pipeline], rec)
@@ -195,6 +196,28 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		for _, rec := range recs {
 			skipped = append(skipped, proposal{Rec: rec, Note: note})
 		}
+		return nil, skipped, ""
+	}
+	if p.Kind == "fluentbit" {
+		root, ok := checkouts[p.Repo]
+		switch {
+		case !ok:
+			return skipAll("no --checkout for " + p.Repo)
+		case len(p.Files) == 0:
+			return skipAll("pipeline " + p.Name + " lists no files (Helm values aren't written yet)")
+		}
+		return proposeFluentBit(p, recs, root, scan, check)
+	}
+	// Stream reroutes have a writer only for Fluent Bit so far.
+	var drops []report.Recommendation
+	for _, rec := range recs {
+		if rec.Action == report.ActionReroute {
+			skipped = append(skipped, proposal{Rec: rec, Note: "no writer for stream reroutes in " + p.Kind + " pipelines yet"})
+			continue
+		}
+		drops = append(drops, rec)
+	}
+	if recs = drops; len(recs) == 0 {
 		return nil, skipped, ""
 	}
 	var listJobs func([]byte) ([]string, error)
@@ -614,4 +637,109 @@ func ensureFilterBuild(p config.Pipeline, root string, d propose.Drop, note func
 		note(fmt.Sprintf("%s: adds the filter processor %s (rebuild the Collector with ocb before deploying)", path, version))
 	}
 	return propose.Diff(path, src, out), nil
+}
+
+// proposeFluentBit writes stream reroutes into a Fluent Bit pipeline: a
+// rewrite_tag per stream, moving its records to the cold output
+// pipelines[].cold names (propose.FluentBitRoutes). A stream must be
+// named by label equalities only, and its Loki output must carry exactly
+// those labels. All of a file's routes are written, or none.
+func proposeFluentBit(p config.Pipeline, recs []report.Recommendation, root string, scan int64, check checkFunc) (written, skipped []proposal, diff string) {
+	var ok []report.Recommendation
+	var routes []propose.Route
+	for _, rec := range recs {
+		if rec.Action != report.ActionReroute {
+			skipped = append(skipped, proposal{Rec: rec, Note: "a fluentbit pipeline carries logs; no writer for " + rec.Action + " there"})
+			continue
+		}
+		if p.Cold == "" {
+			skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + p.Name + " names no cold output (tvt.yaml pipelines[].cold)"})
+			continue
+		}
+		labels, err := selectorLabels(rec.Signal.Name)
+		if err != nil {
+			skipped = append(skipped, proposal{Rec: rec, Note: err.Error()})
+			continue
+		}
+		d := dropOf(rec.ID, []report.Recommendation{rec}, scan)
+		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold})
+		ok = append(ok, rec)
+	}
+	if len(ok) == 0 {
+		return nil, skipped, ""
+	}
+	// Each route goes into the first file that has its stream's output.
+	byFile := map[string][]int{}
+	srcs := map[string][]byte{}
+	failure := map[int]string{}
+	for i, r := range routes {
+		var last error
+		for _, f := range p.Files {
+			if _, read := srcs[f]; !read {
+				b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
+				if err != nil {
+					last = err
+					continue
+				}
+				srcs[f] = b
+			}
+			if _, err := propose.FluentBit(srcs[f], r); err != nil {
+				last = fmt.Errorf("%s: %w", f, err)
+				continue
+			}
+			byFile[f] = append(byFile[f], i)
+			last = nil
+			break
+		}
+		if last != nil {
+			failure[i] = last.Error()
+		}
+	}
+	var b strings.Builder
+	for _, f := range p.Files {
+		idx := byFile[f]
+		if len(idx) == 0 {
+			continue
+		}
+		var rs []propose.Route
+		for _, i := range idx {
+			rs = append(rs, routes[i])
+		}
+		out, err := propose.FluentBitRoutes(srcs[f], rs)
+		if err == nil {
+			err = check(root, f, out)
+		}
+		if err != nil {
+			for _, i := range idx {
+				failure[i] = f + ": " + err.Error()
+			}
+			continue
+		}
+		b.WriteString(propose.Diff(f, srcs[f], out))
+	}
+	for i, rec := range ok {
+		if note, bad := failure[i]; bad {
+			skipped = append(skipped, proposal{Rec: rec, Note: note})
+		} else {
+			written = append(written, proposal{Rec: rec})
+		}
+	}
+	return written, skipped, b.String()
+}
+
+// selectorLabels is a stream selector's labels, when it names them all by
+// equality ({app="shop", level="debug"}).
+func selectorLabels(selector string) (map[string]string, error) {
+	refs, err := parse.LogQL(selector)
+	if err != nil || len(refs) != 1 || len(refs[0].Matchers) == 0 {
+		return nil, fmt.Errorf("stream %s isn't one selector tvt can read", selector)
+	}
+	out := map[string]string{}
+	for _, m := range refs[0].Matchers {
+		if m.Op != parse.MatchEqual || m.Variable {
+			return nil, fmt.Errorf("stream %s matches %s by more than equality; tvt reroutes streams named by exact labels", selector, m.Label)
+		}
+		out[m.Label] = m.Value
+	}
+	return out, nil
 }
