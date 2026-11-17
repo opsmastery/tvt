@@ -9,16 +9,13 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 305,
+        "true_positives": 307,
         "false_positives": 0,
-        "false_negatives": 2,
+        "false_negatives": 0,
         "precision": 1,
-        "recall": 0.9935,
+        "recall": 1,
         "wrong": [],
-        "missed": [
-          "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend"
-        ]
+        "missed": []
       }
     },
     "before-deploy": {
@@ -29,16 +26,13 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 306,
+        "true_positives": 308,
         "false_positives": 0,
-        "false_negatives": 2,
+        "false_negatives": 0,
         "precision": 1,
-        "recall": 0.9935,
+        "recall": 1,
         "wrong": [],
-        "missed": [
-          "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend"
-        ]
+        "missed": []
       }
     },
     "overflow": {
@@ -49,16 +43,13 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 305,
+        "true_positives": 307,
         "false_positives": 0,
-        "false_negatives": 2,
+        "false_negatives": 0,
         "precision": 1,
-        "recall": 0.9935,
+        "recall": 1,
         "wrong": [],
-        "missed": [
-          "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend"
-        ]
+        "missed": []
       }
     },
     "pipelines": {
@@ -69,16 +60,13 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 305,
+        "true_positives": 307,
         "false_positives": 0,
-        "false_negatives": 2,
+        "false_negatives": 0,
         "precision": 1,
-        "recall": 0.9935,
+        "recall": 1,
         "wrong": [],
-        "missed": [
-          "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend"
-        ]
+        "missed": []
       }
     },
     "rule-efficiency": {
@@ -89,15 +77,13 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 304,
+        "true_positives": 306,
         "false_positives": 0,
-        "false_negatives": 3,
+        "false_negatives": 1,
         "precision": 1,
-        "recall": 0.9902,
+        "recall": 0.9967,
         "wrong": [],
         "missed": [
-          "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend",
           "line:startup_burst: not raised, want repeated_line"
         ]
       }
@@ -110,15 +96,13 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 304,
+        "true_positives": 306,
         "false_positives": 0,
-        "false_negatives": 3,
+        "false_negatives": 1,
         "precision": 1,
-        "recall": 0.9902,
+        "recall": 0.9967,
         "wrong": [],
         "missed": [
-          "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend",
           "line:startup_burst: not raised, want repeated_line"
         ]
       }
@@ -131,17 +115,15 @@
         "missed": []
       },
       "recommendations": {
-        "true_positives": 302,
+        "true_positives": 304,
         "false_positives": 1,
-        "false_negatives": 3,
+        "false_negatives": 1,
         "precision": 0.9967,
-        "recall": 0.9902,
+        "recall": 0.9967,
         "wrong": [
           "line:{app=\"shop\", component=\"api\", level=\"warn\"} \"method=\u003c_\u003e route=\u003c_\u003e status=404 duration_ms=\u003c_\u003e request_id=\u003c_\u003e user=\u003c_\u003e\": line_handoff, want keep"
         ],
         "missed": [
-          "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
-          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend",
           "line:startup_burst: not raised, want repeated_line"
         ]
       }
