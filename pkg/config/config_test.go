@@ -166,14 +166,14 @@ func TestParseSize(t *testing.T) {
 	}
 }
 
-// Pipelines (S6 item 4, ADR 0007): the example's three load; each
+// Pipelines (S6 item 4, ADR 0007): the example's four load; each
 // malformed one is an error naming it.
 func TestPipelines(t *testing.T) {
 	c, err := Load(filepath.Join("..", "..", "examples", "tvt.example.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Pipelines) != 3 || c.Pipelines[1].Name != "alloy-apps" || c.Pipelines[1].Kind != "alloy" ||
+	if len(c.Pipelines) != 4 || c.Pipelines[3].Cold != "archive" || c.Pipelines[1].Name != "alloy-apps" || c.Pipelines[1].Kind != "alloy" ||
 		len(c.Pipelines[1].Handles) != 2 || c.Pipelines[2].HelmValues == nil || c.Pipelines[2].HelmValues.Path != "config" {
 		t.Errorf("pipelines %+v", c.Pipelines)
 	}
