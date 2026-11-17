@@ -1,6 +1,6 @@
 # 0010. Reduce before drop: the least-lossy order
 
-Date: 2026-11-16 · Status: proposed (accept before S8)
+Date: 2026-11-16 · Status: accepted (Nov 16)
 
 ## Context
 
