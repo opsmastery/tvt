@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -665,4 +666,29 @@ func TestProposeOperatorValidate(t *testing.T) {
 		t.Errorf("notes:\n%s", notes)
 	}
 	t.Log(notes)
+}
+
+// TestSelectorLabelsServiceName: a service_name Loki derived from app is
+// left out of the labels tvt matches in the pipeline; one set on its own
+// stays.
+func TestSelectorLabelsServiceName(t *testing.T) {
+	for sel, want := range map[string]string{
+		`{app="shop", component="api", level="debug", service_name="shop"}`:  "app=shop component=api level=debug",
+		`{app="shop", component="api", level="debug", service_name="other"}`: "app=shop component=api level=debug service_name=other",
+		`{component="api", service_name="api"}`:                              "component=api",
+		`{service_name="checkout", level="info"}`:                            "level=info service_name=checkout",
+	} {
+		l, err := selectorLabels(sel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for k, v := range l {
+			got = append(got, k+"="+v)
+		}
+		slices.Sort(got)
+		if strings.Join(got, " ") != want {
+			t.Errorf("%s: %v, want %s", sel, got, want)
+		}
+	}
 }

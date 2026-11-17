@@ -128,3 +128,20 @@ func TestProposePR(t *testing.T) {
 		t.Errorf("rerun stacked %s commits", n)
 	}
 }
+
+// TestPRBodyFits: a first scan's thousand drops still fit GitHub's 65,536
+// character limit on a PR description (the live lab run got a 422 without
+// this), and the body says how many rows it left out.
+func TestPRBodyFits(t *testing.T) {
+	const repo = "github.com/o/r"
+	var written []proposal
+	for i := range 2000 {
+		written = append(written, proposal{Repo: repo, Rec: report.Recommendation{
+			ID:    "drop:prom:metric:go_godebug_non_default_behavior_" + strings.Repeat("x", i%40) + "_events_total",
+			Claim: "In the 30 days to 2026-11-17, nothing read it: no panel, rule, alert or logged query; dropping it saves 0.01 USD a month."}})
+	}
+	b := prBody(repo, 1, written, []string{repo + " a.yml: valid (promtool)"}, nil)
+	if len(b) > 65536 || !strings.Contains(b, "2000 recommendations") || !strings.Contains(b, "more aren't listed") || !strings.Contains(b, "a.yml: valid") {
+		t.Errorf("body %d characters:\n%s", len(b), b[len(b)-400:])
+	}
+}
