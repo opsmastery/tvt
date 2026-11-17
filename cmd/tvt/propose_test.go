@@ -606,3 +606,22 @@ func TestProposeFluentBitHelm(t *testing.T) {
 		t.Errorf("written %d skipped %+v\n%s", len(written), skipped, diff)
 	}
 }
+
+// TestProposeFluentOperator: a fluentbit pipeline whose file holds Fluent
+// Operator resources gets a rewriteTag ClusterFilter.
+func TestProposeFluentOperator(t *testing.T) {
+	root := t.TempDir()
+	b, err := os.ReadFile("../../pkg/propose/testdata/fluent-operator.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(root, "logging.yaml"), b, 0o644)
+	sel := `{app="shop", component="api", level="debug"}`
+	rec := report.Recommendation{ID: "reroute:loki:stream:" + sel, Action: report.ActionReroute,
+		Signal: report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel}, Proposable: true}
+	p := config.Pipeline{Name: "fo", Kind: "fluentbit", Files: []string{"logging.yaml"}, Cold: "cold"}
+	written, skipped, diff := proposeFluentBit(p, []report.Recommendation{rec}, root, 3, func(string, string, []byte) error { return nil })
+	if len(written) != 1 || len(skipped) != 0 || !strings.Contains(diff, "+kind: ClusterFilter") || !strings.Contains(diff, `+          - "$log ^.*$ tvt.cold.shop.debug false"`) {
+		t.Errorf("written %d skipped %+v\n%s", len(written), skipped, diff)
+	}
+}
