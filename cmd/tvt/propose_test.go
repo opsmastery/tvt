@@ -325,3 +325,40 @@ func TestProposeMonitors(t *testing.T) {
 		t.Errorf("mapped: written %d skipped %+v\n%s", len(written), skipped, diff)
 	}
 }
+
+// TestProposeHelmValues: with helm_values, the drops go into the team's
+// kube-prometheus-stack overlay (the rendered chart only resolves jobs),
+// and a new key carries the chart's default rules.
+func TestProposeHelmValues(t *testing.T) {
+	root := t.TempDir()
+	for src, dst := range map[string]string{
+		"../../testdata/kube-prometheus-stack/render.yaml": "render.yaml",
+		"../../testdata/kube-prometheus-stack/values.yaml": "chart-values.yaml",
+		"../../pkg/propose/testdata/kps-values.yaml":       "values.yaml",
+	} {
+		b, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, dst), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := report.Recommendation{ID: "drop:prom:metric:node_softnet_times_squeezed_total", Action: report.ActionDrop,
+		Signal: report.SignalRef{ID: "prom:metric:node_softnet_times_squeezed_total", Kind: "metric", Name: "node_softnet_times_squeezed_total"}, Proposable: true}
+	jobs := map[string][]string{rec.Signal.ID: {"node-exporter"}}
+	p := config.Pipeline{Name: "kps", Kind: "prometheus-operator", Files: []string{"render.yaml"},
+		HelmValues: &config.HelmValues{File: "values.yaml", Defaults: "chart-values.yaml"}}
+	ok := func(string, string, []byte) error { return nil }
+	written, skipped, diff := proposeMonitors(p, []report.Recommendation{rec}, jobs, root, 6, ok)
+	if len(written) != 1 || len(skipped) != 0 {
+		t.Fatalf("written %d skipped %+v", len(written), skipped)
+	}
+	if !strings.Contains(diff, "a/values.yaml") || !strings.Contains(diff, "+prometheus-node-exporter:") || strings.Contains(diff, "a/render.yaml") {
+		t.Errorf("diff:\n%s", diff)
+	}
+	p.HelmValues.Defaults = ""
+	if _, skipped, _ = proposeMonitors(p, []report.Recommendation{rec}, jobs, root, 6, ok); len(skipped) != 1 || !strings.Contains(skipped[0].Note, "helm_values.defaults") {
+		t.Errorf("no defaults: %+v", skipped)
+	}
+}
