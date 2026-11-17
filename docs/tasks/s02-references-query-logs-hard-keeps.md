@@ -2,11 +2,11 @@
 
 **Status:** Done Nov 16. In detail: items 1–7, 11 and 16–19 are done (see `CLAUDE.md`). Item 11 was finished on the Grafana Cloud test stack (`docs/grafana-cloud.md`), except Adaptive Metrics usage counts, which wait for the stack to have recommendations. Item 7 left Grafana SLO's read API to item 11 (it's a Cloud app; the lab can't exercise it). The rest carry over into the two-day sprints (`docs/tasks/README.md`): item 15 with S3's client tagging and S6's query cost, items 12 and 14 before S6, item 11 by S6, item 13 before S10, and items 8–10 by S12.
 
+**Done when:** every dependency seeded in tvt-lab resolves to the right signal, no hard keep is misclassified (including the metric only a Grafana-managed alert reads and one only an SLO reads), and the Grafana Cloud adapters pass the same checks on the Cloud test stack.
+
 Written Nov 11, 2026 for a Claude Code session on the Mac (Go, module downloads and the live tvt-lab are there). Read `CLAUDE.md`, `docs/ROADMAP.md`, `docs/query-logs.md`, `docs/architecture.md` and ADRs 0005, 0007 and 0008 first.
 
 **Rules for every item:** one branch and one PR per numbered item, `--base main`. Tests first or alongside. Keep the read-only guarantee (`internal/testutil` fails any non-GET). Update `testdata/lab/ground-truth.yaml` when a lab seed changes. Update the Status section of `CLAUDE.md` in each PR. Nothing from internal planning (pricing, partners, schedules) goes in the repo.
-
-**Done when:** every dependency seeded in tvt-lab resolves to the right signal, no hard keep is misclassified (including the metric only a Grafana-managed alert reads and one only an SLO reads), and the Grafana Cloud adapters pass the same checks on the Cloud test stack.
 
 ## Before you start
 
