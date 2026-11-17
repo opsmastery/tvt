@@ -1,6 +1,7 @@
 // Package validate runs a pipeline's own validator on a config tvt
 // changed (S7 item 5): promtool check config, alloy validate, otelcol
-// validate and fluent-bit --dry-run. A config that doesn't load never
+// validate and fluent-bit --dry-run, and kubeconform for operator
+// custom resources. A config that doesn't load never
 // becomes a patch or a PR. The validator is the native binary when it's on
 // PATH, or else the pinned container image through podman or docker; with
 // neither, the result says why validation didn't run, and the caller
@@ -30,6 +31,9 @@ type Tool struct {
 	// in a container, with the root mounted read-only at /cfg.
 	Image      string
 	Entrypoint string
+	// Prepare, when set, readies the root before the validator runs
+	// (kubeconform's schemas).
+	Prepare func(root string) error
 }
 
 // Tools are the validators, pinned to the versions the tvt lab runs.
@@ -44,6 +48,10 @@ var Tools = map[string]Tool{
 		Image: "docker.io/otel/opentelemetry-collector-contrib:0.165.0"},
 	"fluentbit": {Binary: "fluent-bit", Args: func(f string) []string { return []string{"--dry-run", "-c", f} },
 		Image: "docker.io/fluent/fluent-bit:5.2.0"},
+	// kubernetes: Prometheus Operator monitors and Fluent Operator
+	// resources, against the embedded custom resource schemas.
+	"kubernetes": {Binary: "kubeconform", Args: kubeconformArgs,
+		Image: "ghcr.io/yannh/kubeconform:v0.8.0", Prepare: writeSchemas},
 }
 
 // Options configure Run.
@@ -86,6 +94,11 @@ func Run(ctx context.Context, kind, root, file string, o Options) Result {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	file = filepath.ToSlash(file)
+	if t.Prepare != nil {
+		if err := t.Prepare(root); err != nil {
+			return Result{Skipped: err.Error()}
+		}
+	}
 	if !o.NoNative {
 		if path, err := exec.LookPath(t.Binary); err == nil {
 			return run(ctx, t.Binary, root, path, t.Args(file)...)
