@@ -198,6 +198,25 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		}
 		return nil, skipped, ""
 	}
+	if p.Kind == "prometheus-operator" {
+		root, ok := checkouts[p.Repo]
+		switch {
+		case !ok:
+			return skipAll("no --checkout for " + p.Repo)
+		case len(p.Files) == 0:
+			return skipAll("pipeline " + p.Name + " lists no files (Helm values aren't written yet)")
+		}
+		var drops []report.Recommendation
+		for _, rec := range recs {
+			if rec.Action == report.ActionReroute {
+				skipped = append(skipped, proposal{Rec: rec, Note: "a prometheus-operator pipeline carries metrics; no writer for reroute there"})
+				continue
+			}
+			drops = append(drops, rec)
+		}
+		w, s, diff := proposeMonitors(p, drops, jobs, root, scan, check)
+		return w, append(skipped, s...), diff
+	}
 	if p.Kind == "fluentbit" {
 		root, ok := checkouts[p.Repo]
 		switch {
@@ -742,4 +761,111 @@ func selectorLabels(selector string) (map[string]string, error) {
 		out[m.Label] = m.Value
 	}
 	return out, nil
+}
+
+// proposeMonitors writes whole-metric drops into a prometheus-operator
+// pipeline: a metricRelabelings rule on every endpoint of each monitor
+// whose targets carry the metric's jobs (propose.MonitorJobs, plus
+// pipelines[].monitor_jobs for jobs the manifests can't tell). A metric
+// is written only when every job it carries maps to a monitor in the
+// pipeline's files.
+func proposeMonitors(p config.Pipeline, recs []report.Recommendation, jobs map[string][]string, root string, scan int64, check checkFunc) (written, skipped []proposal, diff string) {
+	if len(recs) == 0 {
+		return nil, nil, ""
+	}
+	srcs := map[string][]byte{}
+	var all [][]byte
+	for _, f := range p.Files {
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
+		if err != nil {
+			for _, rec := range recs {
+				skipped = append(skipped, proposal{Rec: rec, Note: err.Error()})
+			}
+			return nil, skipped, ""
+		}
+		srcs[f] = b
+		all = append(all, b)
+	}
+	byJob, unresolved, err := propose.MonitorJobs(all...)
+	if err != nil {
+		for _, rec := range recs {
+			skipped = append(skipped, proposal{Rec: rec, Note: err.Error()})
+		}
+		return nil, skipped, ""
+	}
+	for job, ref := range p.MonitorJobs {
+		parts := strings.SplitN(ref, "/", 3)
+		if len(parts) == 3 {
+			byJob[job] = []propose.MonitorRef{{Kind: parts[0], Namespace: parts[1], Name: parts[2]}}
+		}
+	}
+	plan := map[propose.MonitorRef][]report.Recommendation{}
+	for _, rec := range recs {
+		js := jobs[rec.Signal.ID]
+		if len(js) == 0 {
+			skipped = append(skipped, proposal{Rec: rec, Note: fmt.Sprintf("scan %d didn't read the metric's job label", scan)})
+			continue
+		}
+		var missing []string
+		for _, j := range js {
+			if len(byJob[j]) == 0 {
+				missing = append(missing, j)
+			}
+		}
+		if len(missing) > 0 {
+			note := fmt.Sprintf("job %s maps to no monitor in %s", strings.Join(missing, ", "), strings.Join(p.Files, ", "))
+			if len(unresolved) > 0 {
+				note += " (set pipelines[].monitor_jobs for monitors tvt can't resolve)"
+			}
+			skipped = append(skipped, proposal{Rec: rec, Note: note})
+			continue
+		}
+		for _, j := range js {
+			for _, m := range byJob[j] {
+				plan[m] = append(plan[m], rec)
+			}
+		}
+	}
+	byMonitor := map[propose.MonitorRef]propose.Drop{}
+	for m, rs := range plan {
+		byMonitor[m] = dropOf(p.Name+"/"+m.Namespace+"/"+m.Name, rs, scan)
+	}
+	var b strings.Builder
+	failed := map[string]string{}
+	done := 0
+	for _, f := range p.Files {
+		out, n, err := propose.Monitors(srcs[f], byMonitor)
+		if err == nil && n > 0 {
+			err = check(root, f, out)
+		}
+		if err != nil {
+			for _, rs := range plan {
+				for _, rec := range rs {
+					failed[rec.ID] = f + ": " + err.Error()
+				}
+			}
+			continue
+		}
+		done += n
+		b.WriteString(propose.Diff(f, srcs[f], out))
+	}
+	if done < len(byMonitor) && len(failed) == 0 {
+		for _, rs := range plan {
+			for _, rec := range rs {
+				failed[rec.ID] = "a monitor for its jobs isn't in " + strings.Join(p.Files, ", ")
+			}
+		}
+		b.Reset()
+	}
+	for _, rec := range recs {
+		if note, ok := failed[rec.ID]; ok {
+			skipped = append(skipped, proposal{Rec: rec, Note: note})
+		} else if !slices.ContainsFunc(skipped, func(s proposal) bool { return s.Rec.ID == rec.ID }) {
+			written = append(written, proposal{Rec: rec})
+		}
+	}
+	if len(failed) > 0 {
+		return nil, skipped, ""
+	}
+	return written, skipped, b.String()
 }
