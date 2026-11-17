@@ -2,9 +2,9 @@
 
 **Status:** Done Nov 14 (PRs #54–#61).
 
-Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0006 and 0007 first.
-
 **Done when:** `tvt report` produces the HTML and JSON report of the top 50 on the lab in under 30 minutes from a cold start, no hard keep, keep_high, dormant or record signal is ever recommended, and every row lists its evidence gaps.
+
+Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0006 and 0007 first.
 
 ## Must have (in this order)
 
