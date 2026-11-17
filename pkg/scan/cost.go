@@ -165,3 +165,58 @@ func summable(s *collect.Scrape, series string) bool {
 	}
 	return false
 }
+
+// unreadStreams are signals for the streams the volume API listed that no
+// queried selector selects: each stream's full label set, so an unread
+// stream is classified, priced and reported like any other (route_cold
+// when nothing marks it incident-critical, a confirm question when its
+// labels do). When a query's selectors couldn't be read (AllStreams) or a
+// selector can't be evaluated, nothing can be shown unread, so none is
+// added: an unread stream is never a guess.
+func unreadStreams(vols []collect.StreamVolume, signals []graph.Signal) []graph.Signal {
+	var selectors [][]parse.Matcher
+	ids := map[string]bool{}
+	for _, s := range signals {
+		ids[s.ID] = true
+		if s.Kind != graph.KindStream {
+			continue
+		}
+		if s.Name == AllStreams {
+			return nil
+		}
+		refs, err := parse.LogQL(s.Name)
+		if err != nil || len(refs) != 1 {
+			return nil
+		}
+		selectors = append(selectors, refs[0].Matchers)
+	}
+	var out []graph.Signal
+	for _, v := range vols {
+		read := false
+		for _, ms := range selectors {
+			match, err := parse.MatchesLabels(ms, v.Labels)
+			if err != nil {
+				return nil
+			}
+			if match {
+				read = true
+				break
+			}
+		}
+		if read || len(v.Labels) == 0 {
+			continue
+		}
+		ms := make([]parse.Matcher, 0, len(v.Labels))
+		for k, val := range v.Labels {
+			ms = append(ms, parse.Matcher{Label: k, Op: parse.MatchEqual, Value: val})
+		}
+		sel := parse.CanonicalSelector(ms)
+		id := "loki:stream:" + sel
+		if ids[id] {
+			continue
+		}
+		ids[id] = true
+		out = append(out, graph.Signal{ID: id, Kind: graph.KindStream, Name: sel, Source: "loki"})
+	}
+	return out
+}
