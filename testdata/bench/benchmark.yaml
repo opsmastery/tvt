@@ -77,3 +77,19 @@ states:
       customer lookup filters on the capped customer_id. Full snapshot captured Nov 16, 2026 00:24 UTC
       with prometheus/overflow.json. Ground truth's overflow is scored by TestOverflow.
     proven: [prometheus query log, loki query log, grafana router log]
+  - name: writers
+    dir: writers
+    scan_time: 2026-11-17T07:06:36Z
+    about: >
+      The lab tvt S7's writers work against (tvt-lab #27 to #30), on the Mac mini since Nov 17
+      (history carried over with the volumes): Fluent Bit ships the shop's debug stream, Alloy
+      renames shop_search_queries_total to shop_search_requests_total (read only by Shop Overview
+      panel 10) and has a sys.env drop rule on the span path, and an OTel Collector carries a
+      synthetic coding agent's spans, logs and delta counters. Full snapshot captured Nov 17, 2026
+      07:06 UTC, two hours after the move (an earlier capture at 04:51 held ad hoc health-check
+      queries and was discarded); tvt-lab.yaml declares all four pipelines. Ground truth adds
+      rewrites, genai_agent and records, which S7 items 2 and 9 score. Timing gap: Loki was failing
+      when the shop started on the mini, so the startup burst never reached the pattern ingester;
+      without it the 404 pattern is over 25% of the warn stream and is raised as a line hand-off
+      ground truth doesn't list (precision 0.9967). Recapture after a shop restart to clear both.
+    proven: [prometheus query log, loki query log, grafana router log]
