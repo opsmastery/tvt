@@ -44,6 +44,10 @@ Each rule sits in a marked block (S7 item 10):
 
 `evidence` is a short hash of the scan and the recommendations' evidence; S9 binds approvals to it. Every existing tvt block in a file is removed before the new ones go in, so a rerun replaces the last proposal instead of stacking on it, and every other byte of the file is kept. The patch starts with the recommendations it carries and their claims; `git apply` skips that text.
 
+## Custom Collector builds
+
+A Collector built with ocb has only the components its builder manifest lists, and a config naming any other doesn't load (S7 item 4). Before tvt writes `filter/tvt`, it reads the pipeline's manifest: `pipelines[].build` in `tvt.yaml` (a path in the repo), or a `builder-config.yaml` next to one of the pipeline's files. If the manifest doesn't list `github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor`, the same patch adds it, in a marked block, at the version the manifest's other contrib components use (or its core `v0` components', or `dist.otelcol_version`). Rebuild the Collector before deploying the config. A manifest with no version to match skips the pipeline: tvt doesn't guess a module version. With no manifest, tvt assumes `otelcol-contrib`, which includes the filter processor, and the patch header says so.
+
 ## What it skips, and says so
 
 Every other recommendation is printed as skipped with the reason: unmapped or claimed by several pipelines, a recording rule's output, an action or signal kind with no writer yet (label removals, stream reroutes), a pipeline kind with no writer yet (OTel Collector, Fluent Bit, exporters), Helm-rendered pipelines, a missing checkout, or a scan that didn't read the job label.
