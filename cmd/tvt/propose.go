@@ -669,6 +669,15 @@ func (v *validator) check(ctx context.Context, p config.Pipeline) checkFunc {
 			v.notes = append(v.notes, fmt.Sprintf("%s %s: not validated (--validate off)", p.Repo, file))
 			return nil
 		}
+		if p.Kind == "fluentbit" && propose.IsFluentOperator(out) {
+			// Fluent Operator resources aren't a Fluent Bit config: the
+			// operator builds one from them.
+			if v.o.Validate == "require" {
+				return fmt.Errorf("not validated (--validate require): Fluent Operator resources")
+			}
+			v.notes = append(v.notes, fmt.Sprintf("%s %s: NOT VALIDATED: Fluent Operator resources (the operator builds the config)", p.Repo, file))
+			return nil
+		}
 		if p.HelmValues != nil && file == p.HelmValues.File {
 			// A values file isn't the pipeline's config: the chart renders
 			// it. tvt checked the edit against the joined config itself.
@@ -830,7 +839,7 @@ func proposeFluentBit(p config.Pipeline, recs []report.Recommendation, root stri
 				}
 				srcs[f] = b
 			}
-			if _, err := fluentRoutes(f)(srcs[f], []propose.Route{r}); err != nil {
+			if _, err := fluentRoutes(f, srcs[f])(srcs[f], []propose.Route{r}); err != nil {
 				last = fmt.Errorf("%s: %w", f, err)
 				continue
 			}
@@ -852,7 +861,7 @@ func proposeFluentBit(p config.Pipeline, recs []report.Recommendation, root stri
 		for _, i := range idx {
 			rs = append(rs, routes[i])
 		}
-		out, err := fluentRoutes(f)(srcs[f], rs)
+		out, err := fluentRoutes(f, srcs[f])(srcs[f], rs)
 		if err == nil {
 			err = check(root, f, out)
 		}
@@ -1102,10 +1111,13 @@ func proposeAlloyRoutesOnly(p config.Pipeline, recs []report.Recommendation, rou
 	return fail(fmt.Sprint(last))
 }
 
-// fluentRoutes is the Fluent Bit writer for a file's format: classic for
-// .conf, YAML otherwise.
-func fluentRoutes(file string) func([]byte, []propose.Route) ([]byte, error) {
-	if strings.HasSuffix(strings.ToLower(file), ".conf") {
+// fluentRoutes is the Fluent Bit writer for a file's format: Fluent
+// Operator resources, classic for .conf, YAML otherwise.
+func fluentRoutes(file string, src []byte) func([]byte, []propose.Route) ([]byte, error) {
+	switch {
+	case propose.IsFluentOperator(src):
+		return propose.FluentOperatorRoutes
+	case strings.HasSuffix(strings.ToLower(file), ".conf"):
 		return propose.FluentBitClassicRoutes
 	}
 	return propose.FluentBitRoutes

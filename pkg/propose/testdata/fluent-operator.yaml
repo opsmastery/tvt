@@ -1,0 +1,55 @@
+# Fluent Operator resources for the shop's debug log (tvt S7 item 3
+# fixture): a tail ClusterInput, the Loki ClusterOutput, a cold
+# ClusterOutput and an existing ClusterFilter.
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: ClusterInput
+metadata:
+  name: shop-debug
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+spec:
+  tail:
+    tag: shop.debug
+    path: /var/log/shop/debug.log
+---
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: ClusterFilter
+metadata:
+  name: shop-env
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+    fluentbit.fluent.io/component: logging
+spec:
+  match: shop.debug
+  filters:
+    - modify:
+        rules:
+          - add:
+              env: lab
+---
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: ClusterOutput
+metadata:
+  name: loki
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+spec:
+  match: shop.debug
+  loki:
+    host: loki
+    port: 3100
+    labels:
+      - app=shop
+      - component=api
+      - level=debug
+---
+apiVersion: fluentbit.fluent.io/v1alpha2
+kind: ClusterOutput
+metadata:
+  name: cold
+  labels:
+    fluentbit.fluent.io/enabled: "true"
+spec:
+  match: tvt.cold.*
+  file:
+    path: /tmp/cold
