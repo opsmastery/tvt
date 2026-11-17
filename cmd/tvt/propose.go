@@ -231,11 +231,18 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		}
 		return proposeFluentBit(p, recs, root, scan, check)
 	}
-	// Stream reroutes have a writer only for Fluent Bit so far.
-	var drops []report.Recommendation
+	// Stream reroutes: Fluent Bit above; Alloy below, with the drops.
+	var drops, reroutes []report.Recommendation
 	for _, rec := range recs {
 		if rec.Action == report.ActionReroute {
-			skipped = append(skipped, proposal{Rec: rec, Note: "no writer for stream reroutes in " + p.Kind + " pipelines yet"})
+			switch {
+			case p.Kind != "alloy":
+				skipped = append(skipped, proposal{Rec: rec, Note: "no writer for stream reroutes in " + p.Kind + " pipelines yet"})
+			case p.Cold == "":
+				skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + p.Name + " names no cold component (tvt.yaml pipelines[].cold, such as loki.write.cold)"})
+			default:
+				reroutes = append(reroutes, rec)
+			}
 			continue
 		}
 		if rec.Action == report.ActionLabelRemoval && p.Kind != "otelcol" {
@@ -250,8 +257,21 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		}
 		drops = append(drops, rec)
 	}
-	if recs = drops; len(recs) == 0 {
+	if recs = drops; len(recs) == 0 && len(reroutes) == 0 {
 		return nil, skipped, ""
+	}
+	var routes []propose.Route
+	for _, rec := range reroutes {
+		labels, err := selectorLabels(rec.Signal.Name)
+		if err != nil {
+			skipped = append(skipped, proposal{Rec: rec, Note: err.Error()})
+			continue
+		}
+		d := dropOf(rec.ID, []report.Recommendation{rec}, scan)
+		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold})
+	}
+	if len(recs) == 0 {
+		return proposeAlloyRoutesOnly(p, reroutes, routes, checkouts, scan, check, skipped)
 	}
 	var listJobs func([]byte) ([]string, error)
 	switch p.Kind {
@@ -323,6 +343,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		}
 	}
 	var b strings.Builder
+	routed := false
 	failed := map[string]string{} // rec ID -> why its file couldn't be written
 	for _, f := range p.Files {
 		byJob := plan[f]
@@ -348,6 +369,13 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 			}
 			slices.Sort(js)
 			out, err = propose.Alloy(srcs[f], js, dropOf(p.Name, all, scan))
+			// The stream reroutes go in the same pass, into the file with
+			// the loki.process shipping to Loki.
+			if err == nil && len(routes) > 0 && !routed {
+				if next, rerr := propose.AlloyRoutesKeep(out, routes); rerr == nil {
+					out, routed = next, true
+				}
+			}
 		}
 		if err == nil {
 			err = check(root, f, out)
@@ -369,6 +397,15 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 			continue
 		} else {
 			written = append(written, proposal{Rec: rec})
+		}
+	}
+	for _, rec := range reroutes {
+		switch {
+		case slices.ContainsFunc(skipped, func(s proposal) bool { return s.Rec.ID == rec.ID }):
+		case routed:
+			written = append(written, proposal{Rec: rec})
+		default:
+			skipped = append(skipped, proposal{Rec: rec, Note: "no file with the pipeline's drops has the loki.process that ships to Loki"})
 		}
 	}
 	return written, skipped, b.String()
@@ -1008,4 +1045,48 @@ func proposeHelmValues(p config.Pipeline, recs []report.Recommendation, plan map
 		}
 	}
 	return written, skipped, propose.Diff(hv.File, src, out)
+}
+
+// proposeAlloyRoutesOnly writes an Alloy pipeline's stream reroutes when
+// it has no metric drops: into the first file that has the loki.process
+// shipping to Loki.
+func proposeAlloyRoutesOnly(p config.Pipeline, recs []report.Recommendation, routes []propose.Route, checkouts checkoutFlag, scan int64, check checkFunc, skipped []proposal) (written, _ []proposal, diff string) {
+	fail := func(note string) ([]proposal, []proposal, string) {
+		for _, rec := range recs {
+			if !slices.ContainsFunc(skipped, func(s proposal) bool { return s.Rec.ID == rec.ID }) {
+				skipped = append(skipped, proposal{Rec: rec, Note: note})
+			}
+		}
+		return nil, skipped, ""
+	}
+	if len(routes) == 0 {
+		return nil, skipped, ""
+	}
+	root, ok := checkouts[p.Repo]
+	if !ok {
+		return fail("no --checkout for " + p.Repo)
+	}
+	var last error
+	for _, f := range p.Files {
+		src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
+		if err != nil {
+			last = err
+			continue
+		}
+		out, err := propose.AlloyRoutes(src, routes)
+		if err == nil {
+			err = check(root, f, out)
+		}
+		if err != nil {
+			last = fmt.Errorf("%s: %w", f, err)
+			continue
+		}
+		for _, rec := range recs {
+			if !slices.ContainsFunc(skipped, func(s proposal) bool { return s.Rec.ID == rec.ID }) {
+				written = append(written, proposal{Rec: rec})
+			}
+		}
+		return written, skipped, propose.Diff(f, src, out)
+	}
+	return fail(fmt.Sprint(last))
 }
