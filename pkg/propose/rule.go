@@ -27,7 +27,20 @@ type Drop struct {
 	// Collector is the target Collector's version, when known: it picks
 	// the OTTL form (OTTLFormFor, S7 item 7).
 	Collector string
+	// Labels are labels to remove from some metrics only (a label_removal
+	// where no series merge): a relabel rule per label that empties it on
+	// those metrics, so other metrics keep it. Prometheus and Alloy.
+	Labels []LabelRule
 }
+
+// LabelRule removes Label from the series of Metrics.
+type LabelRule struct {
+	Label   string
+	Metrics []string
+}
+
+// Regex matches exactly the rule's metrics.
+func (l LabelRule) Regex() string { return Drop{Metrics: l.Metrics}.Regex() }
 
 // Regex is the relabel regex that matches exactly d.Metrics (anchored by
 // Prometheus and Alloy).
@@ -57,8 +70,21 @@ func (d Drop) validate() error {
 	if d.ID == "" || strings.ContainsAny(d.ID, "\n\r") {
 		return fmt.Errorf("propose: drop needs a one-line ID")
 	}
-	if len(d.Metrics) == 0 {
+	if len(d.Metrics) == 0 && len(d.Labels) == 0 {
 		return fmt.Errorf("propose: drop %s names no metric", d.ID)
+	}
+	for _, l := range d.Labels {
+		if !metricName.MatchString(l.Label) || strings.Contains(l.Label, ":") || strings.HasPrefix(l.Label, "__") || l.Label == "job" || l.Label == "instance" {
+			return fmt.Errorf("propose: drop %s: %q isn't a label tvt removes", d.ID, l.Label)
+		}
+		if len(l.Metrics) == 0 {
+			return fmt.Errorf("propose: drop %s: label %s names no metric", d.ID, l.Label)
+		}
+		for _, m := range l.Metrics {
+			if !metricName.MatchString(m) {
+				return fmt.Errorf("propose: drop %s: %q is not a metric name", d.ID, m)
+			}
+		}
 	}
 	for _, m := range d.Metrics {
 		if !metricName.MatchString(m) {

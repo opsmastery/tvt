@@ -239,8 +239,14 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 			continue
 		}
 		if rec.Action == report.ActionLabelRemoval && p.Kind != "otelcol" {
-			skipped = append(skipped, proposal{Rec: rec, Note: "no writer for label removals in " + p.Kind + " pipelines yet"})
-			continue
+			switch {
+			case p.Kind != "prometheus" && p.Kind != "alloy":
+				skipped = append(skipped, proposal{Rec: rec, Note: "no writer for label removals in " + p.Kind + " pipelines yet"})
+				continue
+			case rec.Removal != "labeldrop":
+				skipped = append(skipped, proposal{Rec: rec, Note: fmt.Sprintf("removing %s merges %d series, which a relabel rule can't sum; that needs a recording rule or a collector's ordered pipeline", rec.Signal.Name, rec.Merges)})
+				continue
+			}
 		}
 		drops = append(drops, rec)
 	}
@@ -382,12 +388,30 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 	for _, rec := range recs {
 		ev, _ := json.Marshal(rec.Evidence)
 		fmt.Fprintf(h, "%s\n%s\n", rec.ID, ev)
+		if rec.Action == report.ActionLabelRemoval {
+			i := slices.IndexFunc(d.Labels, func(l propose.LabelRule) bool { return l.Label == rec.Signal.Name })
+			if i < 0 {
+				d.Labels = append(d.Labels, propose.LabelRule{Label: rec.Signal.Name})
+				i = len(d.Labels) - 1
+			}
+			d.Labels[i].Metrics = append(d.Labels[i].Metrics, rec.Signal.Parent)
+			monthly += rec.Savings.Monthly
+			currency = cmp.Or(currency, rec.Savings.Currency)
+			continue
+		}
 		d.Metrics = append(d.Metrics, rec.Signal.Name)
 		monthly += rec.Savings.Monthly
 		currency = cmp.Or(currency, rec.Savings.Currency)
 	}
 	d.Evidence = hex.EncodeToString(h.Sum(nil))[:12]
-	d.Reason = plural(len(recs), "unread metric", "unread metrics") + ", see tvt why"
+	var parts []string
+	if len(d.Metrics) > 0 {
+		parts = append(parts, plural(len(d.Metrics), "unread metric", "unread metrics"))
+	}
+	if len(d.Labels) > 0 {
+		parts = append(parts, plural(len(d.Labels), "unread label", "unread labels"))
+	}
+	d.Reason = strings.Join(parts, ", ") + ", see tvt why"
 	if currency != "" {
 		d.Reason += fmt.Sprintf("; saves %.2f %s/month", monthly, currency)
 	}
