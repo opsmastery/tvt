@@ -194,11 +194,11 @@ func TestProposeBuildManifest(t *testing.T) {
 	}
 }
 
-// TestProposeFluentBit: a reviewed report's reroute of the shop's debug
-// stream (ground truth: route_cold, pipeline fluentbit-shop-debug) becomes
-// a rewrite_tag to the cold output in fluent-bit.yaml (S7 item 3). The
-// scan doesn't raise unread volume streams as recommendations yet, so the
-// row is added to the report the way a reviewer's JSON would carry it.
+// TestProposeFluentBit: the scan raises the shop's unread debug stream
+// (ground truth: route_cold, pipeline fluentbit-shop-debug) as a reroute,
+// and tvt propose writes it as a rewrite_tag to the cold output in
+// fluent-bit.yaml (S7 item 3). The writers state's tvt-lab.yaml names no
+// cold output, so the test's config adds one.
 func TestProposeFluentBit(t *testing.T) {
 	bm, dirs := loadBenchmark(t)
 	var st benchState
@@ -213,12 +213,19 @@ func TestProposeFluentBit(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := report.Build(in, 0)
-	r.Recommendations = append(r.Recommendations, report.Recommendation{
-		ID: `reroute:loki:stream:{app="shop", component="api", level="debug"}`, Action: report.ActionReroute,
-		Signal: report.SignalRef{ID: `loki:stream:{app="shop", component="api", level="debug"}`, Kind: "stream", Name: `{app="shop", component="api", level="debug"}`, Source: "loki"},
-		Claim:  "never queried; moving it to cold storage", Savings: report.Savings{Monthly: 12.5, Currency: "USD"},
-		Pipeline: "fluentbit-shop-debug", Proposable: true,
-	})
+	const debugID = `reroute:loki:stream:{app="shop", component="api", level="debug"}`
+	found := false
+	for _, rec := range r.Recommendations {
+		if rec.ID == debugID {
+			found = true
+			if !rec.Proposable || rec.Pipeline != "fluentbit-shop-debug" {
+				t.Errorf("debug stream: proposable %v, pipeline %q", rec.Proposable, rec.Pipeline)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the scan didn't raise %s", debugID)
+	}
 	dir := t.TempDir()
 	rj := filepath.Join(dir, "report.json")
 	b, _ := json.Marshal(r)
