@@ -1,0 +1,19 @@
+# An ocb manifest for a slim Collector: OTLP in, Prometheus remote write
+# out, no filter processor.
+dist:
+  name: otelcol-acme
+  description: Acme's Collector
+  output_path: ./dist
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.165.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.165.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/deltatocumulativeprocessor v0.165.0
+
+exporters:
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/prometheusremotewriteexporter v0.165.0
+
+providers:
+  - gomod: go.opentelemetry.io/collector/confmap/provider/fileprovider v1.45.0

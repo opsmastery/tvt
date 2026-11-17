@@ -140,3 +140,55 @@ func TestProposeValidationFails(t *testing.T) {
 		t.Error("the patch should carry the unvalidated Alloy change, marked")
 	}
 }
+
+// TestProposeBuildManifest: with an ocb manifest next to the collector
+// config that lacks the filter processor, the patch adds it (S7 item 4);
+// without one, the patch says otelcol-contrib is assumed.
+func TestProposeBuildManifest(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	checkout := t.TempDir()
+	if err := os.CopyFS(checkout, os.DirFS(filepath.Join(dirs[st.Name], "checkout"))); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile("../../pkg/propose/testdata/builder-config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func() (string, string) {
+		t.Helper()
+		dir := t.TempDir()
+		var out strings.Builder
+		o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Output: "patch", Dir: dir,
+			Checkouts: checkoutFlag{repo: checkout}, Validate: "off"}
+		if err := runPropose(context.Background(), o, &out); err != nil {
+			t.Fatal(err)
+		}
+		patch, err := os.ReadFile(filepath.Join(dir, report.ManifestDir(repo)+".patch"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.String(), string(patch)
+	}
+	out, patch := run()
+	if !strings.Contains(out, "build: "+repo+" no ocb builder manifest") || !strings.Contains(patch, "assumed otelcol-contrib") {
+		t.Errorf("no manifest: not noted\n%s", out)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "otelcol", "builder-config.yaml"), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, patch = run()
+	if !strings.Contains(out, "build: "+repo+" otelcol/builder-config.yaml: adds the filter processor v0.165.0") {
+		t.Errorf("manifest: not noted\n%s", out)
+	}
+	if !strings.Contains(patch, "a/otelcol/builder-config.yaml") || !strings.Contains(patch, "+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.165.0") {
+		t.Errorf("manifest not patched:\n%s", patch)
+	}
+}
