@@ -155,14 +155,18 @@ var (
 	runtimeFound = map[string]string{}
 )
 
-// containerRuntime is the first container CLI whose engine answers, cached.
+// containerRuntime is the first container CLI whose engine answers,
+// cached per requested runtime and PATH: a lookup under one PATH says
+// nothing about another (a test that empties PATH must not leave "no
+// runtime" behind for the rest of the process).
 func containerRuntime(want string) string {
 	if want == "none" {
 		return ""
 	}
+	key := want + "\x00" + os.Getenv("PATH")
 	runtimeMu.Lock()
 	defer runtimeMu.Unlock()
-	if rt, ok := runtimeFound[want]; ok {
+	if rt, ok := runtimeFound[key]; ok {
 		return rt
 	}
 	cands := []string{"podman", "docker"}
@@ -193,7 +197,7 @@ func containerRuntime(want string) string {
 			break
 		}
 	}
-	runtimeFound[want] = found
+	runtimeFound[key] = found
 	return found
 }
 
