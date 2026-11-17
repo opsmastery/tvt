@@ -364,6 +364,10 @@ type PipelineTarget struct {
 	Subject  string
 	Pipeline string
 	Note     string
+	// Jobs are the job label values the metric carries (S7 item 3): the
+	// scrape configs a drop goes into. Empty for streams, and when the job
+	// label wasn't read.
+	Jobs []string
 }
 
 // OverflowFinding is one metric with OpenTelemetry overflow series (S6
