@@ -103,7 +103,7 @@ func isIdent(c byte) bool {
 
 // ottlFuncs are the functions tvt's conditions may call: stable standard
 // OTTL functions only (S7 item 6), no experimental or lambda functions.
-var ottlFuncs = map[string]bool{"IsMatch": true}
+var ottlFuncs = map[string]bool{"IsMatch": true, "delete_matching_keys": true}
 
 var ottlCall = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\(`)
 

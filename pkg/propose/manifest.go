@@ -16,8 +16,12 @@ import (
 const (
 	// FilterProcessorModule is the filter processor's Go module.
 	FilterProcessorModule = "github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor"
-	contribPrefix         = "github.com/open-telemetry/opentelemetry-collector-contrib/"
-	corePrefix            = "go.opentelemetry.io/collector/"
+	// TransformProcessorModule and IntervalProcessorModule carry the
+	// ordered pipeline for delta counters (S7 item 8).
+	TransformProcessorModule = "github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor"
+	IntervalProcessorModule  = "github.com/open-telemetry/opentelemetry-collector-contrib/processor/intervalprocessor"
+	contribPrefix            = "github.com/open-telemetry/opentelemetry-collector-contrib/"
+	corePrefix               = "go.opentelemetry.io/collector/"
 )
 
 // IsBuilderManifest reports whether src looks like an ocb manifest: a dist
@@ -47,6 +51,13 @@ func EnsureProcessor(src []byte, module string, d Drop) (out []byte, version str
 	if err != nil {
 		return nil, "", err
 	}
+	return EnsureProcessorKeep(out, module, d)
+}
+
+// EnsureProcessorKeep is EnsureProcessor without removing tvt's blocks
+// first, for adding several modules in one pass: the caller strips once.
+// A module already in a tvt block counts as listed.
+func EnsureProcessorKeep(out []byte, module string, d Drop) ([]byte, string, error) {
 	root, err := otelRoot(out)
 	if err != nil {
 		return nil, "", err
@@ -65,7 +76,7 @@ func EnsureProcessor(src []byte, module string, d Drop) (out []byte, version str
 			}
 		}
 	}
-	version = manifestVersion(root)
+	version := manifestVersion(root)
 	if version == "" {
 		return nil, "", fmt.Errorf("propose: the manifest gives no component version to match for %s", module)
 	}
@@ -79,7 +90,7 @@ func EnsureProcessor(src []byte, module string, d Drop) (out []byte, version str
 	default:
 		indent := strings.Repeat(" ", procs.Content[0].Column-3)
 		text := fmt.Sprintf("%s# %s\n%s- %s\n%s# %s\n", indent, d.begin(), indent, line, indent, endMarker)
-		out = insertAfterLine(out, lastLine(procs), text)
+		out = insertAfterLine(out, pastBlockEnd(out, lastLine(procs)), text)
 	}
 	// Re-read: the module must now be listed once, at that version.
 	root, err = otelRoot(out)
