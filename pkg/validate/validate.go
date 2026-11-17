@@ -174,9 +174,20 @@ func containerRuntime(want string) string {
 		if _, err := exec.LookPath(c); err != nil {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		err := exec.CommandContext(ctx, c, "info").Run()
-		cancel()
+		// A busy engine (parallel test packages, a machine still starting)
+		// can fail one info call; three tries a second apart.
+		var err error
+		for try := 0; try < 3; try++ {
+			if try > 0 {
+				time.Sleep(time.Second)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			err = exec.CommandContext(ctx, c, "info").Run()
+			cancel()
+			if err == nil {
+				break
+			}
+		}
 		if err == nil {
 			found = c
 			break
