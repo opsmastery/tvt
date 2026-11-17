@@ -1,6 +1,6 @@
 # 0011. Records, approvals bound to evidence, and the expected end state
 
-Date: 2026-11-16 · Status: proposed (accept before S8)
+Date: 2026-11-16 · Status: accepted (Nov 16)
 
 ## Context
 
