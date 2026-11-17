@@ -84,7 +84,7 @@ type Config struct {
 }
 
 // Pipeline kinds (ADR 0007).
-var PipelineKinds = []string{"prometheus", "alloy", "otelcol", "fluentbit", "exporter"}
+var PipelineKinds = []string{"prometheus", "alloy", "otelcol", "fluentbit", "prometheus-operator", "exporter"}
 
 // Pipeline is one place signals are ingested and shaped (ADR 0007).
 type Pipeline struct {
@@ -112,6 +112,10 @@ type Pipeline struct {
 	// Cold is the alias of the output that takes streams tvt reroutes to
 	// cold storage (fluentbit pipelines): one the config already defines.
 	Cold string `yaml:"cold"`
+	// MonitorJobs names the monitor (Kind/namespace/name) for a job tvt
+	// can't work out from the manifests (prometheus-operator pipelines: a
+	// ServiceMonitor whose Service isn't in them, such as the apiserver's).
+	MonitorJobs map[string]string `yaml:"monitor_jobs"`
 }
 
 // Records declares records: metrics entries are anchored regexes, streams
