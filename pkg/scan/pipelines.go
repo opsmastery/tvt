@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
@@ -169,7 +170,7 @@ func pipelineTargets(in Inputs, signals []graph.Signal, consumers []graph.Consum
 		if !ok {
 			continue
 		}
-		t := graph.PipelineTarget{Subject: s.ID}
+		t := graph.PipelineTarget{Subject: s.ID, Jobs: in.MetricJobs[name]}
 		switch {
 		case recorded[name]:
 			t.Note = PipelineRuleOutput
@@ -193,7 +194,7 @@ func pipelineTargets(in Inputs, signals []graph.Signal, consumers []graph.Consum
 		}
 		t, ok := metricTarget[metric]
 		if !ok {
-			t = graph.PipelineTarget{Note: PipelineNoMatch}
+			t = graph.PipelineTarget{Note: PipelineNoMatch, Jobs: in.MetricJobs[metric]}
 			t.Pipeline, t.Note = target(metricHits(metric))
 		}
 		t.Subject = s.ID
@@ -303,4 +304,23 @@ func cmpOr(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// MetricJobs inverts the job label's values into metric -> jobs (S7 item
+// 3), sorted. Nil when the job label wasn't read.
+func MetricJobs(lm collect.LabelMetrics) map[string][]string {
+	byValue, ok := lm["job"]
+	if !ok {
+		return nil
+	}
+	out := map[string][]string{}
+	for job, names := range byValue {
+		for _, m := range names {
+			out[m] = append(out[m], job)
+		}
+	}
+	for m := range out {
+		slices.Sort(out[m])
+	}
+	return out
 }

@@ -265,12 +265,15 @@ CREATE TABLE IF NOT EXISTS slo_findings (
 -- Pipeline targets (graph.PipelineTarget, S6 item 4, ADR 0007): the
 -- pipeline each signal maps to, '' when unmapped (note says why). subject:
 -- a signal ID, or stream:<labels> for a stream the volume API listed (not
--- a signal, so no foreign key).
+-- a signal, so no foreign key). jobs: the job label values a metric (or a
+-- label's metric) carries, one per line (schema 24, S7 item 3: where tvt
+-- propose puts its drop rules).
 CREATE TABLE IF NOT EXISTS pipeline_targets (
     scan_id  INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
     subject  TEXT NOT NULL,
     pipeline TEXT NOT NULL,
     note     TEXT NOT NULL,
+    jobs     TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (scan_id, subject)
 );
 

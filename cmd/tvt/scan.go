@@ -291,6 +291,15 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		default:
 			in.LabelMetrics = lm
 		}
+		// The job label puts a drop into the right scrape configs (S7
+		// item 3). Read on its own when no handle names it, so a cut-off
+		// job list can't unmap metrics; a failure leaves jobs unknown and
+		// tvt propose skips those metrics with the reason.
+		if slices.Contains(labels, "job") {
+			in.MetricJobs = scan.MetricJobs(in.LabelMetrics)
+		} else if jl, err := pc.LabelMetrics(ctx, []string{"job"}); err == nil {
+			in.MetricJobs = scan.MetricJobs(jl)
+		}
 	}
 	// Scrape intervals turn series into samples per month. They're a cost
 	// input, not protection: without them a metric's interval is assumed
