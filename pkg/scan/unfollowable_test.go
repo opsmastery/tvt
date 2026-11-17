@@ -31,3 +31,27 @@ func TestHoldUnfollowableAll(t *testing.T) {
 		t.Errorf("gaps %v", gaps)
 	}
 }
+
+// TestHoldUnfollowableStreams: a loki.process rule tvt can't follow holds
+// the pipeline's streams and stream signals, not its metrics.
+func TestHoldUnfollowableStreams(t *testing.T) {
+	out := []graph.PipelineTarget{
+		{Subject: StreamSubject(`{app="shop", level="info"}`), Pipeline: "alloy-apps"},
+		{Subject: `loki:stream:{app="shop", level=~"info|warn"}`, Pipeline: "alloy-apps"},
+		{Subject: "prom:metric:shop_http_requests_total", Pipeline: "alloy-apps"},
+		{Subject: StreamSubject(`{app="reconciler"}`), Pipeline: "other"},
+	}
+	in := Inputs{Rewrites: map[string][]propose.Rewrite{"alloy-apps": {
+		{File: "alloy/config.alloy", Component: `loki.process "apps"`, Unfollowable: "stage.labels sets stream labels from log content", All: true, Streams: true},
+	}}}
+	gaps := holdUnfollowable(in, out, "prom:metric:", "prom:label:")
+	if out[0].Pipeline != "" || out[1].Pipeline != "" || !strings.HasPrefix(out[1].Note, PipelineUnfollowable) {
+		t.Errorf("streams not held: %+v", out[:2])
+	}
+	if out[2].Pipeline != "alloy-apps" || out[3].Pipeline != "other" {
+		t.Errorf("held too much: %+v", out[2:])
+	}
+	if len(gaps) != 1 || !strings.Contains(gaps[0], "1 streams held") {
+		t.Errorf("gaps %v", gaps)
+	}
+}
