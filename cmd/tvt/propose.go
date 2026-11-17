@@ -370,6 +370,11 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 			}
 			continue
 		}
+		if rec.Action == report.ActionLabelRemoval && (rec.Signal.Name == "job" || rec.Signal.Name == "instance" || strings.HasPrefix(rec.Signal.Name, "__")) {
+			// One refused label must not take the file's other rules with it.
+			skipped = append(skipped, proposal{Rec: rec, Note: "tvt never removes " + rec.Signal.Name + ": it identifies the scrape target, and rules, alerts and joins rely on it"})
+			continue
+		}
 		if rec.Action == report.ActionLabelRemoval && p.Kind != "otelcol" {
 			switch {
 			case p.Kind != "prometheus" && p.Kind != "alloy":
@@ -545,6 +550,7 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 	h := sha256.New()
 	fmt.Fprintf(h, "scan %d\n", scan)
 	d := propose.Drop{ID: id, Scan: scan}
+	streams := 0
 	var monthly float64
 	currency := ""
 	for _, rec := range recs {
@@ -561,7 +567,11 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 			currency = cmp.Or(currency, rec.Savings.Currency)
 			continue
 		}
-		d.Metrics = append(d.Metrics, rec.Signal.Name)
+		if rec.Action == report.ActionReroute {
+			streams++ // a stream's route: nothing for the Drop's metric list
+		} else {
+			d.Metrics = append(d.Metrics, rec.Signal.Name)
+		}
 		monthly += rec.Savings.Monthly
 		currency = cmp.Or(currency, rec.Savings.Currency)
 	}
@@ -572,6 +582,9 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 	}
 	if len(d.Labels) > 0 {
 		parts = append(parts, plural(len(d.Labels), "unread label", "unread labels"))
+	}
+	if streams > 0 {
+		parts = append(parts, plural(streams, "unread stream", "unread streams"))
 	}
 	d.Reason = strings.Join(parts, ", ") + ", see tvt why"
 	if currency != "" {
