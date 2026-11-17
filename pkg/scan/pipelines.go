@@ -253,6 +253,8 @@ func pipelineTargets(in Inputs, signals []graph.Signal, consumers []graph.Consum
 		out = append(out, t)
 	}
 
+	held := holdUnfollowable(in, out, metricPrefix, labelPrefix)
+
 	// Coverage: the share of priced metric and stream signals (rule
 	// outputs aside) mapped to one pipeline; the gap lists the rest.
 	priced := map[string]bool{}
@@ -283,6 +285,10 @@ func pipelineTargets(in Inputs, signals []graph.Signal, consumers []graph.Consum
 	}
 	if in.LabelMetricsErr != "" {
 		gaps = append(gaps, "pipeline labels: "+in.LabelMetricsErr)
+	}
+	gaps = append(gaps, held...)
+	for _, e := range in.RewriteErrs {
+		gaps = append(gaps, "pipeline rewrites: "+e)
 	}
 	src.Coverage = 1
 	if total > 0 {
@@ -323,4 +329,72 @@ func MetricJobs(lm collect.LabelMetrics) map[string][]string {
 		slices.Sort(out[m])
 	}
 	return out
+}
+
+// PipelineUnfollowable starts the note on a metric that passes a pipeline
+// rewrite tvt can't follow (S7 item 9): an evidence gap, so the metric is
+// unmapped (never proposable) while the rewrite stands.
+const PipelineUnfollowable = "passes a rewrite tvt can't follow"
+
+// holdUnfollowable unmaps every metric (and its labels) that passes a
+// rewrite tvt can't follow, in place, and returns one gap line per
+// rewrite. Renames tvt follows change nothing here: readers already match
+// the stored name, and writers add their rules after the rename.
+func holdUnfollowable(in Inputs, out []graph.PipelineTarget, metricPrefix, labelPrefix string) []string {
+	pipelines := make([]string, 0, len(in.Rewrites))
+	for p := range in.Rewrites {
+		pipelines = append(pipelines, p)
+	}
+	slices.Sort(pipelines)
+	mapped := map[string]string{} // metric -> its pipeline target
+	for _, t := range out {
+		if name, ok := strings.CutPrefix(t.Subject, metricPrefix); ok {
+			mapped[name] = t.Pipeline
+		}
+	}
+	held := map[string]string{} // metric -> note
+	var gaps []string
+	for _, p := range pipelines {
+		for _, rw := range in.Rewrites[p] {
+			if rw.Unfollowable == "" {
+				continue
+			}
+			note := fmt.Sprintf("%s (%s %s in %s: %s)", PipelineUnfollowable, p, rw.Component, rw.File, rw.Unfollowable)
+			n := 0
+			for name, pipe := range mapped {
+				hit := rw.All && pipe == p || slices.Contains(rw.Names, name)
+				for _, pre := range rw.Prefixes {
+					hit = hit || strings.HasPrefix(name, pre)
+				}
+				for _, j := range in.MetricJobs[name] {
+					hit = hit || slices.Contains(rw.Jobs, j)
+				}
+				if !hit {
+					continue
+				}
+				n++
+				if _, ok := held[name]; !ok {
+					held[name] = note
+				}
+			}
+			gaps = append(gaps, fmt.Sprintf("pipeline %s: %s in %s can't be followed (%s): %d metrics held, none proposed", p, rw.Component, rw.File, rw.Unfollowable, n))
+		}
+	}
+	for i, t := range out {
+		name, ok := strings.CutPrefix(t.Subject, metricPrefix)
+		if !ok {
+			rest, ok := strings.CutPrefix(t.Subject, labelPrefix)
+			if !ok {
+				continue
+			}
+			name = rest
+			if j := strings.LastIndex(rest, ":"); j >= 0 {
+				name = rest[:j]
+			}
+		}
+		if note, ok := held[name]; ok && t.Note != PipelineRuleOutput {
+			out[i].Pipeline, out[i].Note = "", note
+		}
+	}
+	return gaps
 }

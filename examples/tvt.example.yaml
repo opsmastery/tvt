@@ -126,6 +126,7 @@ pipelines:
     repo: github.com/acme/observability-config
     branch: main
     files: [alloy/config.alloy]
+    checkout: ../observability-config   # optional: a local checkout; tvt scan reads renames and other name rewrites from files there
     handles:
       - '{job=~"shop|node"}'    # metrics scraped by Alloy
       - '{app="shop"}'          # log streams shipped by Alloy
