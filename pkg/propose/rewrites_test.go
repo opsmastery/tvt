@@ -1,7 +1,9 @@
 package propose
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -120,6 +122,7 @@ service:
 		{File: "c.yaml", Component: "processor transform/names", Unfollowable: `replace_pattern on the metric name: replace_pattern(metric.name, "^legacy\\.(.*)$", "$$1")`, All: true},
 		{File: "c.yaml", Component: "processor metricstransform", From: "queue_depth", To: "queue.depth", All: true},
 		{File: "c.yaml", Component: "processor metricstransform", Unfollowable: `regexp update rename of "^old_(.*)$" to "new_$${1}"`, All: true},
+		{File: "c.yaml", Component: "processor metricstransform", Label: true, Labels: []string{"b"}, Unfollowable: "update_label sets label b", All: true},
 	}
 	if !reflect.DeepEqual(rws, want) {
 		t.Errorf("rewrites:\n%+v\nwant:\n%+v", rws, want)
@@ -157,5 +160,109 @@ loki.process "static" {
 	want := []Rewrite{{File: "c.alloy", Component: `loki.process "apps"`, Unfollowable: "stage.labels sets stream labels from log content (inside stage.match)", All: true, Streams: true}}
 	if !reflect.DeepEqual(rws, want) {
 		t.Errorf("rewrites:\n%+v\nwant:\n%+v", rws, want)
+	}
+}
+
+// TestLabelRewrites: rules that set metric labels (S7 item 9): OTel
+// attributes, transform set and key renames, and Alloy replace and
+// labelmap. Deletes, hashes, labeldrop and tvt's own blocks aren't.
+func TestLabelRewrites(t *testing.T) {
+	otel := []byte(`processors:
+  attributes/env:
+    actions:
+      - key: deployment.environment
+        action: upsert
+        value: prod
+      - key: user.email
+        action: hash
+      - key: http.url
+        action: extract
+        pattern: "^(?P<scheme>[a-z]+)"
+      - key: secret
+        action: delete
+  transform/labels:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(datapoint.attributes["route"], datapoint.attributes["http.route"])
+          - delete_key(datapoint.attributes, "http.route")
+          - replace_all_patterns(datapoint.attributes, "key", "^k8s_(.*)$", "$$1")
+  # tvt:begin labels scan=1 evidence=000000000000
+  transform/tvt_aggregate:
+    metric_statements:
+      - set(datapoint.attributes["x"], "y")
+  # tvt:end
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [attributes/env, transform/labels]
+      exporters: [debug]
+`)
+	rws, err := Rewrites("otelcol", "c.yaml", otel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, rw := range rws {
+		if !rw.Label {
+			t.Errorf("not a label rule: %+v", rw)
+		}
+		got = append(got, fmt.Sprintf("%s %v %s", rw.Component, rw.Labels, rw.Unfollowable))
+	}
+	want := []string{
+		"processor attributes/env [deployment.environment] upsert sets label deployment.environment",
+		"processor attributes/env [] extract sets labels from a pattern on http.url",
+		`processor transform/labels [route] sets label route: set(datapoint.attributes["route"], datapoint.attributes["http.route"])`,
+		`processor transform/labels [] replace_all_patterns renames label keys: replace_all_patterns(datapoint.attributes, "key", "^k8s_(.*)$", "$$1")`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("otel:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+
+	alloy := []byte(`prometheus.scrape "shop" {
+  targets    = [{"__address__" = "shop:8080"}]
+  job_name   = "shop"
+  forward_to = [prometheus.relabel.apps.receiver]
+}
+
+prometheus.relabel "apps" {
+  rule {
+    source_labels = ["pod"]
+    target_label  = "instance_pod"
+  }
+  rule {
+    action = "labelmap"
+    regex  = "__meta_(.+)"
+  }
+  rule {
+    action = "labeldrop"
+    regex  = "tmp_.*"
+  }
+  // tvt:begin x scan=1 evidence=000000000000
+  rule {
+    source_labels = ["__name__"]
+    regex         = "m"
+    target_label  = "user_id"
+    replacement   = ""
+  }
+  // tvt:end
+  forward_to = []
+}
+`)
+	rws, err = Rewrites("alloy", "config.alloy", alloy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = nil
+	for _, rw := range rws {
+		got = append(got, fmt.Sprintf("%v %v %v %s", rw.Label, rw.Labels, rw.Jobs, rw.Unfollowable))
+	}
+	want = []string{
+		"true [instance_pod] [shop] replace sets label instance_pod",
+		`true [] [shop] labelmap "__meta_(.+)" sets labels tvt can't list`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("alloy:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

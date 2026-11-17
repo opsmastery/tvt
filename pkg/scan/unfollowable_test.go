@@ -55,3 +55,39 @@ func TestHoldUnfollowableStreams(t *testing.T) {
 		t.Errorf("gaps %v", gaps)
 	}
 }
+
+// TestHoldLabelRewrites: a rule that sets a label holds that label on the
+// metrics that pass it, and only that label; one that can't say which
+// labels it sets holds every label of those metrics. Metrics stay mapped.
+func TestHoldLabelRewrites(t *testing.T) {
+	out := []graph.PipelineTarget{
+		{Subject: "prom:metric:shop_http_requests_total", Pipeline: "alloy-apps"},
+		{Subject: "prom:label:shop_http_requests_total:instance_pod", Pipeline: "alloy-apps"},
+		{Subject: "prom:label:shop_http_requests_total:route", Pipeline: "alloy-apps"},
+		{Subject: "prom:label:node_cpu_seconds_total:instance_pod", Pipeline: "alloy-apps"},
+		{Subject: "prom:label:agent_tokens_total:session_id", Pipeline: "otelcol-agent"},
+	}
+	in := Inputs{
+		MetricJobs: map[string][]string{"shop_http_requests_total": {"shop"}, "node_cpu_seconds_total": {"node"}},
+		Rewrites: map[string][]propose.Rewrite{
+			"alloy-apps":    {{File: "config.alloy", Component: `prometheus.relabel "apps"`, Label: true, Labels: []string{"instance_pod"}, Jobs: []string{"shop"}, Unfollowable: "replace sets label instance_pod"}},
+			"otelcol-agent": {{File: "c.yaml", Component: "processor attributes/x", Label: true, All: true, Unfollowable: "extract sets labels from a pattern on http.url"}},
+		},
+	}
+	gaps := holdUnfollowable(in, out, "prom:metric:", "prom:label:")
+	if out[0].Pipeline != "alloy-apps" {
+		t.Errorf("the metric was held: %+v", out[0])
+	}
+	if out[1].Pipeline != "" || !strings.Contains(out[1].Note, "replace sets label instance_pod") {
+		t.Errorf("the set label wasn't held: %+v", out[1])
+	}
+	if out[2].Pipeline != "alloy-apps" || out[3].Pipeline != "alloy-apps" {
+		t.Errorf("held too much: %+v", out[2:4])
+	}
+	if out[4].Pipeline != "" {
+		t.Errorf("unknown labels not held: %+v", out[4])
+	}
+	if len(gaps) != 2 || !strings.Contains(gaps[0]+gaps[1], "1 labels held") {
+		t.Errorf("gaps %v", gaps)
+	}
+}
