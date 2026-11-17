@@ -414,6 +414,13 @@ func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Bu
 // be one series of an OTel histogram is skipped: the collector sees the
 // whole histogram.
 func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
+	form, err := propose.OTTLFormFor(p.Version)
+	if err != nil {
+		for _, rec := range recs {
+			skipped = append(skipped, proposal{Rec: rec, Note: err.Error()})
+		}
+		return nil, skipped, ""
+	}
 	var ok []report.Recommendation
 	for _, rec := range recs {
 		if _, matchable := propose.OtelConditions(rec.Signal.Name); !matchable {
@@ -444,6 +451,7 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 		}
 		d := dropOf(p.Name, ok, scan)
 		d.PromNames = true
+		d.Collector = p.Version
 		out, err := propose.Otelcol(src, pipes, d)
 		if err == nil {
 			err = check(root, f, out)
@@ -457,6 +465,9 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 	}
 	if failure == "" && files == 0 {
 		failure = "no metrics pipeline in " + strings.Join(p.Files, ", ")
+	}
+	if failure == "" && form.Note != "" {
+		note(form.Note)
 	}
 	if failure == "" {
 		d := dropOf(p.Name, ok, scan)

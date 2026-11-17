@@ -140,6 +140,7 @@ pipelines:
     helm_values:
       file: charts/otel-gateway/values.yaml
       path: config
+    version: 0.165.0   # optional: the Collector version; picks the OTTL form tvt writes
     build: otel-gateway/builder-config.yaml   # optional: the ocb manifest of a custom Collector; tvt adds the components it writes
     handles:
       - '{service_namespace="payments"}'
