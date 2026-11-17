@@ -1,5 +1,5 @@
 # Example tvt config. Copy to ./tvt.yaml (git-ignored). `tvt scan --config tvt.yaml`
-# reads external_consumers, ownership, slos, runbooks, postmortems, seasons, gaps, pricecard, clients, storage, sweep_share and window_days; the other sections are accepted and read
+# reads external_consumers, ownership, records, slos, runbooks, postmortems, seasons, gaps, pricecard, clients, storage, sweep_share and window_days; the other sections are accepted and read
 # by later sprints (backends still come from flags). Unknown keys are errors.
 grafana:
   url: http://localhost:3000
@@ -49,6 +49,14 @@ external_consumers:
     metrics: ["^billing_.*"]
   - name: siem-export
     streams: ['{component="audit"}']
+
+# Records: signals tvt never drops, samples or collapses, whatever their
+# readers (ADR 0011). tvt also finds them by name: an audit, deploy-events or
+# change-events token in a metric name or a stream label value. A stream
+# signal that selects any record stream is protected whole.
+records:
+  metrics: ["payments_ledger_.*"]
+  streams: ['{app="k8s", component="audit"}']
 
 # Who owns which signals, and how critical their service is. First match wins.
 # An unread signal of a tier 0 or 1 service is dormant (ask its owner), never a

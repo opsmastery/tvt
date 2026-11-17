@@ -164,6 +164,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			return err
 		}
 		in.External, in.Owners, in.Clients, in.SweepShare = cfg.ExternalConsumers, cfg.Ownership.Owners, cfg.Clients, cfg.SweepShare
+		in.Records = cfg.Records
 		in.Pipelines = cfg.Pipelines
 		in.MinWindowDays = cfg.WindowDays
 		in.Seasons = cfg.Seasons

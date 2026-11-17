@@ -77,7 +77,10 @@ CREATE TABLE IF NOT EXISTS signals (
     class      TEXT NOT NULL DEFAULT '' CHECK (class IN ('', 'hard_keep', 'keep_high', 'dormant', 'candidate')),
     dormant    TEXT NOT NULL DEFAULT '',
     owner      TEXT NOT NULL DEFAULT '',
-    tier       INTEGER
+    tier       INTEGER,
+    -- Schema version 23 (S7 item 2, ADR 0011): why the signal is a record,
+    -- never dropped, sampled or collapsed; '' when it isn't.
+    record     TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS signals_name ON signals (kind, name);
 CREATE INDEX IF NOT EXISTS signals_scan ON signals (last_scan);
