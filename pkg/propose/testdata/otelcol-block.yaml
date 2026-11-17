@@ -1,0 +1,29 @@
+# Block-style lists, a pipeline with no processors, and tabs nowhere.
+receivers:
+  otlp:
+    protocols:
+      grpc: {}
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+  batch:
+exporters:
+  debug: {}
+service:
+  pipelines:
+    metrics:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - batch
+      exporters:
+        - debug
+    metrics/raw:
+      receivers: [otlp]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
