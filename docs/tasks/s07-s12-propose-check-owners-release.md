@@ -1,20 +1,25 @@
 # S7–S12: propose, check, owners, reduce before drop, savings, release candidate
 
+**Status:** Next. In these files, numbered items are must-haves in order unless marked "(should have)".
+
 Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 0006 and 0007 first. The only writes tvt makes are Git branches and PRs in mapped pipeline repos; every backend stays read-only.
 
 **Done when (S12):** `v0.1.0-rc1` is tagged; on the lab, `tvt propose` opens a draft PR for a seeded drop, `tvt check` passes it and fails a PR that would break any hard keep or record, the PR leaves draft only after a recorded owner confirmation, and the next `tvt scan` records the measured saving in the ledger.
 
-## Before S7
+## Before you start (before S7)
 
 - S4's JSON report (recommendation records, evidence gaps) and S6's pipeline targets merged: they're what `propose` and `check` read.
-- ADR: Alloy parsing (Grafana's Alloy syntax package after a license check, or a narrow parser for only the blocks tvt writes).
-- ADR 0009 (amends 0007): Fluent Bit and exporter/receiver pipeline kinds, and the source-first rule.
-- ADR 0010: reduce-before-drop actions (label removal, bucketing, stream aggregation, retention tiers, scrape interval, collapse with a count) and where each sits in the least-lossy order.
-- ADR 0011: records as a protected class, approvals bound to an evidence hash, and the expected end state on recommendations.
-- ADR 0012: reading existing OTTL. OTTL is v1 from opentelemetry-collector-contrib v0.164.0: the language reference (paths, literals, operators, function calls, `where` clauses), the standard functions and the Go API are frozen for 1.x. Decide between importing contrib's `pkg/ottl` parser (Apache 2.0; measure the dependency weight as spike 3 did for Loki) and a narrow extractor for paths and the editors that change them. Lambda functions, experimental `xottl` functions and `xprofile` are outside the guarantee.
+- ADR 0013: Alloy parsing. Drafted Nov 16 after a spike: Grafana's `syntax` package pinned at v0.1.2, writes spliced into the original bytes. Accept it.
+- ADR 0009 (amends 0007): Fluent Bit and exporter/receiver pipeline kinds, and the source-first rule. Drafted Nov 16; accept it.
+- ADR 0003: the protection manifest. Proposed since Nov 8; accept it with S7 item 1.
+- ADR 0010 (drafted Nov 16, accept before S8): reduce-before-drop actions (label removal, bucketing, stream aggregation, retention tiers, scrape interval, collapse with a count) and where each sits in the least-lossy order.
+- ADR 0011 (drafted Nov 16, accept before S8): records as a protected class, approvals bound to an evidence hash, and the expected end state on recommendations.
+- ADR 0012 (drafted Nov 16 with options and a measurement; decide before S8): reading existing OTTL. OTTL is v1 from opentelemetry-collector-contrib v0.164.0: the language reference (paths, literals, operators, function calls, `where` clauses), the standard functions and the Go API are frozen for 1.x. Decide between importing contrib's `pkg/ottl` parser (Apache 2.0; measure the dependency weight as spike 3 did for Loki) and a narrow extractor for paths and the editors that change them. Lambda functions, experimental `xottl` functions and `xprofile` are outside the guarantee.
 - tvt-lab: the pipeline repo and Fluent Bit container from `lab-backlog.md` (S7).
 
 ## S7: writers
+
+**Status:** Planned.
 
 **Done when:** `propose` opens a draft PR against the lab pipelines repo for each writer kind.
 
@@ -30,6 +35,8 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 10. **Generated rules carry their evidence and are regenerated, not hand-edited.** Every rule tvt writes sits inside a marked block (`# tvt:begin <recommendation id>` ... `# tvt:end`) whose comment carries the scan ID, the evidence hash from S9 and a one-line reason ("no reader in 30d; 0 rules, 0 panels; $3.10/mo"). The next `propose` rewrites only its own blocks from current evidence, removes blocks whose recommendation was dismissed or whose evidence changed, and leaves everything outside them alone. `check` warns when a block was edited by hand since tvt wrote it.
 
 ## S8: check, the safety gate
+
+**Status:** Planned.
 
 **Done when:** every unsafe case in ground truth is refused, with the reason in the `check` output.
 
@@ -49,6 +56,8 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 
 ## S9: owner workflow
 
+**Status:** Planned.
+
 **Done when:** a lab drop goes from draft to ready only after a recorded confirmation, and changing its evidence reopens it.
 
 1. **Owners.** From the ownership map in `tvt.yaml`, CODEOWNERS, `team`/`service` labels and Backstage `catalog-info.yaml` (`spec.owner`, through the component's name or annotations). When none of those name an owner, fall back to OTel resource attributes and Kubernetes metadata: `service.namespace` and `service.name` mapped through `tvt.yaml`, then the workload's `app.kubernetes.io/part-of` and `app.kubernetes.io/name` labels and team labels on its namespace. An owner found this way is marked inferred in the recommendation. A dormant signal with no owner from any source stays report only and is listed as an evidence gap (missing ownership), never routed to a guess.
@@ -59,6 +68,8 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 6. **Capped queue and weekly digest** per owner instead of a stream of PRs.
 
 ## S10: reduce before drop
+
+**Status:** Planned.
 
 **Done when:** for each lab finding, `propose` picks the least-lossy action that `check` accepts.
 
@@ -72,6 +83,8 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 
 ## S11: savings ledger
 
+**Status:** Planned.
+
 **Done when:** the MVP gate is rehearsed on the lab: merge a tvt PR, and the next scan records measured savings.
 
 1. **Before and after per merged PR:** series or bytes and $/month from the scan before the merge and the first scan after it, stored in the graph and shown in the report.
@@ -80,6 +93,8 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 4. **Measured from the Collector.** Where a Collector is in the path, read its own exporter telemetry before and after the merge (`otelcol_exporter_sent_log_records_total`, sent spans and metric points, `otelcol_exporter_enqueue_size_bytes`). The bytes metric needs `service.telemetry.metrics.level: detailed` and a `sending_queue`, and it is labelled by exporter, not signal.
 
 ## S12: release candidate
+
+**Status:** Planned.
 
 **Done when:** `v0.1.0-rc1` is tagged, and the install guide works on a clean machine.
 
