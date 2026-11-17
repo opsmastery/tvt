@@ -56,7 +56,7 @@ get "$PROM/api/v1/series?match[]=shop_cart_operations_total&limit=200" "$OUT/pro
 # Pipeline labels (S6 item 4): label -> value -> metric names, for the
 # labels tvt.yaml's pipelines handles match on. The test server answers
 # /api/v1/label/<l>/values and /api/v1/label/__name__/values?match[]= from it.
-PIPELINE_LABELS=${PIPELINE_LABELS:-job instance app}
+PIPELINE_LABELS=${PIPELINE_LABELS:-job instance app level component service_name}
 label_metrics() {
   printf '{'
   sep=''
