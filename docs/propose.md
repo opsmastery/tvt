@@ -44,6 +44,19 @@ Each rule sits in a marked block (S7 item 10):
 
 `evidence` is a short hash of the scan and the recommendations' evidence; S9 binds approvals to it. Every existing tvt block in a file is removed before the new ones go in, so a rerun replaces the last proposal instead of stacking on it, and every other byte of the file is kept. The patch starts with the recommendations it carries and their claims; `git apply` skips that text.
 
+## OTTL by Collector version
+
+`pipelines[].version` in `tvt.yaml` records the Collector version (S7 item 7), and picks how the filter's conditions are written. Each boundary was checked with `otelcol-contrib validate` on the real image, and both forms were run on live Collectors, which dropped exactly the matching metric:
+
+| Version | Conditions |
+|---|---|
+| v0.122.0 and later | context-qualified paths: `metric.name`, `metric.unit`, `metric.is_monotonic` (v0.121.0 and v0.120.0 reject them) |
+| v0.80.0 to v0.121.x | bare paths: `name`, `unit`, `is_monotonic` |
+| before v0.80.0 | refused: older images have no `validate` command, so tvt has no template it has checked for them |
+| not set | bare paths, which every checked version accepts (v0.80.0 through v0.165.0), and the patch says to set the version |
+
+Every condition follows S7 item 6: stable standard functions only (`IsMatch`), no experimental or lambda functions, `error_mode: ignore`, and one path form per filter; tvt checks this before writing. tvt never writes a `batch` processor. The filter goes first in each pipeline rather than after enrich and clean processors: it matches only names as receivers emit them, so dropping before any other processor spends work on the data is both safe and cheapest. A pipeline that renames metrics in a `transform` before they're stored is a rewrite (S7 item 9), which tvt doesn't read for collectors yet.
+
 ## Custom Collector builds
 
 A Collector built with ocb has only the components its builder manifest lists, and a config naming any other doesn't load (S7 item 4). Before tvt writes `filter/tvt`, it reads the pipeline's manifest: `pipelines[].build` in `tvt.yaml` (a path in the repo), or a `builder-config.yaml` next to one of the pipeline's files. If the manifest doesn't list `github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor`, the same patch adds it, in a marked block, at the version the manifest's other contrib components use (or its core `v0` components', or `dist.otelcol_version`). Rebuild the Collector before deploying the config. A manifest with no version to match skips the pipeline: tvt doesn't guess a module version. With no manifest, tvt assumes `otelcol-contrib`, which includes the filter processor, and the patch header says so.

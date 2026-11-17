@@ -106,6 +106,9 @@ type Pipeline struct {
 	// pipelines), a path in the repo: tvt propose adds the components it
 	// writes to it (S7 item 4).
 	Build string `yaml:"build"`
+	// Version is the Collector version the pipeline runs (otelcol
+	// pipelines, "0.165.0"): it picks the OTTL form tvt writes (S7 item 7).
+	Version string `yaml:"version"`
 }
 
 // Records declares records: metrics entries are anchored regexes, streams

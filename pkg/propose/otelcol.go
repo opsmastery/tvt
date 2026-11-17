@@ -39,6 +39,15 @@ func Otelcol(src []byte, pipelines []string, d Drop) ([]byte, error) {
 	if err := d.validateOtel(); err != nil {
 		return nil, err
 	}
+	form, err := OTTLFormFor(d.Collector)
+	if err != nil {
+		return nil, fmt.Errorf("propose: %w", err)
+	}
+	for _, c := range otelConditions(d) {
+		if err := lintOTTL(c, form); err != nil {
+			return nil, err
+		}
+	}
 	if len(pipelines) == 0 {
 		return nil, fmt.Errorf("propose: drop %s: no pipeline to put it in", d.ID)
 	}
@@ -162,6 +171,12 @@ func otelConditions(d Drop) []string {
 			continue
 		}
 		out = append(out, fmt.Sprintf(`metric.name == "%s"`, n))
+	}
+	// An unparseable version fails in Otelcol before this is used.
+	if form, err := OTTLFormFor(d.Collector); err == nil && !form.Context {
+		for i, c := range out {
+			out[i] = barePaths(c)
+		}
 	}
 	return out
 }
