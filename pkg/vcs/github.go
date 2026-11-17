@@ -140,9 +140,17 @@ func (g GitHub) do(ctx context.Context, method, path string, in, out any) error 
 	if resp.StatusCode/100 != 2 {
 		var e struct {
 			Message string `json:"message"`
+			Errors  []struct {
+				Message, Field, Code string
+			} `json:"errors"`
 		}
 		_ = json.Unmarshal(b, &e)
-		return fmt.Errorf("vcs: %s %s: %s: %s", method, strings.SplitN(path, "?", 2)[0], resp.Status, e.Message)
+		msg := e.Message
+		for _, d := range e.Errors {
+			// GitHub's 422 says only "Validation Failed"; the details are here.
+			msg += "; " + strings.TrimSpace(strings.Join([]string{d.Field, d.Code, d.Message}, " "))
+		}
+		return fmt.Errorf("vcs: %s %s: %s: %s", method, strings.SplitN(path, "?", 2)[0], resp.Status, msg)
 	}
 	if out != nil && len(b) > 0 {
 		if err := json.Unmarshal(b, out); err != nil {
