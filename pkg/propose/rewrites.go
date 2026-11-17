@@ -30,6 +30,9 @@ type Rewrite struct {
 	Prefixes     []string
 	Names        []string
 	All          bool
+	// Streams: the rule touches log streams' labels (Alloy loki.process);
+	// with All, every stream the pipeline carries.
+	Streams bool
 }
 
 // Rewrites reads the name-touching rules of one pipeline file: Alloy
@@ -210,6 +213,7 @@ func alloyRewrites(file string, src []byte) ([]Rewrite, error) {
 	if err != nil {
 		return nil, fmt.Errorf("propose: %w", err)
 	}
+	var out []Rewrite
 	blocks := map[string]*ast.BlockStmt{} // by component ID: name.label
 	var order []string
 	// edges: component ID -> the components it sends to.
@@ -225,6 +229,11 @@ func alloyRewrites(file string, src []byte) ([]Rewrite, error) {
 		}
 		blocks[id] = b
 		order = append(order, id)
+		if strings.Join(b.Name, ".") == "loki.process" {
+			if why := lokiStageWhy(b.Body); why != "" {
+				out = append(out, Rewrite{File: file, Component: fmt.Sprintf("loki.process %q", b.Label), Unfollowable: why, All: true, Streams: true})
+			}
+		}
 		edges[id] = append(edges[id], alloyTargets(b.Body)...)
 	}
 	// upstream: component ID -> the components sending to it.
@@ -234,7 +243,6 @@ func alloyRewrites(file string, src []byte) ([]Rewrite, error) {
 			upstream[to] = append(upstream[to], from)
 		}
 	}
-	var out []Rewrite
 	for _, id := range order {
 		b := blocks[id]
 		if strings.Join(b.Name, ".") != "prometheus.relabel" {
@@ -514,4 +522,33 @@ func promRewrites(file string, src []byte) ([]Rewrite, error) {
 		}
 	}
 	return out, nil
+}
+
+// lokiStageWhy says why a loki.process component's stages make stored
+// stream labels depend on log content (stage.labels or stage.template
+// setting labels, a computed tenant), or "" when its label changes are
+// literal or absent. tvt then can't tell which streams in feed which
+// streams out, so a stream proposal can't be scoped to the source.
+func lokiStageWhy(body ast.Body) string {
+	for _, st := range body {
+		b, ok := st.(*ast.BlockStmt)
+		if !ok {
+			continue
+		}
+		switch strings.Join(b.Name, ".") {
+		case "stage.labels":
+			return "stage.labels sets stream labels from log content"
+		case "stage.template":
+			return "stage.template computes values that can become labels"
+		case "stage.tenant":
+			if _, lit := literalString(attr(b.Body, "value")); !lit {
+				return "stage.tenant picks the tenant from log content"
+			}
+		case "stage.match":
+			if why := lokiStageWhy(b.Body); why != "" {
+				return why + " (inside stage.match)"
+			}
+		}
+	}
+	return ""
 }
