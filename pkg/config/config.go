@@ -405,11 +405,18 @@ func (c *Config) validate() error {
 				return fmt.Errorf("pipeline %q: handles %q: %w", p.Name, h, err)
 			}
 		}
-		if p.HelmValues != nil && (p.HelmValues.File == "" || p.HelmValues.Path == "") {
-			return fmt.Errorf("pipeline %q: helm_values needs file and path", p.Name)
+		// helm_values.path is where the config sits in the values: required
+		// for a collector (its config key); for a chart whose own keys tvt
+		// writes (kube-prometheus-stack, fluent/fluent-bit) it's empty, or
+		// the subchart's key in an umbrella chart.
+		if p.HelmValues != nil && (p.HelmValues.File == "" || (p.Kind == "otelcol" && p.HelmValues.Path == "")) {
+			return fmt.Errorf("pipeline %q: helm_values needs file (and path, the collector config's key)", p.Name)
 		}
-		if p.HelmValues != nil && len(p.Files) > 0 {
-			return fmt.Errorf("pipeline %q: files or helm_values, not both", p.Name)
+		// A prometheus-operator pipeline may list both: files are the
+		// chart's rendered monitors, which say each job's monitor, and
+		// helm_values is where tvt writes.
+		if p.HelmValues != nil && len(p.Files) > 0 && p.Kind != "prometheus-operator" {
+			return fmt.Errorf("pipeline %q: files or helm_values, not both (only a prometheus-operator pipeline lists both: the rendered monitors and the values)", p.Name)
 		}
 	}
 	for i, p := range c.Postmortems.Paths {

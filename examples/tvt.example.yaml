@@ -154,3 +154,26 @@ pipelines:
     cold: archive        # alias of an output you define for cold storage; its match must take tvt.cold.*
     handles:
       - '{app="checkout", level="debug"}'
+
+  # Prometheus Operator monitors (ServiceMonitor, PodMonitor), here rendered
+  # by kube-prometheus-stack: tvt writes metricRelabelings drops into the
+  # chart's values overlay, never into the rendered manifests.
+  - name: kps-monitors
+    kind: prometheus-operator
+    repo: github.com/acme/platform-gitops
+    branch: main
+    files: [rendered/kube-prometheus-stack.yaml]   # helm template output, to resolve each job's monitor
+    helm_values:
+      file: charts/kube-prometheus-stack/values-prod.yaml
+      # The chart's own values.yaml at the deployed version (helm show values
+      # prometheus-community/kube-prometheus-stack --version X > this file):
+      # Helm replaces lists, so a list key the overlay doesn't set yet starts
+      # with the chart's default rules from here, or they'd be lost.
+      defaults: charts/kube-prometheus-stack/chart-defaults.yaml
+    # A job whose monitor tvt can't work out from the manifests (its Service
+    # isn't in them, such as the apiserver's): Kind/namespace/name.
+    monitor_jobs:
+      apiserver: ServiceMonitor/monitoring/kps-apiserver
+    handles:
+      - '{job=~"apiserver|kubelet|node-exporter"}'
+    reviewers: ["@acme/platform-sre"]

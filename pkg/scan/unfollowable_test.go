@@ -91,3 +91,23 @@ func TestHoldLabelRewrites(t *testing.T) {
 		t.Errorf("gaps %v", gaps)
 	}
 }
+
+// TestHoldLabelRewritesOTelKey: an OTel attribute key is held under the
+// label name Prometheus stores it as (deployment.environment ->
+// deployment_environment).
+func TestHoldLabelRewritesOTelKey(t *testing.T) {
+	out := []graph.PipelineTarget{
+		{Subject: "prom:label:coding_agent_token_usage_total:deployment_environment", Pipeline: "otelcol-agent"},
+		{Subject: "prom:label:coding_agent_token_usage_total:session_id", Pipeline: "otelcol-agent"},
+	}
+	in := Inputs{Rewrites: map[string][]propose.Rewrite{"otelcol-agent": {
+		{File: "c.yaml", Component: "processor attributes/env", Label: true, Labels: []string{"deployment.environment"}, All: true, Unfollowable: "upsert sets label deployment.environment"},
+	}}}
+	holdUnfollowable(in, out, "prom:metric:", "prom:label:")
+	if out[0].Pipeline != "" || out[1].Pipeline != "otelcol-agent" {
+		t.Errorf("%+v", out)
+	}
+	if storedLabel("9lives") != "key_9lives" {
+		t.Error(storedLabel("9lives"))
+	}
+}
