@@ -378,7 +378,7 @@ func holdUnfollowable(in Inputs, out []graph.PipelineTarget, metricPrefix, label
 					for _, jb := range in.MetricJobs[metric] {
 						hit = hit || slices.Contains(rw.Jobs, jb)
 					}
-					if !hit || (len(rw.Labels) > 0 && !slices.Contains(rw.Labels, label)) {
+					if !hit || (len(rw.Labels) > 0 && !slices.ContainsFunc(rw.Labels, func(l string) bool { return storedLabel(l) == label })) {
 						continue
 					}
 					n++
@@ -452,4 +452,21 @@ func holdUnfollowable(in Inputs, out []graph.PipelineTarget, metricPrefix, label
 		}
 	}
 	return gaps
+}
+
+// storedLabel is the label name a pipeline's label key is stored under:
+// OTel attribute keys (deployment.environment) become Prometheus labels
+// with every character outside [A-Za-z0-9_] replaced by _, as Prometheus's
+// OTLP translation does; Prometheus and Alloy names are unchanged.
+func storedLabel(key string) string {
+	b := []byte(key)
+	for i, c := range b {
+		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			b[i] = '_'
+		}
+	}
+	if len(b) > 0 && b[0] >= '0' && b[0] <= '9' {
+		return "key_" + string(b)
+	}
+	return string(b)
 }

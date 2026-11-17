@@ -173,7 +173,7 @@ func TestPipelines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Pipelines) != 4 || c.Pipelines[3].Cold != "archive" || c.Pipelines[1].Name != "alloy-apps" || c.Pipelines[1].Kind != "alloy" ||
+	if len(c.Pipelines) != 5 || c.Pipelines[4].Kind != "prometheus-operator" || c.Pipelines[4].HelmValues.Defaults == "" || c.Pipelines[4].MonitorJobs["apiserver"] == "" || c.Pipelines[3].Cold != "archive" || c.Pipelines[1].Name != "alloy-apps" || c.Pipelines[1].Kind != "alloy" ||
 		len(c.Pipelines[1].Handles) != 2 || c.Pipelines[2].HelmValues == nil || c.Pipelines[2].HelmValues.Path != "config" {
 		t.Errorf("pipelines %+v", c.Pipelines)
 	}
@@ -184,12 +184,22 @@ func TestPipelines(t *testing.T) {
 		"pipelines: [{name: a, kind: alloy, handles: ['job=a']}]":                                                          `handles "job=a"`,
 		"pipelines: [{name: a, kind: alloy, handles: ['{job=~\"(\"}']}]":                                                   `handles`,
 		"pipelines: [{name: a, kind: alloy, handles: ['{a=\"1\"}']}, {name: a, kind: prometheus, handles: ['{a=\"2\"}']}]": "appears twice",
-		"pipelines: [{name: a, kind: otelcol, handles: ['{a=\"1\"}'], helm_values: {file: v.yaml}}]":                       "file and path",
+		"pipelines: [{name: a, kind: otelcol, handles: ['{a=\"1\"}'], helm_values: {file: v.yaml}}]":                       "the collector config's key",
 		"pipelines: [{name: a, kind: otelcol, handles: ['{a=\"1\"}'], files: [x], helm_values: {file: v, path: p}}]":       "not both",
 		"pipelines: [{name: a, kind: alloy, handles: ['{a=\"1\"}'], owner: x}]":                                            "owner",
 	} {
 		if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want an error with %q", doc, err, want)
+		}
+	}
+	// Charts whose own keys tvt writes need no path, and an operator
+	// pipeline lists its rendered monitors beside the values.
+	for _, doc := range []string{
+		"pipelines: [{name: a, kind: prometheus-operator, handles: ['{a=\"1\"}'], files: [r.yaml], helm_values: {file: v.yaml, defaults: d.yaml}}]",
+		"pipelines: [{name: a, kind: fluentbit, cold: c, handles: ['{a=\"1\"}'], helm_values: {file: v.yaml, defaults: d.yaml}}]",
+	} {
+		if _, err := Parse([]byte(doc)); err != nil {
+			t.Errorf("%s: %v", doc, err)
 		}
 	}
 }
