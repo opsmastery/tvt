@@ -281,11 +281,27 @@ func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, sca
 func prBody(repo string, scan int64, written []proposal, validation, build []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Telemetry changes from tvt scan %d. Each rule sits in a marked `tvt:begin` block with its evidence; tvt regenerates its own blocks on the next run, so don't edit inside them.\n\n", scan)
-	b.WriteString("| Recommendation | Why |\n|---|---|\n")
+	// GitHub refuses a body over 65,536 characters (a 422), and a first
+	// scan can carry a thousand drops: list rows while they fit, then say
+	// how many more the patch carries.
+	const budget = 50000
+	n, shown := 0, 0
+	var rows strings.Builder
 	for _, w := range written {
-		if w.Repo == repo {
-			fmt.Fprintf(&b, "| `%s` | %s |\n", w.Rec.ID, strings.ReplaceAll(w.Rec.Claim, "|", "\\|"))
+		if w.Repo != repo {
+			continue
 		}
+		n++
+		row := fmt.Sprintf("| `%s` | %s |\n", w.Rec.ID, strings.ReplaceAll(w.Rec.Claim, "|", "\\|"))
+		if rows.Len()+len(row) > budget {
+			continue
+		}
+		rows.WriteString(row)
+		shown++
+	}
+	fmt.Fprintf(&b, "%d recommendations.\n\n| Recommendation | Why |\n|---|---|\n%s", n, rows.String())
+	if shown < n {
+		fmt.Fprintf(&b, "\n%d more aren't listed here (GitHub caps a PR description); each rule's block in the diff names its recommendation and evidence.\n", n-shown)
 	}
 	b.WriteString("\n**Validation**\n\n")
 	for _, n := range validation {
