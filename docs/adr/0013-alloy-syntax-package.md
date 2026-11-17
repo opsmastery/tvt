@@ -1,6 +1,6 @@
 # 0013. Read Alloy config with Grafana's syntax package; write by splicing
 
-Date: 2026-11-16 · Status: proposed (accept before S7)
+Date: 2026-11-16 · Status: accepted (Nov 16)
 
 ## Context
 
