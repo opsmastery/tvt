@@ -46,7 +46,7 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 ## S8
 
-**Status:** Open.
+**Status:** Planned.
 
 - A Collector filter that reads an attribute a later processor sets (`check` refuses it), an uncast status-code comparison and a regex statement with no `where` (S16 flags both).
 - The expected worst-case detection delay for each lab alert, and a scrape interval change that pushes one past its objective.
@@ -54,34 +54,34 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 ## S9
 
-**Status:** Open.
+**Status:** Planned.
 
 - A `catalog-info.yaml` for the shop with an owner, expected in the recommendation's owner field.
 
 ## S10
 
-**Status:** Open.
+**Status:** Planned.
 
 - vmagent with stream aggregation in front of one shop metric.
 - A status-code label read only through `=~"5.."`: a bucketing proposal, not a drop.
 
 ## S13–S14
 
-**Status:** Open.
+**Status:** Planned.
 
 - A flapping alert with no `for`, an alert that fires inside a silence window, two alerts that always co-fire, an alert whose runbook file hasn't changed in over 90 days, and a receiver that fails.
 - A wildcard alert and a resource-specific alert on the same shop metric, and an alert whose threshold sits inside the metric's normal range.
 
 ## S15
 
-**Status:** Open.
+**Status:** Planned.
 
 - A lab "release" that renames a shop metric a dashboard reads: a readers-broken finding naming the panel and the release.
 - The synthetic coding-agent emitter (S7) also calls a telemetry query tool: an `execute_tool` span and a `tool_result` log whose `tool_parameters` hold a PromQL query on a shop metric. Ground truth: that metric is read by client `agent`, and a reduction rule deleting `tool_parameters` from both fails `check`.
 
 ## S16
 
-**Status:** Open.
+**Status:** Planned.
 
 - Shop spans named with raw product paths, the spanmetrics histogram on default buckets, a volatile resource attribute in the metric identity, and a debug exporter left on.
 
@@ -109,7 +109,7 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 ## Later
 
-**Status:** Open, unscheduled.
+**Status:** Planned, unscheduled.
 
 - Spike: can the Podman machine VM (kernel 5.10 or newer) run the OTel eBPF profiler and OBI in a privileged container with host PID and `/sys/kernel/tracing`? If yes, an optional `profiling` Compose profile (Pyroscope plus the profiler, off by default), with an `unknown_service` process and a profile fixture.
 - A second agent tailing the shop's debug log under a different job label: double shipping.

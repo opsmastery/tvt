@@ -2,9 +2,9 @@
 
 **Status:** Done Nov 16 (PRs #77–#86; item 6 on the Grafana Cloud test stack, `docs/grafana-cloud.md`).
 
-Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md`, `docs/query-logs.md` and ADR 0007 first.
-
 **Done when:** all rule and pipeline findings match ground truth, and the report runs on the Grafana Cloud test stack. After this sprint tvt is ready for a first read-only scan outside the lab.
+
+Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md`, `docs/query-logs.md` and ADR 0007 first.
 
 ## Before you start
 
