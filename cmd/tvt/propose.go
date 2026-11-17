@@ -1052,7 +1052,34 @@ func selectorLabels(selector string) (map[string]string, error) {
 		}
 		out[m.Label] = m.Value
 	}
+	dropDerivedServiceName(out)
 	return out, nil
+}
+
+// lokiServiceSources is the order in which Loki 3 (limits_config
+// discover_service_name) picks a stream's service_name from its other
+// labels when the stream has none.
+var lokiServiceSources = []string{"service", "app", "application", "app_name", "name", "app_kubernetes_io_name",
+	"container", "container_name", "k8s_container_name", "component", "workload", "job", "k8s_job_name"}
+
+// dropDerivedServiceName removes a service_name label Loki added at
+// ingest: its value is the first of lokiServiceSources the stream has. No
+// pipeline sets it, so a rule that matched on it would never match the
+// stream where tvt writes (the live lab's debug streams carry
+// service_name="shop" from app="shop").
+func dropDerivedServiceName(l map[string]string) {
+	sn, ok := l["service_name"]
+	if !ok {
+		return
+	}
+	for _, k := range lokiServiceSources {
+		if v, ok := l[k]; ok {
+			if v == sn {
+				delete(l, "service_name")
+			}
+			return
+		}
+	}
 }
 
 // proposeMonitors writes whole-metric drops into a prometheus-operator
