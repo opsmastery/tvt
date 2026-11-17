@@ -80,7 +80,7 @@ Backends are added where a cut saves users the most: high list price per unit, b
 
 Also planned:
 
-- Traces: Tempo and Jaeger, span volume by route, span pruning before sampling, and tail-sampling or probabilistic-sampling proposals that always keep errors, slow requests and spans that change something (deploys, rollbacks, agent tool calls).
+- Traces: Tempo and Jaeger, span volume by route, span pruning before sampling, and tail-sampling or probabilistic-sampling proposals that always keep errors, slow requests and spans that change something (deploys, rollbacks, agent tool calls). Protecting those spans in pipeline config comes earlier, in `check` (S8 item 13); this is the inventory and the proposals.
 - Profiles: Pyroscope as a signal, filter proposals in a gateway Collector, and telemetry overhead measured from profiles.
 - VictoriaMetrics and VictoriaLogs (query-count usage evidence, TSDB status cardinality, vmalert rules).
 - Vector and Cribl as pipeline targets, and OBI (zero-code eBPF instrumentation) as a source.
