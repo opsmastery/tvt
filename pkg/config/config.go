@@ -80,7 +80,7 @@ type Config struct {
 }
 
 // Pipeline kinds (ADR 0007).
-var PipelineKinds = []string{"prometheus", "alloy", "otelcol"}
+var PipelineKinds = []string{"prometheus", "alloy", "otelcol", "fluentbit", "exporter"}
 
 // Pipeline is one place signals are ingested and shaped (ADR 0007).
 type Pipeline struct {
