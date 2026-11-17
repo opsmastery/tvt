@@ -669,14 +669,11 @@ func (v *validator) check(ctx context.Context, p config.Pipeline) checkFunc {
 			v.notes = append(v.notes, fmt.Sprintf("%s %s: not validated (--validate off)", p.Repo, file))
 			return nil
 		}
-		if p.Kind == "fluentbit" && propose.IsFluentOperator(out) {
-			// Fluent Operator resources aren't a Fluent Bit config: the
-			// operator builds one from them.
-			if v.o.Validate == "require" {
-				return fmt.Errorf("not validated (--validate require): Fluent Operator resources")
-			}
-			v.notes = append(v.notes, fmt.Sprintf("%s %s: NOT VALIDATED: Fluent Operator resources (the operator builds the config)", p.Repo, file))
-			return nil
+		// Operator custom resources aren't a pipeline config (the operator
+		// builds one): kubeconform checks them against their schemas.
+		kind := p.Kind
+		if kind == "prometheus-operator" || (kind == "fluentbit" && propose.IsFluentOperator(out)) {
+			kind = "kubernetes"
 		}
 		if p.HelmValues != nil && file == p.HelmValues.File {
 			// A values file isn't the pipeline's config: the chart renders
@@ -706,10 +703,16 @@ func (v *validator) check(ctx context.Context, p config.Pipeline) checkFunc {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(file)), out, 0o644); err != nil {
 			return fmt.Errorf("validation: %w", err)
 		}
-		res := validate.Run(ctx, p.Kind, dir, file, validate.Options{Images: v.o.Images, Runtime: v.o.Runtime})
+		res := validate.Run(ctx, kind, dir, file, validate.Options{Images: v.o.Images, Runtime: v.o.Runtime})
 		switch {
 		case res.Ran && res.OK:
-			v.notes = append(v.notes, fmt.Sprintf("%s %s: valid (%s)", p.Repo, file, res.By))
+			note := fmt.Sprintf("%s %s: valid (%s)", p.Repo, file, res.By)
+			if kind == "kubernetes" {
+				if n := validate.Unchecked(res.Output); n > 0 {
+					note += fmt.Sprintf("; %s of other kinds not checked", plural(n, "resource", "resources"))
+				}
+			}
+			v.notes = append(v.notes, note)
 			return nil
 		case res.Ran:
 			return fmt.Errorf("%s rejected the changed config: %s", res.By, validate.FirstLines(res.Output, 3))
