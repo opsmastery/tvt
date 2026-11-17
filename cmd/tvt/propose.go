@@ -23,6 +23,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/propose"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/validate"
+	"github.com/Opsmastery-Summit/tvt/pkg/vcs"
 )
 
 type proposeOptions struct {
@@ -38,7 +39,14 @@ type proposeOptions struct {
 	Validate string
 	Images   checkoutFlag // kind=image overrides of the validators' images
 	Runtime  string
+	// GitHub opens the draft PRs (--output pr); its token is GITHUB_TOKEN.
+	GitHub vcs.GitHub
 }
+
+// prBranch is the branch tvt pushes in each pipeline repo. It's stable,
+// so a rerun updates the same draft PR: tvt regenerates its own blocks
+// (S7 item 10), and the branch is tvt's.
+const prBranch = "tvt/propose"
 
 // checkoutFlag is --checkout repo=path, repeatable: where each pipeline
 // repo is checked out. tvt reads the files there and writes patches; it
@@ -63,7 +71,8 @@ func cmdPropose(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.DB, "db", "tvt.db", "path to the usage graph database (from tvt scan)")
 	fs.StringVar(&o.Config, "config", "", "tvt.yaml: the pipelines the drops go into (required)")
 	fs.StringVar(&o.Report, "report", "", "the reviewed report JSON (from tvt report); must be of the database's latest scan (default: build it from the database)")
-	fs.StringVar(&o.Output, "output", "patch", "what to write: patch (one git-apply patch per pipeline repo)")
+	fs.StringVar(&o.Output, "output", "patch", "what to write: patch (one git-apply patch per pipeline repo), or pr (the patches too, then a draft pull request per repo from its --checkout; needs GITHUB_TOKEN)")
+	fs.StringVar(&o.GitHub.BaseURL, "github-api", "", "GitHub API root for --output pr (default https://api.github.com; GitHub Enterprise: https://HOST/api/v3)")
 	fs.StringVar(&o.Dir, "dir", "proposals", "where to write the patches")
 	fs.StringVar(&o.Validate, "validate", "auto", "run each pipeline's own validator on the changed config: auto (when promtool, alloy, otelcol-contrib, fluent-bit or a container runtime is available), require (skip what can't be validated), off")
 	fs.Var(o.Images, "validator-image", "kind=image: validate that pipeline kind with this image, your distribution and version (repeatable)")
@@ -83,8 +92,16 @@ func cmdPropose(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "tvt propose: --config is required (the pipelines come from tvt.yaml)")
 		return exitUsage
 	}
-	if o.Output != "patch" {
-		fmt.Fprintf(stderr, "tvt propose: --output %q: only patch is built (pull requests come with S9 approvals)\n", o.Output)
+	switch o.Output {
+	case "patch":
+	case "pr":
+		o.GitHub.Token = os.Getenv("GITHUB_TOKEN")
+		if o.GitHub.Token == "" {
+			fmt.Fprintln(stderr, "tvt propose: --output pr needs GITHUB_TOKEN in the environment (a token that can push branches and open pull requests in the pipeline repos)")
+			return exitUsage
+		}
+	default:
+		fmt.Fprintf(stderr, "tvt propose: --output %q: want patch or pr\n", o.Output)
 		return exitUsage
 	}
 	if o.Validate != "auto" && o.Validate != "require" && o.Validate != "off" {
@@ -183,7 +200,113 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 			skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + name + " isn't in " + o.Config})
 		}
 	}
-	return writeProposals(o, r.Scan.ID, patches, written, skipped, v.notes, v.build, out)
+	if err := writeProposals(o, r.Scan.ID, patches, written, skipped, v.notes, v.build, out); err != nil {
+		return err
+	}
+	if o.Output == "pr" {
+		return openPRs(ctx, o, cfg.Pipelines, r.Scan.ID, patches, written, v.notes, v.build, out)
+	}
+	return nil
+}
+
+// openPRs pushes each repo's patch as tvt's branch and opens (or updates)
+// a draft pull request for it (S7 item 3). PRs stay drafts: an owner's
+// confirmation (S9) is what takes one out of draft. A repo that fails is
+// reported and the others still go ahead; the error at the end says how
+// many failed.
+func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, scan int64, patches map[string]*strings.Builder, written []proposal, validation, build []string, out io.Writer) error {
+	repos := make([]string, 0, len(patches))
+	for repo := range patches {
+		repos = append(repos, repo)
+	}
+	sort.Strings(repos)
+	failed := 0
+	for _, repo := range repos {
+		var base string
+		var reviewers []string
+		for _, p := range pipes {
+			if p.Repo != repo {
+				continue
+			}
+			base = cmp.Or(base, p.Branch)
+			for _, r := range p.Reviewers {
+				if !slices.Contains(reviewers, r) {
+					reviewers = append(reviewers, r)
+				}
+			}
+		}
+		err := func() error {
+			owner, name, err := vcs.ParseRepo(repo)
+			if err != nil {
+				return err
+			}
+			checkout, ok := o.Checkouts[repo]
+			if !ok {
+				return fmt.Errorf("no --checkout for %s", repo)
+			}
+			used, err := vcs.Push(ctx, vcs.Branch{Checkout: checkout, Base: base, Name: prBranch, Patch: patches[repo].String(),
+				Message: fmt.Sprintf("tvt propose: changes from scan %d", scan)})
+			if err != nil {
+				return err
+			}
+			res, err := o.GitHub.OpenOrUpdate(ctx, vcs.PR{Owner: owner, Repo: name, Head: prBranch, Base: used, Reviewers: reviewers,
+				Title: fmt.Sprintf("tvt: telemetry changes from scan %d", scan),
+				Body:  prBody(repo, scan, written, validation, build)})
+			if err != nil {
+				return err
+			}
+			verb := "updated"
+			if res.Created {
+				verb = "opened"
+			}
+			fmt.Fprintf(out, "draft PR %s for %s: %s\n", verb, repo, res.URL)
+			if res.Note != "" {
+				fmt.Fprintf(out, "  %s\n", res.Note)
+			}
+			return nil
+		}()
+		if err != nil {
+			failed++
+			fmt.Fprintf(out, "no PR for %s: %v\n", repo, err)
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d pull requests failed (the patches are in %s)", failed, len(repos), o.Dir)
+	}
+	return nil
+}
+
+// prBody is a draft PR's description: what changes and why, validation,
+// build notes, and that it stays a draft until its owner confirms.
+func prBody(repo string, scan int64, written []proposal, validation, build []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Telemetry changes from tvt scan %d. Each rule sits in a marked `tvt:begin` block with its evidence; tvt regenerates its own blocks on the next run, so don't edit inside them.\n\n", scan)
+	b.WriteString("| Recommendation | Why |\n|---|---|\n")
+	for _, w := range written {
+		if w.Repo == repo {
+			fmt.Fprintf(&b, "| `%s` | %s |\n", w.Rec.ID, strings.ReplaceAll(w.Rec.Claim, "|", "\\|"))
+		}
+	}
+	b.WriteString("\n**Validation**\n\n")
+	for _, n := range validation {
+		if rest, ok := strings.CutPrefix(n, repo+" "); ok {
+			fmt.Fprintf(&b, "- %s\n", rest)
+		}
+	}
+	var builds []string
+	for _, n := range build {
+		if rest, ok := strings.CutPrefix(n, repo+" "); ok {
+			builds = append(builds, rest)
+		}
+	}
+	if len(builds) > 0 {
+		b.WriteString("\n**Collector build**\n\n")
+		for _, n := range builds {
+			fmt.Fprintf(&b, "- %s\n", n)
+		}
+	}
+	b.WriteString("\nCheck each signal with `tvt why <signal>` before merging. This PR stays a draft until its owner confirms the evidence.\n")
+	return b.String()
 }
 
 // proposePipeline writes recs (whole-metric drops) into pipeline p's
