@@ -122,6 +122,29 @@
           "line:startup_burst: not raised, want repeated_line"
         ]
       }
+    },
+    "writers": {
+      "evidence": {
+        "found": 80,
+        "total": 80,
+        "score": 1,
+        "missed": []
+      },
+      "recommendations": {
+        "true_positives": 302,
+        "false_positives": 1,
+        "false_negatives": 3,
+        "precision": 0.9967,
+        "recall": 0.9902,
+        "wrong": [
+          "line:{app=\"shop\", component=\"api\", level=\"warn\"} \"method=\u003c_\u003e route=\u003c_\u003e status=404 duration_ms=\u003c_\u003e request_id=\u003c_\u003e user=\u003c_\u003e\": line_handoff, want keep"
+        ],
+        "missed": [
+          "loki:stream:{app=\"reconciler\", component=\"worker\", level=\"error\"}: not raised, want confirm",
+          "loki:stream:{app=\"shop\", component=\"api\", level=\"debug\"}: not raised, want recommend",
+          "line:startup_burst: not raised, want repeated_line"
+        ]
+      }
     }
   }
 }
