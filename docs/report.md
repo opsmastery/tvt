@@ -241,7 +241,7 @@ Readers check `version` (now 10: 2 made gaps structured, 3 added `services`, 4 a
 
 `tvt report --config tvt.yaml --manifest-dir DIR` also writes one protection manifest per pipeline repo (S7 item 1, ADR 0003 and 0007) to `DIR/<repo>/.tvt/protect.json`, where `<repo>` is the repo path from `tvt.yaml` `pipelines:` with every character but letters, digits, `.`, `_` and `-` replaced by `_`. `tvt check` reads it in that repo's CI, offline, with no credentials; `tvt propose` commits it with its PRs.
 
-A manifest lists every hard keep, keep_high and dormant signal that one of the repo's pipelines handles (records join with S7 item 2), each with its pipeline, owner and protectors: the readers behind its class, declared evidence first, never a sweep. It carries names and kinds only, never query text or values. `generated_at` is the scan's start, and `tvt check` fails a manifest older than its max age. Signals no single pipeline claims are in no manifest, because they're never proposed. Output is sorted and deterministic, so a refresh diffs cleanly.
+A manifest lists every hard keep, keep_high and dormant signal that one of the repo's pipelines handles, and every record (S7 item 2: `record` says why), each with its pipeline, owner and protectors: the readers behind its class, declared evidence first, never a sweep. It carries names and kinds only, never query text or values. `generated_at` is the scan's start, and `tvt check` fails a manifest older than its max age. Signals no single pipeline claims are in no manifest, because they're never proposed. Output is sorted and deterministic, so a refresh diffs cleanly.
 
 ```json
 {
@@ -262,3 +262,7 @@ A manifest lists every hard keep, keep_high and dormant signal that one of the r
 ```
 
 `decisions` holds owner decisions once the owner workflow exists (S9).
+
+## Records
+
+A record (S7 item 2, ADR 0011) is a signal tvt never drops, samples or collapses, whatever its readers: an audit log, deploy or change events, and agent tool-call spans once tvt reads spans. tvt marks a signal a record when `tvt.yaml` `records:` declares it (`metrics` regexes, `streams` selectors), when its metric name or one of its stream's label values has an audit, deploy-events or change-events token, or, for a stream signal, when it selects any stream that is a record. A record candidate is held as `record` and never recommended; records are in the protection manifest with `record` saying why. Capping a record's content attribute is allowed when its outcome fields stay; that check comes with `tvt check` (S8).

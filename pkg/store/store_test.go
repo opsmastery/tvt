@@ -799,9 +799,14 @@ func TestUpgradeFromVersion5AndClasses(t *testing.T) {
 
 // v22Drops turns a current database's columns back into version 21's
 // (versions 16-21 only added tables, which CREATE TABLE IF NOT EXISTS adds).
-var v22Drops = []string{
+var v22Drops = append(append([]string{}, v23Drops...),
 	`ALTER TABLE costs DROP COLUMN merges`,
 	`ALTER TABLE costs DROP COLUMN summable`,
+)
+
+// v23Drops turns a current database's tables back into version 22's.
+var v23Drops = []string{
+	`ALTER TABLE signals DROP COLUMN record`,
 }
 
 // v15Drops turns a current database's tables back into version 14's
@@ -1478,5 +1483,33 @@ func TestCostMerges(t *testing.T) {
 		if c.MergesKnown || c.Summable {
 			t.Errorf("upgraded %s: %+v, want unknown", c.SignalID, c)
 		}
+	}
+}
+
+// TestRecordUpgrade (schema 23, S7 item 2): a version 22 database gains
+// signals.record, empty for old rows, and a record round-trips.
+func TestRecordUpgrade(t *testing.T) {
+	s, path := open(t)
+	id := scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutSignal(ctx, graph.Signal{ID: "loki:stream:{component=\"audit\"}", Kind: graph.KindStream, Name: `{component="audit"}`, Source: "loki", Record: "named like a record"}))
+	})
+	sigs, err := s.Signals(ctx, id)
+	must(t, err)
+	if len(sigs) != 1 || sigs[0].Record != "named like a record" {
+		t.Fatalf("signals %+v", sigs)
+	}
+	s.Close()
+	raw, err := sql.Open("sqlite", path)
+	must(t, err)
+	for _, q := range append(append([]string{}, v23Drops...), `UPDATE meta SET value = '22' WHERE key = 'schema_version'`) {
+		_, err := raw.Exec(q)
+		must(t, err)
+	}
+	raw.Close()
+	s2, err := Open(ctx, path)
+	must(t, err)
+	defer s2.Close()
+	if sigs, err = s2.Signals(ctx, id); err != nil || len(sigs) != 1 || sigs[0].Record != "" {
+		t.Fatalf("upgraded signals %+v, %v: want one, not a record", sigs, err)
 	}
 }

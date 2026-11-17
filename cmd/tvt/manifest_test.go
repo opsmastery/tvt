@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"go.yaml.in/yaml/v3"
 )
 
 // TestProtectionManifest (S7 item 1, ADR 0003 and 0007) writes the writers
@@ -141,6 +143,76 @@ func TestProtectionManifest(t *testing.T) {
 	for _, s := range m.Signals {
 		if s.Pipeline == "" || !slices.Contains(m.Pipelines, s.Pipeline) {
 			t.Errorf("%s: pipeline %q not one of the repo's", s.ID, s.Pipeline)
+		}
+	}
+}
+
+// TestRecords (S7 item 2, ADR 0011) scans the writers state: every record
+// stream in ground truth is selected by a stream signal marked as a record
+// and in the manifest, no recommendation covers a record, and the audit
+// stream is a record by declaration.
+func TestRecords(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	_, rep, _ := scanState(t, st, dirs[st.Name])
+	var gt struct {
+		Records struct {
+			Streams map[string]string `yaml:"streams"`
+		} `yaml:"records"`
+	}
+	if err := yaml.Unmarshal(testutil.ReadFile(t, "bench/writers/ground-truth.yaml"), &gt); err != nil {
+		t.Fatal(err)
+	}
+	if len(gt.Records.Streams) == 0 {
+		t.Fatal("ground truth lists no record streams")
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	dir := t.TempDir()
+	var out strings.Builder
+	o := reportOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), JSON: filepath.Join(dir, "r.json"), Top: 0, ManifestDir: dir}
+	if err := runReport(context.Background(), o, &out); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, report.ManifestDir("github.com/Opsmastery-Summit/tvt-lab"), ".tvt", "protect.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m report.Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	for key := range gt.Records.Streams {
+		labels := streamLabels(t, key)
+		found := ""
+		for _, s := range m.Signals {
+			if s.Kind == "stream" && s.Record != "" && selectorMatches(t, s.Name, labels) {
+				found = s.Record
+				if strings.HasPrefix(found, "declared") {
+					break
+				}
+			}
+		}
+		switch {
+		case found == "":
+			t.Errorf("record stream %s: no record stream signal in the manifest selects it", key)
+		case !strings.HasPrefix(found, "declared"):
+			t.Errorf("record stream %s: %q, want it declared (tvt-lab.yaml records.streams)", key, found)
+		}
+	}
+	records := map[string]bool{}
+	for _, s := range m.Signals {
+		if s.Record != "" {
+			records[s.ID] = true
+		}
+	}
+	for _, r := range rep.Recommendations {
+		if records[r.Signal.ID] {
+			t.Errorf("recommendation %s %s covers a record", r.Action, r.Signal.ID)
 		}
 	}
 }
