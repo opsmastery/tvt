@@ -193,3 +193,25 @@ func lineIndent(src []byte, n int) string {
 	l := lines[n-1]
 	return l[:len(l)-len(strings.TrimLeft(l, " \t"))]
 }
+
+// AlloyJobs lists the jobs of an Alloy config's prometheus.scrape
+// components (job_name, or the component's label), in file order.
+func AlloyJobs(src []byte) ([]string, error) {
+	f, err := parser.ParseFile("config.alloy", src)
+	if err != nil {
+		return nil, fmt.Errorf("propose: %w", err)
+	}
+	var out []string
+	for _, st := range f.Body {
+		b, ok := st.(*ast.BlockStmt)
+		if !ok || strings.Join(b.Name, ".") != "prometheus.scrape" {
+			continue
+		}
+		job := b.Label
+		if v, ok := literalString(attr(b.Body, "job_name")); ok {
+			job = v
+		}
+		out = append(out, job)
+	}
+	return out, nil
+}
