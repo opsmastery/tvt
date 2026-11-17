@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 )
 
@@ -277,5 +278,50 @@ func TestProposeFluentBit(t *testing.T) {
 		if !strings.Contains(string(patch), want) {
 			t.Errorf("patch lacks %q:\n%s", want, patch)
 		}
+	}
+}
+
+// TestProposeMonitors: drops for metrics of the kube-prometheus-stack
+// fixture's jobs go into the right ServiceMonitor endpoints; a job no
+// monitor resolves to (the apiserver's Service isn't rendered) is skipped
+// until tvt.yaml maps it.
+func TestProposeMonitors(t *testing.T) {
+	root := t.TempDir()
+	r, err := os.ReadFile("../../testdata/kube-prometheus-stack/render.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "render.yaml"), r, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := func(name string) report.Recommendation {
+		return report.Recommendation{ID: "drop:prom:metric:" + name, Action: report.ActionDrop,
+			Signal: report.SignalRef{ID: "prom:metric:" + name, Kind: "metric", Name: name}, Proposable: true}
+	}
+	recs := []report.Recommendation{rec("node_softnet_times_squeezed_total"), rec("apiserver_storage_objects")}
+	jobs := map[string][]string{
+		"prom:metric:node_softnet_times_squeezed_total": {"node-exporter"},
+		"prom:metric:apiserver_storage_objects":         {"apiserver"},
+	}
+	p := config.Pipeline{Name: "kps", Kind: "prometheus-operator", Files: []string{"render.yaml"}}
+	ok := func(string, string, []byte) error { return nil }
+	written, skipped, diff := proposeMonitors(p, recs, jobs, root, 4, ok)
+	if len(written) != 1 || written[0].Rec.Signal.Name != "node_softnet_times_squeezed_total" {
+		t.Errorf("written %+v", written)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0].Note, "job apiserver maps to no monitor") || !strings.Contains(skipped[0].Note, "monitor_jobs") {
+		t.Errorf("skipped %+v", skipped)
+	}
+	if !strings.Contains(diff, `+          regex: "node_softnet_times_squeezed_total"`) && !strings.Contains(diff, `regex: "node_softnet_times_squeezed_total"`) {
+		t.Errorf("diff:\n%s", diff)
+	}
+	if !strings.Contains(diff, "tvt:begin kps/monitoring/kps-prometheus-node-exporter scan=4") {
+		t.Errorf("block id:\n%s", diff)
+	}
+	// Mapped by hand, the apiserver job goes in too.
+	p.MonitorJobs = map[string]string{"apiserver": "ServiceMonitor/monitoring/kps-kube-prometheus-stack-apiserver"}
+	written, skipped, diff = proposeMonitors(p, recs, jobs, root, 4, ok)
+	if len(written) != 2 || len(skipped) != 0 || !strings.Contains(diff, "tvt:begin kps/monitoring/kps-kube-prometheus-stack-apiserver") {
+		t.Errorf("mapped: written %d skipped %+v\n%s", len(written), skipped, diff)
 	}
 }
