@@ -204,7 +204,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		case !ok:
 			return skipAll("no --checkout for " + p.Repo)
 		case len(p.Files) == 0:
-			return skipAll("pipeline " + p.Name + " lists no files (Helm values aren't written yet)")
+			return skipAll("pipeline " + p.Name + " lists no monitor manifests (files; with helm_values, the chart's rendered output)")
 		}
 		var drops []report.Recommendation
 		for _, rec := range recs {
@@ -830,6 +830,10 @@ func proposeMonitors(p config.Pipeline, recs []report.Recommendation, jobs map[s
 	for m, rs := range plan {
 		byMonitor[m] = dropOf(p.Name+"/"+m.Namespace+"/"+m.Name, rs, scan)
 	}
+	if p.HelmValues != nil {
+		w, s, d := proposeHelmValues(p, recs, plan, byMonitor, root, check)
+		return w, append(skipped, s...), d
+	}
 	var b strings.Builder
 	failed := map[string]string{}
 	done := 0
@@ -868,4 +872,60 @@ func proposeMonitors(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		return nil, skipped, ""
 	}
 	return written, skipped, b.String()
+}
+
+// proposeHelmValues writes a prometheus-operator pipeline's drops into
+// kube-prometheus-stack's values (helm_values) instead of its rendered
+// monitors: each monitor's rule goes into the values keys that render its
+// endpoints' metricRelabelings (propose.KPSValuesKeys), a new key starting
+// with the chart's default rules from helm_values.defaults. The rendered
+// manifests in files only resolve jobs to monitors.
+func proposeHelmValues(p config.Pipeline, recs []report.Recommendation, plan map[propose.MonitorRef][]report.Recommendation, byMonitor map[propose.MonitorRef]propose.Drop, root string, check checkFunc) (written, skipped []proposal, diff string) {
+	hv := p.HelmValues
+	fail := func(note string) ([]proposal, []proposal, string) {
+		for _, rs := range plan {
+			for _, rec := range rs {
+				if !slices.ContainsFunc(skipped, func(s proposal) bool { return s.Rec.ID == rec.ID }) {
+					skipped = append(skipped, proposal{Rec: rec, Note: note})
+				}
+			}
+		}
+		return nil, skipped, ""
+	}
+	if hv.Defaults == "" {
+		return fail("helm_values.defaults names no chart values.yaml; without it tvt can't keep the chart's default rules, which Helm would replace")
+	}
+	src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(hv.File)))
+	if err != nil {
+		return fail(err.Error())
+	}
+	defaults, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(hv.Defaults)))
+	if err != nil {
+		return fail(err.Error())
+	}
+	byPath := map[string]propose.Drop{}
+	for m, d := range byMonitor {
+		keys := propose.KPSValuesKeys(m.Name)
+		if keys == nil {
+			return fail(m.String() + " isn't a monitor kube-prometheus-stack renders from values")
+		}
+		for _, k := range keys {
+			byPath[k] = d
+		}
+	}
+	out, err := propose.HelmValues(src, defaults, hv.Path, byPath)
+	if err == nil {
+		err = check(root, hv.File, out)
+	}
+	if err != nil {
+		return fail(hv.File + ": " + err.Error())
+	}
+	for _, rs := range plan {
+		for _, rec := range rs {
+			if !slices.ContainsFunc(written, func(w proposal) bool { return w.Rec.ID == rec.ID }) {
+				written = append(written, proposal{Rec: rec})
+			}
+		}
+	}
+	return written, skipped, propose.Diff(hv.File, src, out)
 }
