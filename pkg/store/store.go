@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 23
+const SchemaVersion = 24
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -452,6 +452,16 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 24 {
+		for _, q := range []string{
+			`ALTER TABLE pipeline_targets ADD COLUMN jobs TEXT NOT NULL DEFAULT ''`,
+			`UPDATE meta SET value = '24' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -855,7 +865,7 @@ func (s *Store) QueryCosts(ctx context.Context, scanID int64) ([]graph.QueryCost
 // PipelineTargets returns the pipeline targets of scan scanID, by subject.
 func (s *Store) PipelineTargets(ctx context.Context, scanID int64) ([]graph.PipelineTarget, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT subject, pipeline, note FROM pipeline_targets WHERE scan_id = ? ORDER BY subject`, scanID)
+		`SELECT subject, pipeline, note, jobs FROM pipeline_targets WHERE scan_id = ? ORDER BY subject`, scanID)
 	if err != nil {
 		return nil, err
 	}
@@ -863,8 +873,12 @@ func (s *Store) PipelineTargets(ctx context.Context, scanID int64) ([]graph.Pipe
 	var out []graph.PipelineTarget
 	for rows.Next() {
 		var t graph.PipelineTarget
-		if err := rows.Scan(&t.Subject, &t.Pipeline, &t.Note); err != nil {
+		var jobs string
+		if err := rows.Scan(&t.Subject, &t.Pipeline, &t.Note, &jobs); err != nil {
 			return nil, err
+		}
+		if jobs != "" {
+			t.Jobs = strings.Split(jobs, "\n")
 		}
 		out = append(out, t)
 	}
@@ -1104,7 +1118,7 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		{&sc.ruleFinding, `INSERT INTO rule_findings (scan_id, consumer_id, kind, detail, fix) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.queryCost, `INSERT INTO query_costs (scan_id, consumer_id, queries, samples, bytes) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.sloFinding, `INSERT INTO slo_findings (scan_id, kind, subject, name, detail, fix) VALUES (?, ?, ?, ?, ?, ?)`},
-		{&sc.pipeline, `INSERT INTO pipeline_targets (scan_id, subject, pipeline, note) VALUES (?, ?, ?, ?)`},
+		{&sc.pipeline, `INSERT INTO pipeline_targets (scan_id, subject, pipeline, note, jobs) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.overflow, `INSERT INTO overflow_findings (scan_id, signal, series, capped, readers) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.score, `INSERT INTO scores (scan_id, signal_id, monthly_cost, usage_weight, strongest, confidence, priority, held)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
@@ -1312,7 +1326,7 @@ func (sc *Scan) PutPipelineTarget(ctx context.Context, t graph.PipelineTarget) e
 	if t.Subject == "" || (t.Pipeline == "" && t.Note == "") {
 		return errors.New("store: pipeline target: Subject is required, and Note when unmapped")
 	}
-	_, err := sc.pipeline.ExecContext(ctx, sc.ID, t.Subject, t.Pipeline, t.Note)
+	_, err := sc.pipeline.ExecContext(ctx, sc.ID, t.Subject, t.Pipeline, t.Note, strings.Join(t.Jobs, "\n"))
 	return wrap("pipeline target", t.Subject, err)
 }
 
