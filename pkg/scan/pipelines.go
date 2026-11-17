@@ -29,7 +29,7 @@ import (
 // Pipeline notes on graph.PipelineTarget.
 const (
 	PipelineNoMatch    = "no pipeline's handles match"
-	PipelineRuleOutput = "a recording rule's output: changed in the rule, not a pipeline"
+	PipelineRuleOutput = "a rule's output (a recording rule, or ALERTS and ALERTS_FOR_STATE from alerting rules): changed in the rule, not a pipeline"
 )
 
 // SourcePipelines is the pipelines source: the share of priced signals
@@ -172,7 +172,9 @@ func pipelineTargets(in Inputs, signals []graph.Signal, consumers []graph.Consum
 		}
 		t := graph.PipelineTarget{Subject: s.ID, Jobs: in.MetricJobs[name]}
 		switch {
-		case recorded[name]:
+		case recorded[name] || name == "ALERTS" || name == "ALERTS_FOR_STATE":
+			// ALERTS carries the alerted series' labels (job="shop"), so it
+			// would match a pipeline's handles; the ruler writes it.
 			t.Note = PipelineRuleOutput
 		case unread != "":
 			t.Note = fmt.Sprintf("labels %s weren't read (%s)", unread, cmpOr(in.LabelMetricsErr, "no label source"))

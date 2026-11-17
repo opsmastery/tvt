@@ -550,6 +550,7 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 	h := sha256.New()
 	fmt.Fprintf(h, "scan %d\n", scan)
 	d := propose.Drop{ID: id, Scan: scan}
+	streams := 0
 	var monthly float64
 	currency := ""
 	for _, rec := range recs {
@@ -566,7 +567,11 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 			currency = cmp.Or(currency, rec.Savings.Currency)
 			continue
 		}
-		d.Metrics = append(d.Metrics, rec.Signal.Name)
+		if rec.Action == report.ActionReroute {
+			streams++ // a stream's route: nothing for the Drop's metric list
+		} else {
+			d.Metrics = append(d.Metrics, rec.Signal.Name)
+		}
 		monthly += rec.Savings.Monthly
 		currency = cmp.Or(currency, rec.Savings.Currency)
 	}
@@ -577,6 +582,9 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 	}
 	if len(d.Labels) > 0 {
 		parts = append(parts, plural(len(d.Labels), "unread label", "unread labels"))
+	}
+	if streams > 0 {
+		parts = append(parts, plural(streams, "unread stream", "unread streams"))
 	}
 	d.Reason = strings.Join(parts, ", ") + ", see tvt why"
 	if currency != "" {
