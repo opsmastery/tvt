@@ -493,3 +493,70 @@ func TestProposeLabelDrops(t *testing.T) {
 		t.Errorf("the merging removal wasn't skipped with the reason:\n%s", out.String())
 	}
 }
+
+// TestProposeAlloyRoutes: a stream reroute on an Alloy pipeline splits
+// the stream to the cold component, in the same pass as the pipeline's
+// metric drops (the routes keep the drop block).
+func TestProposeAlloyRoutes(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := readLatest(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := report.Build(in, 0)
+	sel := `{app="shop", component="api", level="info"}`
+	r.Recommendations = append(r.Recommendations, report.Recommendation{ID: "reroute:loki:stream:" + sel, Action: report.ActionReroute,
+		Signal:   report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel, Source: "loki"},
+		Pipeline: "alloy-apps", Proposable: true})
+	dir := t.TempDir()
+	rj := filepath.Join(dir, "report.json")
+	b, _ := json.Marshal(r)
+	if err := os.WriteFile(rj, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgSrc, err := os.ReadFile(filepath.Join(dirs[st.Name], "tvt-lab.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgText := strings.Replace(string(cfgSrc), "    files: [alloy/config.alloy]\n", "    files: [alloy/config.alloy]\n    cold: loki.write.cold\n", 1)
+	cfg := filepath.Join(dirs[st.Name], "tvt-lab.alloyroutes-test.yaml")
+	if err := os.WriteFile(cfg, []byte(cfgText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(cfg) })
+	checkout := t.TempDir()
+	if err := os.CopyFS(checkout, os.DirFS(filepath.Join(dirs[st.Name], "checkout"))); err != nil {
+		t.Fatal(err)
+	}
+	ap := filepath.Join(checkout, "alloy", "config.alloy")
+	a, _ := os.ReadFile(ap)
+	a = []byte(strings.Replace(string(a), "loki.write \"loki\" {", "loki.write \"cold\" {\n  endpoint {\n    url = \"http://loki-cold:3100/loki/api/v1/push\"\n  }\n}\n\nloki.write \"loki\" {", 1))
+	if err := os.WriteFile(ap, a, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	var out strings.Builder
+	o := proposeOptions{DB: db, Config: cfg, Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"), Checkouts: checkoutFlag{repo: checkout}, Validate: "off"}
+	if err := runPropose(context.Background(), o, &out); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := os.ReadFile(filepath.Join(dir, "p", report.ManifestDir(repo)+".patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`+loki.relabel "tvt_cold" {`, `+  forward_to = [loki.write.cold.receiver]`, "tvt:begin alloy-apps scan="} {
+		if !strings.Contains(string(patch), want) {
+			t.Errorf("patch lacks %q", want)
+		}
+	}
+	if strings.Contains(out.String(), "skipped reroute:loki:stream:"+sel) {
+		t.Errorf("the reroute was skipped:\n%s", out.String())
+	}
+}

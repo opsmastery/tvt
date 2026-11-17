@@ -353,10 +353,28 @@ func holdUnfollowable(in Inputs, out []graph.PipelineTarget, metricPrefix, label
 		}
 	}
 	held := map[string]string{} // metric -> note
+	heldStreams := map[string]string{}
 	var gaps []string
 	for _, p := range pipelines {
 		for _, rw := range in.Rewrites[p] {
 			if rw.Unfollowable == "" {
+				continue
+			}
+			if rw.Streams {
+				note := fmt.Sprintf("%s (%s %s in %s: %s)", PipelineUnfollowable, p, rw.Component, rw.File, rw.Unfollowable)
+				n := 0
+				for _, t := range out {
+					isStream := strings.HasPrefix(t.Subject, streamSubjectPrefix) || strings.HasPrefix(t.Subject, "loki:stream:")
+					if isStream && t.Pipeline == p {
+						if _, ok := heldStreams[t.Subject]; !ok {
+							heldStreams[t.Subject] = note
+						}
+						if strings.HasPrefix(t.Subject, streamSubjectPrefix) {
+							n++
+						}
+					}
+				}
+				gaps = append(gaps, fmt.Sprintf("pipeline %s: %s in %s can't be followed (%s): %d streams held, none proposed", p, rw.Component, rw.File, rw.Unfollowable, n))
 				continue
 			}
 			note := fmt.Sprintf("%s (%s %s in %s: %s)", PipelineUnfollowable, p, rw.Component, rw.File, rw.Unfollowable)
@@ -381,6 +399,10 @@ func holdUnfollowable(in Inputs, out []graph.PipelineTarget, metricPrefix, label
 		}
 	}
 	for i, t := range out {
+		if note, ok := heldStreams[t.Subject]; ok {
+			out[i].Pipeline, out[i].Note = "", note
+			continue
+		}
 		name, ok := strings.CutPrefix(t.Subject, metricPrefix)
 		if !ok {
 			rest, ok := strings.CutPrefix(t.Subject, labelPrefix)
