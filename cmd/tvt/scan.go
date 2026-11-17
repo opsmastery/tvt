@@ -33,6 +33,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
+	"github.com/Opsmastery-Summit/tvt/pkg/propose"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 	"github.com/Opsmastery-Summit/tvt/pkg/score"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
@@ -166,6 +167,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		in.External, in.Owners, in.Clients, in.SweepShare = cfg.ExternalConsumers, cfg.Ownership.Owners, cfg.Clients, cfg.SweepShare
 		in.Records = cfg.Records
 		in.Pipelines = cfg.Pipelines
+		in.Rewrites, in.RewriteErrs = readRewrites(cfg.Pipelines)
 		in.MinWindowDays = cfg.WindowDays
 		in.Seasons = cfg.Seasons
 		// Validated when the config was read.
@@ -1294,4 +1296,36 @@ func ruleSummary(costs []graph.RuleCost, findings []graph.RuleFinding) string {
 		parts = append(parts, fmt.Sprintf("%s %d", k, kinds[k]))
 	}
 	return s + " (" + strings.Join(parts, ", ") + ")"
+}
+
+// readRewrites reads each pipeline's name-touching rules from its
+// checkout (S7 item 9). A pipeline with no checkout is skipped; a file
+// that can't be read or parsed is reported, never fatal.
+func readRewrites(ps []config.Pipeline) (map[string][]propose.Rewrite, []string) {
+	var out map[string][]propose.Rewrite
+	var errs []string
+	for _, p := range ps {
+		if p.Checkout == "" || (p.Kind != "alloy" && p.Kind != "prometheus") {
+			continue // no checkout, or a kind whose rewrites tvt doesn't read yet
+		}
+		for _, f := range p.Files {
+			b, err := os.ReadFile(filepath.Join(p.Checkout, filepath.FromSlash(f)))
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", p.Name, err))
+				continue
+			}
+			rws, err := propose.Rewrites(p.Kind, f, b)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %s: %v", p.Name, f, err))
+				continue
+			}
+			if len(rws) > 0 {
+				if out == nil {
+					out = map[string][]propose.Rewrite{}
+				}
+				out[p.Name] = append(out[p.Name], rws...)
+			}
+		}
+	}
+	return out, errs
 }
