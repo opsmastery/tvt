@@ -125,3 +125,37 @@ service:
 		t.Errorf("rewrites:\n%+v\nwant:\n%+v", rws, want)
 	}
 }
+
+func TestLokiProcessRewrites(t *testing.T) {
+	src := []byte(`loki.process "apps" {
+  stage.json {
+    expressions = { level = "lvl" }
+  }
+  stage.match {
+    selector = "{app=\"shop\"}"
+    stage.labels {
+      values = { level = "" }
+    }
+  }
+  forward_to = []
+}
+
+loki.process "static" {
+  stage.static_labels {
+    values = { env = "lab" }
+  }
+  stage.label_drop {
+    values = ["filename"]
+  }
+  forward_to = []
+}
+`)
+	rws, err := Rewrites("alloy", "c.alloy", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Rewrite{{File: "c.alloy", Component: `loki.process "apps"`, Unfollowable: "stage.labels sets stream labels from log content (inside stage.match)", All: true, Streams: true}}
+	if !reflect.DeepEqual(rws, want) {
+		t.Errorf("rewrites:\n%+v\nwant:\n%+v", rws, want)
+	}
+}
