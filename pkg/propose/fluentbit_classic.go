@@ -144,14 +144,9 @@ func fluentClassicRoute(src []byte, r Route) ([]byte, error) {
 			break
 		}
 	}
-	emitter := "tvt_cold_" + regexp.MustCompile(`[^A-Za-z0-9]+`).ReplaceAllString(tag, "_")
+	text := classicFilter(r, tag, indent)
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s\n", r.begin())
-	if r.Reason != "" {
-		fmt.Fprintf(&b, "# %s\n", r.Reason)
-	}
-	fmt.Fprintf(&b, "[FILTER]\n%sName         rewrite_tag\n%sMatch        %s\n%sRule         $log ^.*$ %s false\n%sEmitter_Name %s\n\n# %s\n",
-		indent, indent, tag, indent, newTag, indent, emitter, endMarker)
+	b.WriteString(text)
 	// Before the first [OUTPUT], after any comment lines heading it.
 	at := firstOutput
 	for at > 0 && strings.HasPrefix(strings.TrimSpace(lines[at-1]), "#") && !strings.Contains(lines[at-1], endMarker) {
@@ -174,4 +169,37 @@ func fluentClassicRoute(src []byte, r Route) ([]byte, error) {
 		return nil, fmt.Errorf("propose: the edited config has %d tvt reroutes for %s, want 1", n, tag)
 	}
 	return out, nil
+}
+
+// classicFilter is the marked rewrite_tag [FILTER] section for r's tag.
+func classicFilter(r Route, tag, indent string) string {
+	newTag := ColdTagPrefix + tag
+	emitter := "tvt_cold_" + regexp.MustCompile(`[^A-Za-z0-9]+`).ReplaceAllString(tag, "_")
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n", r.begin())
+	if r.Reason != "" {
+		fmt.Fprintf(&b, "# %s\n", r.Reason)
+	}
+	fmt.Fprintf(&b, "[FILTER]\n%sName         rewrite_tag\n%sMatch        %s\n%sRule         $log ^.*$ %s false\n%sEmitter_Name %s\n\n# %s\n",
+		indent, indent, tag, indent, newTag, indent, emitter, endMarker)
+	return b.String()
+}
+
+// classicRouteTag runs FluentBitClassicRoutes' checks for r on src and
+// returns the tag the route retags, without writing anything.
+func classicRouteTag(src []byte, r Route) (string, error) {
+	out, err := fluentClassicRoute(src, r)
+	if err != nil {
+		return "", err
+	}
+	secs, _, err := parseFluentClassic(out)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range secs {
+		if s.kind == "FILTER" && strings.EqualFold(s.get("name"), "rewrite_tag") && strings.HasSuffix(s.get("rule"), " false") && strings.Contains(s.get("rule"), ColdTagPrefix) {
+			return s.get("match"), nil
+		}
+	}
+	return "", fmt.Errorf("propose: no reroute written")
 }
