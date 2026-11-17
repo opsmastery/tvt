@@ -36,13 +36,13 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 ## S7
 
-**Status:** Open.
+**Status:** Done Nov 17 (tvt-lab #27–#30). The pipeline configs live in tvt-lab itself: `propose` opens its draft PRs against tvt-lab.
 
-- A pipeline repo (or directory) for the lab's Alloy config, and a Fluent Bit container that tails the shop's debug log and ships it to Loki. Record which pipeline owns each signal.
-- An audit stream, and a span with `gen_ai.operation.name=execute_tool` for a simulated agent rollback that succeeds: both are records.
-- A shop metric renamed in Alloy (`prometheus.relabel` with `action = "replace"` on `__name__`) that only a dashboard reads under its new name: it stays keep_high (S7 item 9). One more rule whose `regex` is `sys.env(...)`: an evidence gap, not a reader or a drop.
-- A Collector pipeline with a `batch` processor (S7 never writes one; S16 flags it).
-- A synthetic coding-agent emitter on the GenAI conventions (interaction, llm_request and tool spans; tool_result, tool_decision and api_request logs; token and cost delta counters carrying `session.id` and `user.email`), every content flag on. Ground truth: content attributes unread (cap), `session.id` on delta counters (aggregate in the ordered pipeline), successful tool spans are records (keep the span), `api_request` logs unread (drop). Synthetic only: no real agent or prompts.
+- Done (#27): a pipeline repo (or directory) for the lab's Alloy config, and a Fluent Bit container that tails the shop's debug log and ships it to Loki. Record which pipeline owns each signal.
+- Done (#29, #30): an audit stream, and a span with `gen_ai.operation.name=execute_tool` for a simulated agent rollback that succeeds: both are records.
+- Done (#28): a shop metric renamed in Alloy (`prometheus.relabel` with `action = "replace"` on `__name__`) that only a dashboard reads under its new name: it stays keep_high (S7 item 9). One more rule whose `regex` is `sys.env(...)`: an evidence gap, not a reader or a drop.
+- Done (#29): a Collector pipeline with a `batch` processor (S7 never writes one; S16 flags it).
+- Done (#29): a synthetic coding-agent emitter on the GenAI conventions (interaction, llm_request and tool spans; tool_result, tool_decision and api_request logs; token and cost delta counters carrying `session.id` and `user.email`), every content flag on. Ground truth: content attributes unread (cap), `session.id` on delta counters (aggregate in the ordered pipeline), successful tool spans are records (keep the span), `api_request` logs unread (drop). Synthetic only: no real agent or prompts.
 
 ## S8
 
