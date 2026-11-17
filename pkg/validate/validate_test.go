@@ -115,3 +115,32 @@ spec:
 		t.Errorf("bad: %+v", r)
 	}
 }
+
+// TestRuntimeCachePerPath: an empty PATH's "no runtime" isn't served to a
+// later lookup under the real PATH (the gated nightly failed this way:
+// TestRunUnavailable ran first and TestKubernetesLive found no podman).
+func TestRuntimeCachePerPath(t *testing.T) {
+	real := os.Getenv("PATH")
+	t.Setenv("PATH", t.TempDir())
+	if rt := containerRuntime(""); rt != "" {
+		t.Fatalf("empty PATH found %q", rt)
+	}
+	t.Setenv("PATH", real)
+	runtimeMu.Lock()
+	_, cached := runtimeFound["\x00"+real]
+	runtimeMu.Unlock()
+	if cached {
+		t.Skip("this PATH was already looked up earlier in the process")
+	}
+	// Only checks that the empty PATH's answer isn't reused: whether a
+	// runtime exists here depends on the machine.
+	runtimeMu.Lock()
+	n := len(runtimeFound)
+	runtimeMu.Unlock()
+	containerRuntime("")
+	runtimeMu.Lock()
+	defer runtimeMu.Unlock()
+	if len(runtimeFound) != n+1 {
+		t.Errorf("the real PATH reused another PATH's answer")
+	}
+}
