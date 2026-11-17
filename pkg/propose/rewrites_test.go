@@ -73,3 +73,55 @@ func sortStrings(s []string) {
 		}
 	}
 }
+
+func TestOtelRewrites(t *testing.T) {
+	src := []byte(`processors:
+  transform/names:
+    metric_statements:
+      - context: metric
+        statements:
+          - set(metric.name, "http.server.duration") where metric.name == "http.server.request.duration"
+          - replace_pattern(metric.name, "^legacy\\.(.*)$", "$$1")
+          - set(metric.description, "x")
+  transform/unused:
+    metric_statements:
+      - set(name, "never") where name == "used"
+  metricstransform:
+    transforms:
+      - include: queue_depth
+        action: update
+        new_name: queue.depth
+      - include: ^old_(.*)$
+        match_type: regexp
+        action: update
+        new_name: new_$${1}
+      - include: kept
+        action: insert
+        new_name: kept.copy
+      - include: labels_only
+        action: update
+        operations:
+          - action: update_label
+            label: a
+            new_label: b
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [transform/names, metricstransform]
+      exporters: [debug]
+`)
+	rws, err := Rewrites("otelcol", "c.yaml", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Rewrite{
+		{File: "c.yaml", Component: "processor transform/names", From: "http.server.request.duration", To: "http.server.duration", All: true},
+		{File: "c.yaml", Component: "processor transform/names", Unfollowable: `replace_pattern on the metric name: replace_pattern(metric.name, "^legacy\\.(.*)$", "$$1")`, All: true},
+		{File: "c.yaml", Component: "processor metricstransform", From: "queue_depth", To: "queue.depth", All: true},
+		{File: "c.yaml", Component: "processor metricstransform", Unfollowable: `regexp update rename of "^old_(.*)$" to "new_$${1}"`, All: true},
+	}
+	if !reflect.DeepEqual(rws, want) {
+		t.Errorf("rewrites:\n%+v\nwant:\n%+v", rws, want)
+	}
+}
