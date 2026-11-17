@@ -46,6 +46,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/propose"
 )
 
 // AllStreams is the selector of the signal a LogQL consumer references when
@@ -92,6 +93,11 @@ type Inputs struct {
 	// 3), stored with its pipeline target so tvt propose knows which
 	// scrape configs a drop goes into. Nil when not read.
 	MetricJobs map[string][]string
+	// Rewrites are the name-touching rules read from each pipeline's
+	// checkout (S7 item 9), by pipeline; RewriteErrs the files that
+	// couldn't be read.
+	Rewrites    map[string][]propose.Rewrite
+	RewriteErrs []string
 	// SelectorMetrics maps a label-only selector (SelectorKey) to the
 	// metric names the backend says carry those labels. A selector that
 	// names no metric resolves to these instead of every collected metric.
