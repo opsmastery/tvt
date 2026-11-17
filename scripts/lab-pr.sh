@@ -15,6 +15,12 @@
 #
 # The branch is pushed with the tvt-lab checkout's own Git credentials (an
 # SSH remote), not with the token.
+#
+# The Keychain only gives tokens to the logged-in session, not to ssh, so
+# over ssh run it as a launchd job. macOS also keeps launchd jobs out of
+# external volumes: then point TVT_LAB_DIR at a clone in your home folder
+# and TVT_LAB_LOGS at the lab's logs copied there (grafana.log*,
+# prometheus/query.log, loki.log); the export is skipped.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -47,15 +53,19 @@ run() {
   mkdir -p "$OUT"
   # The lab's logs, as tvt's e2e suite reads them: Grafana's router log out
   # of its container, Loki's query lines from its container log.
-  (cd "$LAB" && make -s export-logs >/dev/null)
-  (cd "$LAB" && LAB_LOGS="$LAB/lab-logs" podman compose logs --no-log-prefix --since 720h loki 2>&1 | grep 'caller=metrics.go' > "$OUT/loki.log" || true)
+  local logs="${TVT_LAB_LOGS:-}"
+  if [[ -z "$logs" ]]; then
+    logs="$LAB/lab-logs"
+    (cd "$LAB" && make -s export-logs >/dev/null)
+    (cd "$LAB" && LAB_LOGS="$LAB/lab-logs" podman compose logs --no-log-prefix --since 720h loki 2>&1 | grep 'caller=metrics.go' > "$logs/loki.log" || true)
+  fi
   cd "$HERE"
   make -s build
   TVT_GRAFANA_TOKEN="$gt" ./bin/tvt scan --config "$CONFIG" --db "$OUT/tvt.db" \
     --grafana http://localhost:3000 --prom http://localhost:9090 --loki http://localhost:3100 \
-    --grafana-log "$LAB/lab-logs/grafana.log*" \
-    --prom-query-log "$LAB/lab-logs/prometheus/query.log" \
-    --loki-query-log "$OUT/loki.log"
+    --grafana-log "$logs/grafana.log*" \
+    --prom-query-log "$logs/prometheus/query.log" \
+    --loki-query-log "$logs/loki.log"
   ./bin/tvt report --db "$OUT/tvt.db" --config "$CONFIG" --label-drops --top 0 --json "$OUT/report.json" --html "$OUT/report.html"
   GITHUB_TOKEN="$gh" ./bin/tvt propose --db "$OUT/tvt.db" --config "$CONFIG" --report "$OUT/report.json" \
     --checkout "$REPO=$LAB" --validate require --output pr --dir "$OUT/proposals"
