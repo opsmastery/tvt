@@ -6,7 +6,7 @@
 - **Price it.** Attaches ingest and storage cost to every series and stream, using your own price card.
 - **Act on it.** Generates OTel Collector or Prometheus relabel config as a PR. `tvt check` blocks any change that would break an alert, SLO or viewed dashboard.
 
-> Status: pre-alpha (Sprint 1). `tvt scan` collects Prometheus or Mimir cardinality and rules, Loki rules, Grafana dashboards and dashboard views into a SQLite usage graph. Query matching (Sprint 2), Loki stream volume (Sprint 3), report, propose and check are not built yet. See [docs/architecture.md](docs/architecture.md).
+> Status: pre-alpha. `tvt scan`, `tvt report` and `tvt why` work on the lab and on Grafana Cloud. `tvt propose` and `tvt check` are next. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/tasks/README.md](docs/tasks/README.md).
 
 ## Commands
 
