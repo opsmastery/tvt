@@ -103,13 +103,44 @@ func isIdent(c byte) bool {
 
 // ottlFuncs are the functions tvt's conditions may call: stable standard
 // OTTL functions only (S7 item 6), no experimental or lambda functions.
-var ottlFuncs = map[string]bool{"IsMatch": true, "delete_matching_keys": true}
+var ottlFuncs = map[string]bool{"IsMatch": true, "delete_matching_keys": true,
+	// Pseudonymised IDs (S7 item 8).
+	"set": true, "Substring": true, "SHA256": true, "String": true}
 
 var ottlCall = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\(`)
 
 // lintOTTL checks a condition against item 6's rules: only allowed
 // functions, balanced quotes and parentheses, and paths of one form.
 func lintOTTL(cond string, form OTTLForm) error {
+	if err := lintCalls(cond); err != nil {
+		return err
+	}
+	if strings.Contains(codeOf(cond), "metric.") != form.Context {
+		return fmt.Errorf("propose: OTTL %q: paths don't match the target's form", cond)
+	}
+	return nil
+}
+
+// codeOf is cond with string literals blanked.
+func codeOf(cond string) string {
+	outside := strings.Builder{}
+	in := false
+	for i := 0; i < len(cond); i++ {
+		if cond[i] == '"' {
+			in = !in
+			outside.WriteByte(' ')
+			continue
+		}
+		if !in {
+			outside.WriteByte(cond[i])
+		}
+	}
+	return outside.String()
+}
+
+// lintCalls checks balanced quotes and parentheses and that every
+// function is one tvt writes.
+func lintCalls(cond string) error {
 	outside := strings.Builder{}
 	in := false
 	for i := 0; i < len(cond); i++ {
@@ -133,9 +164,6 @@ func lintOTTL(cond string, form OTTLForm) error {
 		if !ottlFuncs[m[1]] {
 			return fmt.Errorf("propose: OTTL %q: function %s isn't one tvt writes", cond, m[1])
 		}
-	}
-	if strings.Contains(code, "metric.") != form.Context {
-		return fmt.Errorf("propose: OTTL %q: paths don't match the target's form", cond)
 	}
 	return nil
 }
