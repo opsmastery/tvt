@@ -1,6 +1,6 @@
 # tvt propose
 
-`tvt propose` turns the latest scan's recommendations into config changes for the pipelines in `tvt.yaml` (S7 item 3, ADR 0007). Today it writes whole-metric drops into Prometheus scrape configs and Alloy configs, as one patch per pipeline repo. It reads local checkouts and never pushes, so it needs no Git token.
+`tvt propose` turns the latest scan's recommendations into config changes for the pipelines in `tvt.yaml` (S7 item 3, ADR 0007). It writes one patch per pipeline repo from local checkouts (`--output patch`, the default, with no Git token), or the patches and then a draft pull request per repo (`--output pr`).
 
 ```
 tvt propose --db tvt.db --config tvt.yaml \
@@ -17,8 +17,18 @@ git -C ../observability apply ../tvt/proposals/github.com_acme_observability.pat
 | `--config` | `tvt.yaml`, required: its `pipelines:` say where each drop goes. |
 | `--checkout repo=path` | A pipeline repo's local checkout, with the repo named as in `tvt.yaml`. Repeat per repo. A pipeline with no checkout is skipped. |
 | `--report` | The reviewed report JSON. It must be of the database's latest scan; without it, tvt builds the report from the database (all recommendations, no `--top` cut). |
-| `--output` | `patch`, the only output so far. Pull requests come with S9's approvals. |
+| `--output` | `patch` (default), or `pr`: the patches, then for each repo a branch `tvt/propose` pushed from its `--checkout` and a draft pull request (see Pull requests below). |
+| `--github-api` | The GitHub API root for `--output pr` (default `https://api.github.com`; GitHub Enterprise: `https://HOST/api/v3`). |
 | `--dir` | Where patches go (default `proposals`), as `<repo>.patch` with the repo path made filename-safe as in `report.md`'s manifests. |
+
+## Pull requests
+
+With `--output pr`, after writing the patches, tvt does this for each repo that has one:
+
+1. In a temporary worktree of the repo's `--checkout` (the checkout's own working tree is never touched), it fetches the base branch (`pipelines[].branch`, or origin's default branch), applies the patch, commits it as "tvt propose: changes from scan N" with your Git identity, and pushes it to origin as `tvt/propose` with your Git credentials. The branch is tvt's: a rerun replaces it with one commit from current evidence, as tvt regenerates its own blocks.
+2. Through the GitHub API with `GITHUB_TOKEN` (from the environment, never a flag), it opens a **draft** pull request from `tvt/propose` to the base, or updates the title and body of the one already open from that branch. The body lists each recommendation and its claim, the validation results and any Collector build change. Reviewers come from the repo's `pipelines[].reviewers` (`@user`, or `@owner/team` for a team in the repo's organization); a reviewer GitHub refuses is reported, and the PR still opens.
+
+PRs stay drafts: an owner's confirmation, recorded with the evidence they saw (S9), is what takes one out of draft. A repo that fails (no checkout, a patch that doesn't apply on the base, a push or API error) is reported and the other repos still go ahead; the command then exits non-zero, and the patches are in `--dir`. GitHub only; GitLab comes later. The token needs to push branches and open pull requests (a fine-grained token with Contents and Pull requests write on the pipeline repos).
 
 ## What it writes
 
