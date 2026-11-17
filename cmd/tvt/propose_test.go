@@ -187,7 +187,7 @@ func TestProposeBuildManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, patch = run()
-	if !strings.Contains(out, "build: "+repo+" otelcol/builder-config.yaml: adds the filter processor v0.165.0") {
+	if !strings.Contains(out, "build: "+repo+" otelcol/builder-config.yaml: adds filterprocessor v0.165.0") {
 		t.Errorf("manifest: not noted\n%s", out)
 	}
 	if !strings.Contains(patch, "a/otelcol/builder-config.yaml") || !strings.Contains(patch, "+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.165.0") {
@@ -360,5 +360,72 @@ func TestProposeHelmValues(t *testing.T) {
 	p.HelmValues.Defaults = ""
 	if _, skipped, _ = proposeMonitors(p, []report.Recommendation{rec}, jobs, root, 6, ok); len(skipped) != 1 || !strings.Contains(skipped[0].Note, "helm_values.defaults") {
 		t.Errorf("no defaults: %+v", skipped)
+	}
+}
+
+// TestProposeDeltaLabels: the coding agent's session_id and user_email
+// (ground truth genai_agent.labels: aggregate in the ordered pipeline)
+// become a transform and an interval ahead of delta_to_cumulative in the
+// lab's collector config (S7 item 8). The writers state drops both
+// metrics outright (a label removal on a dropped metric is never raised),
+// so the reviewed report keeps the metrics and carries the label rows.
+func TestProposeDeltaLabels(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := readLatest(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := report.Build(in, 0)
+	recs := r.Recommendations[:0]
+	for _, rec := range r.Recommendations {
+		if !strings.HasPrefix(rec.Signal.Name, "coding_agent_") {
+			recs = append(recs, rec)
+		}
+	}
+	for _, m := range []string{"coding_agent_token_usage_total", "coding_agent_cost_usage_USD_total"} {
+		for _, l := range []string{"session_id", "user_email"} {
+			recs = append(recs, report.Recommendation{ID: "label_removal:prom:label:" + m + ":" + l, Action: report.ActionLabelRemoval,
+				Signal:   report.SignalRef{ID: "prom:label:" + m + ":" + l, Kind: "label", Name: l, Parent: m, Source: "prom"},
+				Pipeline: "otelcol-agent", Proposable: true, Removal: "aggregate"})
+		}
+	}
+	r.Recommendations = recs
+	dir := t.TempDir()
+	rj := filepath.Join(dir, "report.json")
+	b, _ := json.Marshal(r)
+	if err := os.WriteFile(rj, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	var out strings.Builder
+	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
+		Checkouts: checkoutFlag{repo: filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}
+	if err := runPropose(context.Background(), o, &out); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := os.ReadFile(filepath.Join(dir, "p", report.ManifestDir(repo)+".patch"))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	for _, want := range []string{
+		"+  transform/tvt_aggregate:",
+		`delete_matching_keys(datapoint.attributes, "^session[^A-Za-z0-9:]+id$")`,
+		`delete_matching_keys(datapoint.attributes, "^user[^A-Za-z0-9:]+email$")`,
+		"+  interval/tvt:",
+		"processors: [transform/tvt_aggregate, interval/tvt, delta_to_cumulative, batch]",
+	} {
+		if !strings.Contains(string(patch), want) {
+			t.Errorf("patch lacks %q", want)
+		}
+	}
+	if strings.Contains(out.String(), "label_removal:prom:label:coding_agent") && strings.Contains(out.String(), "skipped label_removal") {
+		t.Errorf("a coding agent label removal was skipped:\n%s", out.String())
 	}
 }
