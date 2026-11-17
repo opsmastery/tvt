@@ -67,7 +67,7 @@ func TestFluentBitHelmRender(t *testing.T) {
 	version := strings.TrimSpace(string(fbChart(t, "VERSION")))
 	r, err := exec.Command("helm", "template", "fb", "fluent/fluent-bit", "--version", version, "-f", f).Output()
 	if err != nil {
-		t.Fatalf("helm template: %v", err)
+		t.Fatalf("helm template: %v\n%s", err, stderrOf(err))
 	}
 	s := string(r)
 	if !strings.Contains(s, "Name kubernetes") || !strings.Contains(s, "Rule         $log ^.*$ tvt.cold.shop.debug false") {

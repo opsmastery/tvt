@@ -16,7 +16,8 @@ make bench     # ground-truth benchmark on the frozen lab states (testdata/bench
 make hooks     # enable .githooks: pre-commit (blocked files, gofmt, vet, tidy, schema tests, gitleaks), pre-push (go test), rebuild bin/tvt on checkout/merge
 ./scripts/capture-fixtures.sh   # record real lab API responses into testdata/lab/
 TVT_TEST_VALIDATORS=1 TVT_TEST_HELM=1 go test ./...   # the gated suites CI skips: real validators in Podman, chart renders with helm
-./scripts/gated-nightly.sh install   # run those nightly on the Mac mini (launchd, 03:41; logs in ~/tvt-gated)
+./scripts/gated-nightly.sh install   # run those nightly on the Mac mini (launchd, 03:41; logs in ~/tvt-gated; adds the chart repos the Helm renders need)
+./scripts/lab-pr.sh [run|patch|check]   # on the mini: scan the live lab, then the draft PR (run) or the patch only (patch); tokens from its Keychain
 ```
 
 ## Conventions
