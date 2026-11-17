@@ -64,4 +64,5 @@ pipelines:
     branch: main
     checkout: checkout   # tvt-lab's pipeline files at the capture (S7 item 9)
     files: [otelcol/config.yaml]
+    version: 0.165.0   # tvt-lab compose.yaml's otelcol-contrib image
     handles: ['{job="coding-agent"}', '{service_name="coding-agent"}']
