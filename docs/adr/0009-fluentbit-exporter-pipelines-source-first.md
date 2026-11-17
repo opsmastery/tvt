@@ -1,6 +1,6 @@
 # 0009. Fluent Bit and exporter pipeline kinds; cut at the source first
 
-Date: 2026-11-16 · Status: proposed (accept before S7) · Amends ADR 0007
+Date: 2026-11-16 · Status: accepted (Nov 16) · Amends ADR 0007
 
 ## Context
 
