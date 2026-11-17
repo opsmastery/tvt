@@ -187,6 +187,11 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		listJobs = propose.PrometheusJobs
 	case "alloy":
 		listJobs = propose.AlloyJobs
+	case "otelcol":
+		// propose.Otelcol needs the names the receivers emit, and the
+		// report has the backend's (Prometheus translation adds units and
+		// _total). Mapping one to the other is S7 item 9.
+		return skipAll("the otelcol writer needs each metric's OTel name, which the scan doesn't map yet (S7 item 9)")
 	default:
 		return skipAll("no writer for " + p.Kind + " pipelines yet")
 	}
