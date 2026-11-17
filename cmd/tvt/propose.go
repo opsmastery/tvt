@@ -370,6 +370,11 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 			}
 			continue
 		}
+		if rec.Action == report.ActionLabelRemoval && (rec.Signal.Name == "job" || rec.Signal.Name == "instance" || strings.HasPrefix(rec.Signal.Name, "__")) {
+			// One refused label must not take the file's other rules with it.
+			skipped = append(skipped, proposal{Rec: rec, Note: "tvt never removes " + rec.Signal.Name + ": it identifies the scrape target, and rules, alerts and joins rely on it"})
+			continue
+		}
 		if rec.Action == report.ActionLabelRemoval && p.Kind != "otelcol" {
 			switch {
 			case p.Kind != "prometheus" && p.Kind != "alloy":

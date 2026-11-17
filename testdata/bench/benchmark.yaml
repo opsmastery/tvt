@@ -96,6 +96,7 @@ states:
   - name: writers-2
     dir: writers-2
     scan_time: 2026-11-17T20:26:00Z
+    label_top: 50   # tvt scan's default, so the agent's token counter (45th by series) has label signals
     about: >
       The writers lab after tvt-lab #35 and #36, the seeds that let tvt propose exercise more
       of its S7 writers on the live lab: a cold output for Fluent Bit (file, alias cold) and for
@@ -103,6 +104,7 @@ states:
       labeldrop label (op_kind on shop_cart_operations_total, set by op), and label rules tvt
       holds (Alloy sets instance_pod; the collector upserts deployment.environment). tvt-lab.yaml
       names both cold tiers. The shop restarted at 20:13 UTC, so the startup burst is in the
-      pattern window. Mimir doesn't run on the Mac mini: mimir/ is the writers state's. The
+      pattern window. Recorded series (prometheus/series_*.json): shop_cart_operations_total at the
+      capture, coding_agent_token_usage_total at 20:37 UTC. Mimir doesn't run on the Mac mini: mimir/ is the writers state's. The
       writers state stays frozen.
     proven: [prometheus query log, loki query log, grafana router log]

@@ -257,6 +257,14 @@ func scoreState(t *testing.T, st benchState, dir string) benchScore {
 // returns the stored graph, the full report and the state's ground truth.
 func scanState(t *testing.T, st benchState, dir string) (scanGraph, report.Report, groundTruth) {
 	t.Helper()
+	db, r, gt := scanStateDB(t, st, dir)
+	return readGraph(t, db), r, gt
+}
+
+// scanStateDB is scanState returning the database's path instead of the
+// graph read from it.
+func scanStateDB(t *testing.T, st benchState, dir string) (string, report.Report, groundTruth) {
+	t.Helper()
 	setNowAt(t, st.ScanTime)
 	// The capture asked for 200 series (limit=200), so Prometheus marked the
 	// answer truncated, which tvt refuses (fail closed). Served as the
@@ -312,7 +320,7 @@ func scanState(t *testing.T, st benchState, dir string) (scanGraph, report.Repor
 	r := report.Build(in, 0)
 
 	gt := parseGroundTruth(t, testutil.ReadFile(t, filepath.Join(dir, "ground-truth.yaml")))
-	return readGraph(t, db), r, gt
+	return db, r, gt
 }
 
 // tally collects pass/fail items.
