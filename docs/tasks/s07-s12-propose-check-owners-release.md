@@ -9,12 +9,12 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 ## Before you start (before S7)
 
 - S4's JSON report (recommendation records, evidence gaps) and S6's pipeline targets merged: they're what `propose` and `check` read.
-- ADR 0013: Alloy parsing. Drafted Nov 16 after a spike: Grafana's `syntax` package pinned at v0.1.2, writes spliced into the original bytes. Accept it.
-- ADR 0009 (amends 0007): Fluent Bit and exporter/receiver pipeline kinds, and the source-first rule. Drafted Nov 16; accept it.
-- ADR 0003: the protection manifest. Proposed since Nov 8; accept it with S7 item 1.
-- ADR 0010 (drafted Nov 16, accept before S8): reduce-before-drop actions (label removal, bucketing, stream aggregation, retention tiers, scrape interval, collapse with a count) and where each sits in the least-lossy order.
-- ADR 0011 (drafted Nov 16, accept before S8): records as a protected class, approvals bound to an evidence hash, and the expected end state on recommendations.
-- ADR 0012 (drafted Nov 16 with options and a measurement; decide before S8): reading existing OTTL. OTTL is v1 from opentelemetry-collector-contrib v0.164.0: the language reference (paths, literals, operators, function calls, `where` clauses), the standard functions and the Go API are frozen for 1.x. Decide between importing contrib's `pkg/ottl` parser (Apache 2.0; measure the dependency weight as spike 3 did for Loki) and a narrow extractor for paths and the editors that change them. Lambda functions, experimental `xottl` functions and `xprofile` are outside the guarantee.
+- Done Nov 16: ADR 0013, Alloy parsing (Grafana's `syntax` package pinned at v0.1.2, writes spliced into the original bytes).
+- ADR 0009 (amends 0007): Fluent Bit and exporter/receiver pipeline kinds, and the source-first rule. Done Nov 16 (accepted).
+- Done Nov 16: ADR 0003, the protection manifest, accepted.
+- Done Nov 16: ADR 0010, reduce-before-drop actions (label removal, bucketing, stream aggregation, retention tiers, scrape interval, collapse with a count) and where each sits in the least-lossy order.
+- Done Nov 16: ADR 0011, records as a protected class, approvals bound to an evidence hash, and the expected end state on recommendations.
+- ADR 0012, reading existing OTTL: accepted Nov 16 as a narrow extractor. Before S8, collect the OTTL corpus and prototype the extractor; below 95% of statements recognized, the ADR reopens. OTTL is v1 from opentelemetry-collector-contrib v0.164.0: the language reference (paths, literals, operators, function calls, `where` clauses), the standard functions and the Go API are frozen for 1.x. Decide between importing contrib's `pkg/ottl` parser (Apache 2.0; measure the dependency weight as spike 3 did for Loki) and a narrow extractor for paths and the editors that change them. Lambda functions, experimental `xottl` functions and `xprofile` are outside the guarantee.
 - tvt-lab: the pipeline repo and Fluent Bit container from `lab-backlog.md` (S7).
 
 ## S7: writers
