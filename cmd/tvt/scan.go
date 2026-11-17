@@ -1305,7 +1305,7 @@ func readRewrites(ps []config.Pipeline) (map[string][]propose.Rewrite, []string)
 	var out map[string][]propose.Rewrite
 	var errs []string
 	for _, p := range ps {
-		if p.Checkout == "" || (p.Kind != "alloy" && p.Kind != "prometheus") {
+		if p.Checkout == "" || (p.Kind != "alloy" && p.Kind != "prometheus" && p.Kind != "otelcol") {
 			continue // no checkout, or a kind whose rewrites tvt doesn't read yet
 		}
 		for _, f := range p.Files {
