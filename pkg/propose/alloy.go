@@ -124,11 +124,22 @@ func alloyBlock(indent string, d Drop) string {
 	if strings.HasPrefix(indent, "\t") {
 		unit = "\t"
 	}
-	fmt.Fprintf(&b, "%srule {\n", indent)
-	fmt.Fprintf(&b, "%s%ssource_labels = [\"__name__\"]\n", indent, unit)
-	fmt.Fprintf(&b, "%s%sregex         = %s\n", indent, unit, strconv.Quote(d.Regex()))
-	fmt.Fprintf(&b, "%s%saction        = \"drop\"\n", indent, unit)
-	fmt.Fprintf(&b, "%s}\n", indent)
+	if len(d.Metrics) > 0 {
+		fmt.Fprintf(&b, "%srule {\n", indent)
+		fmt.Fprintf(&b, "%s%ssource_labels = [\"__name__\"]\n", indent, unit)
+		fmt.Fprintf(&b, "%s%sregex         = %s\n", indent, unit, strconv.Quote(d.Regex()))
+		fmt.Fprintf(&b, "%s%saction        = \"drop\"\n", indent, unit)
+		fmt.Fprintf(&b, "%s}\n", indent)
+	}
+	for _, l := range d.Labels {
+		fmt.Fprintf(&b, "%srule {\n", indent)
+		fmt.Fprintf(&b, "%s%ssource_labels = [\"__name__\"]\n", indent, unit)
+		fmt.Fprintf(&b, "%s%sregex         = %s\n", indent, unit, strconv.Quote(l.Regex()))
+		fmt.Fprintf(&b, "%s%starget_label  = %s\n", indent, unit, strconv.Quote(l.Label))
+		fmt.Fprintf(&b, "%s%sreplacement   = \"\"\n", indent, unit)
+		fmt.Fprintf(&b, "%s%saction        = \"replace\"\n", indent, unit)
+		fmt.Fprintf(&b, "%s}\n", indent)
+	}
 	fmt.Fprintf(&b, "%s// %s\n", indent, endMarker)
 	return b.String()
 }

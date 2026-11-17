@@ -190,3 +190,44 @@ func TestDropValidate(t *testing.T) {
 		t.Errorf("regex %q", r)
 	}
 }
+
+// TestLabelRules: a label removal empties the label on its metrics only,
+// in Prometheus and Alloy, next to a whole-metric drop in the same block.
+func TestLabelRules(t *testing.T) {
+	d := Drop{ID: "lab/loki", Scan: 9, Metrics: []string{"loki_ingester_chunk_age_seconds_bucket"},
+		Labels: []LabelRule{{Label: "tenant", Metrics: []string{"loki_request_duration_seconds_bucket", "loki_request_duration_seconds_count"}}}}
+	out, err := PrometheusDrops(read(t, "lab-scrape.yml"), map[string]Drop{"loki": d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join([]string{
+		`      - source_labels: [__name__]`,
+		`        regex: "loki_request_duration_seconds_bucket|loki_request_duration_seconds_count"`,
+		`        target_label: tenant`,
+		`        replacement: ""`,
+		`        action: replace`,
+	}, "\n")
+	if !strings.Contains(string(out), want) || !strings.Contains(string(out), "action: drop") {
+		t.Errorf("prometheus:\n%s", out)
+	}
+	if again, err := PrometheusDrops(out, map[string]Drop{"loki": d}); err != nil || string(again) != string(out) {
+		t.Errorf("rerun changed the file (err %v)", err)
+	}
+	labelsOnly := Drop{ID: "lab/shop", Scan: 9, Labels: []LabelRule{{Label: "user_id", Metrics: []string{"shop_feature_flag_evaluations_total"}}}}
+	out, err = Alloy(read(t, "config.alloy"), []string{"shop"}, labelsOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `target_label  = "user_id"`) || !strings.Contains(string(out), `replacement   = ""`) || strings.Contains(string(onlyAddedText(t, read(t, "config.alloy"), out)), `action        = "drop"`) {
+		t.Errorf("alloy:\n%s", out)
+	}
+	for _, bad := range []string{"__name__", "job", "instance", "a:b"} {
+		if err := (Drop{ID: "x", Labels: []LabelRule{{Label: bad, Metrics: []string{"m"}}}}).validate(); err == nil {
+			t.Errorf("label %q accepted", bad)
+		}
+	}
+}
+
+func onlyAddedText(t *testing.T, before, after []byte) string {
+	return strings.Join(onlyAdded(t, before, after), "\n")
+}

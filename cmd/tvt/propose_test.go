@@ -429,3 +429,67 @@ func TestProposeDeltaLabels(t *testing.T) {
 		t.Errorf("a coding agent label removal was skipped:\n%s", out.String())
 	}
 }
+
+// TestProposeLabelDrops: a label removal where no series merge becomes a
+// relabel rule emptying the label on that metric in the Alloy pipeline;
+// one that merges series is skipped with the reason.
+func TestProposeLabelDrops(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := readLatest(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sig = "prom:label:shop_feature_flag_evaluations_total:flag"
+	found := false
+	for _, pt := range in.PipelineTargets {
+		if pt.Subject == sig {
+			found = true
+			if pt.Pipeline != "alloy-apps" || len(pt.Jobs) == 0 {
+				t.Fatalf("%s: target %+v", sig, pt)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no pipeline target for %s", sig)
+	}
+	r := report.Build(in, 0)
+	label := func(metric, l, removal string) report.Recommendation {
+		return report.Recommendation{ID: "label_removal:prom:label:" + metric + ":" + l, Action: report.ActionLabelRemoval,
+			Signal:   report.SignalRef{ID: "prom:label:" + metric + ":" + l, Kind: "label", Name: l, Parent: metric, Source: "prom"},
+			Pipeline: "alloy-apps", Proposable: true, Removal: removal, Merges: 12}
+	}
+	r.Recommendations = []report.Recommendation{
+		label("shop_feature_flag_evaluations_total", "flag", "labeldrop"),
+		label("shop_cart_operations_total", "user_id", "aggregate"),
+	}
+	dir := t.TempDir()
+	rj := filepath.Join(dir, "report.json")
+	b, _ := json.Marshal(r)
+	if err := os.WriteFile(rj, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	var out strings.Builder
+	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
+		Checkouts: checkoutFlag{repo: filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}
+	if err := runPropose(context.Background(), o, &out); err != nil {
+		t.Fatal(err)
+	}
+	patch, err := os.ReadFile(filepath.Join(dir, "p", report.ManifestDir(repo)+".patch"))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(string(patch), `+    target_label  = "flag"`) || !strings.Contains(string(patch), `+    regex         = "shop_feature_flag_evaluations_total"`) {
+		t.Errorf("patch:\n%s", patch)
+	}
+	if !strings.Contains(out.String(), "removing user_id merges 12 series, which a relabel rule can't sum") {
+		t.Errorf("the merging removal wasn't skipped with the reason:\n%s", out.String())
+	}
+}
