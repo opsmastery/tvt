@@ -163,7 +163,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		if len(recs) == 0 {
 			continue
 		}
-		done, skip, diff := proposePipeline(p, recs, jobs, o.Checkouts, r.Scan.ID, v.check(ctx, p))
+		done, skip, diff := proposePipeline(p, recs, jobs, o.Checkouts, r.Scan.ID, v.check(ctx, p), func(n string) { v.build = append(v.build, p.Repo+" "+n) })
 		for i := range done {
 			done[i].Repo = p.Repo
 		}
@@ -182,7 +182,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 			skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + name + " isn't in " + o.Config})
 		}
 	}
-	return writeProposals(o, r.Scan.ID, patches, written, skipped, v.notes, out)
+	return writeProposals(o, r.Scan.ID, patches, written, skipped, v.notes, v.build, out)
 }
 
 // proposePipeline writes recs (whole-metric drops) into pipeline p's
@@ -190,7 +190,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 // written only when every job its metric carries has a scrape config in
 // p's files: a drop in some jobs would leave the rest of the series, and
 // the savings, in place.
-func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[string][]string, checkouts checkoutFlag, scan int64, check checkFunc) (written, skipped []proposal, diff string) {
+func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[string][]string, checkouts checkoutFlag, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
 	skipAll := func(note string) ([]proposal, []proposal, string) {
 		for _, rec := range recs {
 			skipped = append(skipped, proposal{Rec: rec, Note: note})
@@ -211,7 +211,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		if !ok {
 			return skipAll("no --checkout for " + p.Repo)
 		}
-		return proposeOtelcol(p, recs, root, scan, check)
+		return proposeOtelcol(p, recs, root, scan, check, note)
 	default:
 		return skipAll("no writer for " + p.Kind + " pipelines yet")
 	}
@@ -347,7 +347,7 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 // writeProposals writes each repo's patch to o.Dir/<repo>.patch, headed by
 // the recommendations it carries (git apply skips text before the first
 // diff), and prints what was written and what was skipped, and why.
-func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Builder, written, skipped []proposal, validation []string, out io.Writer) error {
+func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Builder, written, skipped []proposal, validation, build []string, out io.Writer) error {
 	repos := make([]string, 0, len(patches))
 	for repo := range patches {
 		repos = append(repos, repo)
@@ -373,6 +373,18 @@ func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Bu
 				fmt.Fprintf(&b, "  %s\n", strings.TrimPrefix(n, repo+" "))
 			}
 		}
+		var builds []string
+		for _, n := range build {
+			if rest, ok := strings.CutPrefix(n, repo+" "); ok {
+				builds = append(builds, rest)
+			}
+		}
+		if len(builds) > 0 {
+			b.WriteString("\nCollector build:\n")
+			for _, n := range builds {
+				fmt.Fprintf(&b, "  %s\n", n)
+			}
+		}
 		b.WriteString("\nCheck each with tvt why <signal> before merging. Apply with: git apply <this file>\n\n")
 		b.WriteString(patches[repo].String())
 		path := filepath.Join(o.Dir, report.ManifestDir(repo)+".patch")
@@ -383,6 +395,9 @@ func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Bu
 	}
 	for _, n := range validation {
 		fmt.Fprintf(out, "validation: %s\n", n)
+	}
+	for _, n := range build {
+		fmt.Fprintf(out, "build: %s\n", n)
 	}
 	fmt.Fprintf(out, "scan %d: %d drops written, %d recommendations skipped\n", scan, len(written), len(skipped))
 	sort.SliceStable(skipped, func(i, j int) bool { return skipped[i].Note < skipped[j].Note })
@@ -398,7 +413,7 @@ func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Bu
 // recommended name (propose.OtelConditions, S7 item 9). A name that may
 // be one series of an OTel histogram is skipped: the collector sees the
 // whole histogram.
-func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string, scan int64, check checkFunc) (written, skipped []proposal, diff string) {
+func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
 	var ok []report.Recommendation
 	for _, rec := range recs {
 		if _, matchable := propose.OtelConditions(rec.Signal.Name); !matchable {
@@ -443,6 +458,14 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 	if failure == "" && files == 0 {
 		failure = "no metrics pipeline in " + strings.Join(p.Files, ", ")
 	}
+	if failure == "" {
+		d := dropOf(p.Name, ok, scan)
+		mdiff, err := ensureFilterBuild(p, root, d, note)
+		if err != nil {
+			failure = "the Collector build can't take filter/tvt: " + err.Error()
+		}
+		b.WriteString(mdiff)
+	}
 	for _, rec := range ok {
 		if failure != "" {
 			skipped = append(skipped, proposal{Rec: rec, Note: failure})
@@ -468,6 +491,7 @@ type checkFunc func(root, file string, out []byte) error
 type validator struct {
 	o      proposeOptions
 	notes  []string
+	build  []string          // per repo: what the Collector build has, or was given (S7 item 4)
 	copies map[string]string // pipeline -> its scratch copy
 	clean  []func()
 }
@@ -543,4 +567,40 @@ func copyTree(src, dst string) error {
 		}
 		return os.WriteFile(filepath.Join(dst, rel), b, 0o644)
 	})
+}
+
+// ensureFilterBuild makes the pipeline's Collector build include the
+// filter processor (S7 item 4) and returns the manifest's diff. The
+// manifest is pipelines[].build, or a builder-config.yaml next to one of
+// the pipeline's files. With none, the distribution is assumed to be
+// otelcol-contrib, which has the filter processor, and the patch says so.
+func ensureFilterBuild(p config.Pipeline, root string, d propose.Drop, note func(string)) (string, error) {
+	path := p.Build
+	if path == "" {
+		for _, f := range p.Files {
+			cand := filepath.ToSlash(filepath.Join(filepath.Dir(filepath.FromSlash(f)), "builder-config.yaml"))
+			if b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(cand))); err == nil && propose.IsBuilderManifest(b) {
+				path = cand
+				break
+			}
+		}
+	}
+	if path == "" {
+		note("no ocb builder manifest (pipelines[].build, or builder-config.yaml next to the config): assumed otelcol-contrib, which includes the filter processor")
+		return "", nil
+	}
+	src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	if err != nil {
+		return "", err
+	}
+	out, version, err := propose.EnsureProcessor(src, propose.FilterProcessorModule, d)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
+	if version == "" {
+		note(path + ": already includes the filter processor")
+	} else {
+		note(fmt.Sprintf("%s: adds the filter processor %s (rebuild the Collector with ocb before deploying)", path, version))
+	}
+	return propose.Diff(path, src, out), nil
 }
