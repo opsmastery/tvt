@@ -102,6 +102,10 @@ type Pipeline struct {
 	// Checkout is a local checkout of Repo (relative to tvt.yaml): tvt
 	// scan reads the pipeline's rewrites from Files there (S7 item 9).
 	Checkout string `yaml:"checkout"`
+	// Build is the ocb builder manifest of a custom Collector (otelcol
+	// pipelines), a path in the repo: tvt propose adds the components it
+	// writes to it (S7 item 4).
+	Build string `yaml:"build"`
 }
 
 // Records declares records: metrics entries are anchored regexes, streams
