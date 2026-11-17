@@ -625,3 +625,44 @@ func TestProposeFluentOperator(t *testing.T) {
 		t.Errorf("written %d skipped %+v\n%s", len(written), skipped, diff)
 	}
 }
+
+// TestProposeOperatorValidate: the monitor and Fluent Operator writers'
+// output passes kubeconform with the custom resource schemas, so those
+// files are validated, not marked NOT VALIDATED.
+func TestProposeOperatorValidate(t *testing.T) {
+	if os.Getenv("TVT_TEST_VALIDATORS") == "" {
+		t.Skip("set TVT_TEST_VALIDATORS=1 to run the pipelines' validators")
+	}
+	v := &validator{o: proposeOptions{Validate: "require"}}
+	defer v.cleanup()
+	ctx := context.Background()
+
+	root := t.TempDir()
+	r, _ := os.ReadFile("../../testdata/kube-prometheus-stack/render.yaml")
+	os.WriteFile(filepath.Join(root, "render.yaml"), r, 0o644)
+	name := "node_softnet_times_squeezed_total"
+	rec := report.Recommendation{ID: "drop:prom:metric:" + name, Action: report.ActionDrop,
+		Signal: report.SignalRef{ID: "prom:metric:" + name, Kind: "metric", Name: name}, Proposable: true}
+	p := config.Pipeline{Name: "kps", Kind: "prometheus-operator", Files: []string{"render.yaml"}}
+	written, skipped, _ := proposeMonitors(p, []report.Recommendation{rec}, map[string][]string{"prom:metric:" + name: {"node-exporter"}}, root, 4, v.check(ctx, p))
+	if len(written) != 1 || len(skipped) != 0 {
+		t.Errorf("monitors: written %d skipped %+v", len(written), skipped)
+	}
+
+	root = t.TempDir()
+	b, _ := os.ReadFile("../../pkg/propose/testdata/fluent-operator.yaml")
+	os.WriteFile(filepath.Join(root, "logging.yaml"), b, 0o644)
+	sel := `{app="shop", component="api", level="debug"}`
+	rr := report.Recommendation{ID: "reroute:loki:stream:" + sel, Action: report.ActionReroute,
+		Signal: report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel}, Proposable: true}
+	fp := config.Pipeline{Name: "fo", Kind: "fluentbit", Files: []string{"logging.yaml"}, Cold: "cold"}
+	written, skipped, _ = proposeFluentBit(fp, []report.Recommendation{rr}, root, 3, v.check(ctx, fp))
+	if len(written) != 1 || len(skipped) != 0 {
+		t.Errorf("fluent operator: written %d skipped %+v", len(written), skipped)
+	}
+	notes := strings.Join(v.notes, "\n")
+	if strings.Count(notes, "valid (") != 2 || !strings.Contains(notes, "not checked") {
+		t.Errorf("notes:\n%s", notes)
+	}
+	t.Log(notes)
+}
