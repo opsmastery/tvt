@@ -121,6 +121,12 @@ func TestWriters2(t *testing.T) {
 		}
 	}
 	t.Log(log.String())
+	// Manual test M3 applies this patch to the running lab.
+	if f := os.Getenv("TVT_WRITERS2_PATCH"); f != "" {
+		if err := os.WriteFile(f, patch, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	// git takes the patch onto a copy of the checkout.
 	if _, err := exec.LookPath("git"); err != nil {
