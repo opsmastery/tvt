@@ -88,6 +88,10 @@ type Inputs struct {
 	Pipelines       []config.Pipeline
 	LabelMetrics    collect.LabelMetrics
 	LabelMetricsErr string
+	// MetricJobs are the job label values each metric carries (S7 item
+	// 3), stored with its pipeline target so tvt propose knows which
+	// scrape configs a drop goes into. Nil when not read.
+	MetricJobs map[string][]string
 	// SelectorMetrics maps a label-only selector (SelectorKey) to the
 	// metric names the backend says carry those labels. A selector that
 	// names no metric resolves to these instead of every collected metric.

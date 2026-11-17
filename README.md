@@ -6,7 +6,7 @@
 - **Price it.** Attaches ingest and storage cost to every series and stream, using your own price card.
 - **Act on it.** Generates OTel Collector or Prometheus relabel config as a PR. `tvt check` blocks any change that would break an alert, SLO or viewed dashboard.
 
-> Status: pre-alpha. `tvt scan`, `tvt report` and `tvt why` work on the lab and on Grafana Cloud. `tvt propose` and `tvt check` are next. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/tasks/README.md](docs/tasks/README.md).
+> Status: pre-alpha. `tvt scan`, `tvt report` and `tvt why` work on the lab and on Grafana Cloud. `tvt propose` writes Prometheus and Alloy drops as patches; the other writers, pull requests and `tvt check` are next. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/tasks/README.md](docs/tasks/README.md).
 
 ## Commands
 
@@ -14,7 +14,7 @@
 tvt scan --grafana <url> --prom <url> --loki <url>   # build the usage graph (read-only)
 tvt report                                            # ranked savings report, HTML + JSON
 tvt why shop_cart_operations_total                    # every reader of one signal, and the evidence
-tvt propose                                           # config change + pull request
+tvt propose --config tvt.yaml --checkout <repo>=<dir> # drop rules as a patch per pipeline repo
 tvt check                                             # CI gate on config PRs
 tvt version
 ```
