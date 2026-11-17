@@ -65,6 +65,10 @@ func (d Drop) begin() string {
 
 const endMarker = "tvt:end"
 
+// originalMarker starts a comment, inside a tvt block, holding a line of
+// the user's that the block replaces; stripping the block restores it.
+const originalMarker = "tvt:original "
+
 // validate refuses a drop no writer should emit.
 func (d Drop) validate() error {
 	if d.ID == "" || strings.ContainsAny(d.ID, "\n\r") {
@@ -117,6 +121,10 @@ func stripBlocks(src []byte, prefix string) ([]byte, int, error) {
 			in = false
 		case in && isBegin:
 			return nil, 0, fmt.Errorf("propose: line %d: tvt:begin inside an open tvt block", i+1)
+		case in && strings.HasPrefix(t, prefix) && strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(t, prefix)), originalMarker):
+			// A line tvt replaced, kept in the block: put it back.
+			indent := l[:len(l)-len(strings.TrimLeft(l, " \t"))]
+			out.WriteString(indent + strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(t, prefix)), originalMarker)) + "\n")
 		case in:
 		case isBegin:
 			in = true
