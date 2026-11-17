@@ -33,7 +33,7 @@ check() {
   done
   if [[ -d "$LAB/.git" ]]; then echo "tvt-lab checkout: $LAB ($(git -C "$LAB" remote get-url origin))"; else echo "tvt-lab checkout: MISSING at $LAB (set TVT_LAB_DIR)"; ok=1; fi
   if [[ -n "$(git -C "$LAB" status --porcelain -- prometheus alloy fluent-bit otelcol 2>/dev/null)" ]]; then echo "tvt-lab pipeline files have local changes: commit or revert them first"; ok=1; fi
-  for u in http://localhost:3000/api/health http://localhost:9090/-/ready http://localhost:3100/ready; do
+  for u in http://localhost:3000/api/health http://localhost:9090/-/ready http://localhost:3100/loki/api/v1/status/buildinfo; do
     if curl -fsS -o /dev/null "$u"; then echo "lab: $u up"; else echo "lab: $u DOWN"; ok=1; fi
   done
   return $ok
