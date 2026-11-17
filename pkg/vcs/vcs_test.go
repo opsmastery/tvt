@@ -123,7 +123,7 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"html_url":"https://github.com/o/r/pull/7"}`))
 	case strings.HasSuffix(r.URL.Path, "/requested_reviewers"):
 		w.WriteHeader(422)
-		w.Write([]byte(`{"message":"Reviews may only be requested from collaborators."}`))
+		w.Write([]byte(`{"message":"Validation Failed","errors":[{"resource":"PullRequest","field":"reviewers","code":"custom","message":"Reviews may only be requested from collaborators."}]}`))
 	default:
 		w.WriteHeader(404)
 	}

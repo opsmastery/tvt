@@ -281,11 +281,27 @@ func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, sca
 func prBody(repo string, scan int64, written []proposal, validation, build []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Telemetry changes from tvt scan %d. Each rule sits in a marked `tvt:begin` block with its evidence; tvt regenerates its own blocks on the next run, so don't edit inside them.\n\n", scan)
-	b.WriteString("| Recommendation | Why |\n|---|---|\n")
+	// GitHub refuses a body over 65,536 characters (a 422), and a first
+	// scan can carry a thousand drops: list rows while they fit, then say
+	// how many more the patch carries.
+	const budget = 50000
+	n, shown := 0, 0
+	var rows strings.Builder
 	for _, w := range written {
-		if w.Repo == repo {
-			fmt.Fprintf(&b, "| `%s` | %s |\n", w.Rec.ID, strings.ReplaceAll(w.Rec.Claim, "|", "\\|"))
+		if w.Repo != repo {
+			continue
 		}
+		n++
+		row := fmt.Sprintf("| `%s` | %s |\n", w.Rec.ID, strings.ReplaceAll(w.Rec.Claim, "|", "\\|"))
+		if rows.Len()+len(row) > budget {
+			continue
+		}
+		rows.WriteString(row)
+		shown++
+	}
+	fmt.Fprintf(&b, "%d recommendations.\n\n| Recommendation | Why |\n|---|---|\n%s", n, rows.String())
+	if shown < n {
+		fmt.Fprintf(&b, "\n%d more aren't listed here (GitHub caps a PR description); each rule's block in the diff names its recommendation and evidence.\n", n-shown)
 	}
 	b.WriteString("\n**Validation**\n\n")
 	for _, n := range validation {
@@ -1036,7 +1052,34 @@ func selectorLabels(selector string) (map[string]string, error) {
 		}
 		out[m.Label] = m.Value
 	}
+	dropDerivedServiceName(out)
 	return out, nil
+}
+
+// lokiServiceSources is the order in which Loki 3 (limits_config
+// discover_service_name) picks a stream's service_name from its other
+// labels when the stream has none.
+var lokiServiceSources = []string{"service", "app", "application", "app_name", "name", "app_kubernetes_io_name",
+	"container", "container_name", "k8s_container_name", "component", "workload", "job", "k8s_job_name"}
+
+// dropDerivedServiceName removes a service_name label Loki added at
+// ingest: its value is the first of lokiServiceSources the stream has. No
+// pipeline sets it, so a rule that matched on it would never match the
+// stream where tvt writes (the live lab's debug streams carry
+// service_name="shop" from app="shop").
+func dropDerivedServiceName(l map[string]string) {
+	sn, ok := l["service_name"]
+	if !ok {
+		return
+	}
+	for _, k := range lokiServiceSources {
+		if v, ok := l[k]; ok {
+			if v == sn {
+				delete(l, "service_name")
+			}
+			return
+		}
+	}
 }
 
 // proposeMonitors writes whole-metric drops into a prometheus-operator
