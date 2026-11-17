@@ -145,3 +145,12 @@ pipelines:
     handles:
       - '{service_namespace="payments"}'
     reviewers: ["@acme/payments-sre"]
+
+  - name: fluentbit-node-logs
+    kind: fluentbit
+    repo: github.com/acme/observability-config
+    branch: main
+    files: [fluent-bit/fluent-bit.yaml]
+    cold: archive        # alias of an output you define for cold storage; its match must take tvt.cold.*
+    handles:
+      - '{app="checkout", level="debug"}'
