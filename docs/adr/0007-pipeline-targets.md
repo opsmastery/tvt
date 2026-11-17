@@ -1,6 +1,6 @@
 # 0007. Pipeline targets: declared pipelines, one owner per signal
 
-Date: 2026-11-09 · Status: accepted
+Date: 2026-11-09 · Status: accepted · Amended by ADR 0009: Fluent Bit and exporter kinds
 
 ## Context
 

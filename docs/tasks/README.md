@@ -4,14 +4,26 @@ From Sprint 3 on, sprints are two working days, each with one theme. They're ord
 
 | Sprint | File | Theme | Done when | Status |
 | --- | --- | --- | --- | --- |
-| 1 | [sprint 1](2026-11-sprint1-remainder-and-test-groundwork.md) | Collectors, store, `tvt scan`, test groundwork | Done | Done Nov 10 (`v0.0.1-rc.1`) |
-| 2 | [sprint 2](2026-11-sprint2.md) | References, query logs, hard keeps, SLOs and runbooks | Every seeded dependency resolves and no hard keep is misclassified | Done Nov 16; open: items 8–10 (more Grafana evidence, self-observability, `tvt init` and `SECURITY.md`, due by S12), 13, and item 11's Adaptive Metrics usage counts |
+| S1 | [s01](s01-collectors-store-scan.md) | Collectors, store, `tvt scan`, test groundwork | Each item merged with CI green; `tvt scan` runs on the live lab | Done Nov 10 (`v0.0.1-rc.1`) |
+| S2 | [s02](s02-references-query-logs-hard-keeps.md) | References, query logs, hard keeps, SLOs and runbooks | Every seeded dependency resolves and no hard keep is misclassified | Done Nov 16; open: items 8–10 (more Grafana evidence, self-observability, `tvt init` and `SECURITY.md`, due by S12), 13, and item 11's Adaptive Metrics usage counts |
 | S3 | [s03](s03-cost-and-scoring.md) | Cost and scoring core | Every lab signal has a monthly cost on two price cards; the simulated agent sweep keeps nothing on its own | Done Nov 14 |
 | S4 | [s04](s04-report-v1.md) | Report v1 | First report in under 30 minutes on the lab | Done Nov 14 |
 | S5 | [s05](s05-benchmark-and-log-findings.md) | Benchmark and log findings | Benchmark baseline recorded; a deliberately broken parser change fails CI | Done Nov 15 |
 | S6 | [s06](s06-rules-query-cost-slos-pipelines.md) | Rules, query cost, SLOs, pipelines | All rule and pipeline findings match ground truth; the report runs on the Grafana Cloud test stack | Done Nov 16 (item 6 on the Grafana Cloud test stack, `docs/grafana-cloud.md`) |
-| S7–S12 | [s07–s12](s07-s12-propose-check-owners-release.md) | Writers, `check`, owner workflow, reduce before drop, savings ledger, release candidate | `v0.1.0-rc1` tagged; the MVP gate rehearsed on the lab | Next. Before S7: ADRs 0009–0012 and the Alloy parsing ADR, tvt-lab's S7 seeds |
+| S7–S12 | [s07–s12](s07-s12-propose-check-owners-release.md) | Writers, `check`, owner workflow, reduce before drop, savings ledger, release candidate | `v0.1.0-rc1` tagged; the MVP gate rehearsed on the lab | Next. Before S7: accept ADRs 0003, 0009 and 0013 (drafted Nov 16) and land tvt-lab\'s S7 seeds. ADRs 0010–0012 before S8 |
 | S13–S16 | [s13–s16](s13-s16-alert-noise-agents-collector.md) | Continuous-mode work pulled forward: alert noise, agents and history, Collector and conventions | Each sprint's seeded cases reported correctly | Planned |
+
+## How these files are written
+
+Every task file follows the same shape, so status can be read the same way everywhere.
+
+- **File name:** `sNN-<theme>.md`, or `sNN-sMM-<theme>.md` for a group of sprints. Lab seeds go in `lab-backlog.md`, decisions in `docs/adr/`.
+- **Top of the file:** `# SNN: theme`, then a `**Status:**` line, then a `**Done when:**` line. In a group file, each `## SNN: theme` section has its own two lines.
+- **Status values:** Planned, Next, In progress, or Done with the date and the PRs. Open carry-overs are named on the same line ("Done Nov 16; open: items 8–10").
+- **Sections:** `## Before you start`, `## Must have (in this order)`, `## Should have`. In a group file, numbered items are must-haves in order unless marked "(should have)".
+- **Items:** numbered, one bold sentence first. What shipped for each item is recorded in `CLAUDE.md`'s Status section, not repeated here.
+- **No schedule.** Done dates are history and stay. Planned dates, partners and pricing stay out of the repo.
+- **The table above** is the index. Change a sprint's row in the same PR that changes its file's Status line.
 
 Lab seeds for every sprint are collected in [lab-backlog.md](lab-backlog.md), so tvt-lab and its `ground-truth.yaml` can run a sprint ahead of the code.
 
