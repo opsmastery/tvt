@@ -1,6 +1,6 @@
 # 0012. Reading the OTTL already in a Collector
 
-Date: 2026-11-16 · Status: proposed (decide before S8)
+Date: 2026-11-16 · Status: accepted (Nov 16): option 2, gated on the corpus test
 
 ## Context
 
@@ -16,11 +16,11 @@ Measured on Nov 16, the same way as ADR 0013: importing `pkg/ottl` adds 2.45 MB 
 2. **A narrow extractor.** Tokenize OTTL statements and recognize only paths and the editors that change them (`delete_key`, `delete_matching_keys`, `keep_keys`, `set`, `replace_pattern`, `truncate_all` and the like), plus the paths a condition reads. Anything it doesn't recognize stays fail-closed for the signals it could touch. Small, but tvt maintains a grammar.
 3. **Both.** The extractor by default, the full parser behind a build tag for partners with heavy OTTL.
 
-## Leaning
+## Decision
 
-Option 2. tvt needs to know which paths a statement reads and changes, not to run it, and the language is frozen, so a grammar written once from the v1 reference stays correct for 1.x. 2.45 MB is about 13% of the binary for that. The parse rate on real configs (the OTTL corpus in the parser tests, SnowOps Labs, partner configs) decides: below 95% of statements recognized, reconsider option 1.
+Option 2, a narrow extractor. tvt needs to know which paths a statement reads and changes, not to run it, and the language is frozen, so a grammar written once from the v1 reference stays correct for 1.x. 2.45 MB is about 13% of the binary for that. The parse rate on real configs (the OTTL corpus in the parser tests, SnowOps Labs, partner configs) decides: below 95% of statements recognized, this ADR is reopened for option 1. Until the extractor exists, `check` stays fail-closed on OTTL it can't read.
 
-## Still to do before deciding
+## Still to do (before S8)
 
 - Collect an OTTL corpus: the contrib docs' examples, the OTel blog posts reviewed Nov 12, tvt-lab's Collector seeds, and SnowOps Labs.
 - Prototype the extractor on that corpus and record the recognized share.

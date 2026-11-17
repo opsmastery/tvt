@@ -10,7 +10,7 @@ From Sprint 3 on, sprints are two working days, each with one theme. They're ord
 | S4 | [s04](s04-report-v1.md) | Report v1 | First report in under 30 minutes on the lab | Done Nov 14 |
 | S5 | [s05](s05-benchmark-and-log-findings.md) | Benchmark and log findings | Benchmark baseline recorded; a deliberately broken parser change fails CI | Done Nov 15 |
 | S6 | [s06](s06-rules-query-cost-slos-pipelines.md) | Rules, query cost, SLOs, pipelines | All rule and pipeline findings match ground truth; the report runs on the Grafana Cloud test stack | Done Nov 16 (item 6 on the Grafana Cloud test stack, `docs/grafana-cloud.md`) |
-| S7–S12 | [s07–s12](s07-s12-propose-check-owners-release.md) | Writers, `check`, owner workflow, reduce before drop, savings ledger, release candidate | `v0.1.0-rc1` tagged; the MVP gate rehearsed on the lab | Next. Before S7: accept ADRs 0003, 0009 and 0013 (drafted Nov 16) and land tvt-lab\'s S7 seeds. ADRs 0010–0012 before S8 |
+| S7–S12 | [s07–s12](s07-s12-propose-check-owners-release.md) | Writers, `check`, owner workflow, reduce before drop, savings ledger, release candidate | `v0.1.0-rc1` tagged; the MVP gate rehearsed on the lab | Next. ADRs 0003 and 0009–0013 accepted Nov 16. Before S7: tvt-lab's S7 seeds. Before S8: the OTTL corpus test (ADR 0012) |
 | S13–S16 | [s13–s16](s13-s16-alert-noise-agents-collector.md) | Continuous-mode work pulled forward: alert noise, agents and history, Collector and conventions | Each sprint's seeded cases reported correctly | Planned |
 
 ## How these files are written
