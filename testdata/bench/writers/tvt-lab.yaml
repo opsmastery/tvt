@@ -1,0 +1,58 @@
+# tvt.yaml for the golden lab scans (cmd/tvt/scan_test.go). Paths are relative
+# to this file: the lab's SLO definitions and runbooks, vendored by
+# scripts/capture-fixtures.sh.
+pricecard: grafana-cloud
+slos:
+  paths: [slos]
+postmortems:
+  paths: [postmortems]
+runbooks:
+  fetch: false
+  mirrors:
+    - url_prefix: https://github.com/Opsmastery-Summit/tvt-lab/blob/main/
+      path: .
+# The lab's agents container (the sweep and finance agents) at its address
+# in this snapshot (the Prometheus query log records only an IP), so the
+# report's query load shows what agents drive (S6 item 2).
+clients:
+  agents:
+    - name: lab-agents
+      addresses: [10.89.0.99]   # on the Mac mini since Nov 17
+# The lab's services, as ground truth's slo_coverage.services names them
+# (S6 item 3). No tiers: classification is unchanged.
+ownership:
+  owners:
+    - name: shop
+      metrics: ["shop_.*"]
+      streams: ['{app="shop"}']
+    - name: reconciler
+      streams: ['{app="reconciler"}']
+# The lab's pipelines (ADR 0007, ADR 0009): Prometheus scrape config and
+# Alloy since tvt-lab #20, Fluent Bit for the shop's debug stream since
+# tvt-lab #27, and the OTel Collector carrying the synthetic coding agent
+# since tvt-lab #29. The reconciler stream bypasses all of them.
+pipelines:
+  - name: prometheus-scrape
+    kind: prometheus
+    repo: github.com/Opsmastery-Summit/tvt-lab
+    branch: main
+    files: [prometheus/scrape/lab.yml]
+    handles: ['{job=~"prometheus|loki|grafana|alertmanager"}']
+  - name: alloy-apps
+    kind: alloy
+    repo: github.com/Opsmastery-Summit/tvt-lab
+    branch: main
+    files: [alloy/config.alloy]
+    handles: ['{job=~"shop|node"}', '{app="shop", level=~"info|warn|error"}']
+  - name: fluentbit-shop-debug
+    kind: fluentbit
+    repo: github.com/Opsmastery-Summit/tvt-lab
+    branch: main
+    files: [fluent-bit/fluent-bit.yaml]
+    handles: ['{app="shop", component="api", level="debug"}']
+  - name: otelcol-agent
+    kind: otelcol
+    repo: github.com/Opsmastery-Summit/tvt-lab
+    branch: main
+    files: [otelcol/config.yaml]
+    handles: ['{job="coding-agent"}', '{service_name="coding-agent"}']
