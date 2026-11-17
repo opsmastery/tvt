@@ -109,6 +109,9 @@ type Pipeline struct {
 	// Version is the Collector version the pipeline runs (otelcol
 	// pipelines, "0.165.0"): it picks the OTTL form tvt writes (S7 item 7).
 	Version string `yaml:"version"`
+	// Cold is the alias of the output that takes streams tvt reroutes to
+	// cold storage (fluentbit pipelines): one the config already defines.
+	Cold string `yaml:"cold"`
 }
 
 // Records declares records: metrics entries are anchored regexes, streams

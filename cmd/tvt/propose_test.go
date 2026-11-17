@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -190,5 +191,84 @@ func TestProposeBuildManifest(t *testing.T) {
 	}
 	if !strings.Contains(patch, "a/otelcol/builder-config.yaml") || !strings.Contains(patch, "+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.165.0") {
 		t.Errorf("manifest not patched:\n%s", patch)
+	}
+}
+
+// TestProposeFluentBit: a reviewed report's reroute of the shop's debug
+// stream (ground truth: route_cold, pipeline fluentbit-shop-debug) becomes
+// a rewrite_tag to the cold output in fluent-bit.yaml (S7 item 3). The
+// scan doesn't raise unread volume streams as recommendations yet, so the
+// row is added to the report the way a reviewer's JSON would carry it.
+func TestProposeFluentBit(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := readLatest(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := report.Build(in, 0)
+	r.Recommendations = append(r.Recommendations, report.Recommendation{
+		ID: `reroute:loki:stream:{app="shop", component="api", level="debug"}`, Action: report.ActionReroute,
+		Signal: report.SignalRef{ID: `loki:stream:{app="shop", component="api", level="debug"}`, Kind: "stream", Name: `{app="shop", component="api", level="debug"}`, Source: "loki"},
+		Claim:  "never queried; moving it to cold storage", Savings: report.Savings{Monthly: 12.5, Currency: "USD"},
+		Pipeline: "fluentbit-shop-debug", Proposable: true,
+	})
+	dir := t.TempDir()
+	rj := filepath.Join(dir, "report.json")
+	b, _ := json.Marshal(r)
+	if err := os.WriteFile(rj, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	cfg := filepath.Join(dir, "tvt.yaml")
+	if err := os.WriteFile(cfg, []byte(`pipelines:
+  - name: fluentbit-shop-debug
+    kind: fluentbit
+    repo: `+repo+`
+    files: [fluent-bit/fluent-bit.yaml]
+    handles: ['{app="shop", component="api", level="debug"}']
+    cold: cold
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checkout := t.TempDir()
+	if err := os.CopyFS(checkout, os.DirFS(filepath.Join(dirs[st.Name], "checkout"))); err != nil {
+		t.Fatal(err)
+	}
+	run := func() string {
+		t.Helper()
+		var out strings.Builder
+		o := proposeOptions{DB: db, Config: cfg, Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"), Checkouts: checkoutFlag{repo: checkout}, Validate: "off"}
+		if err := runPropose(context.Background(), o, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	// The lab's config has no cold output: skipped, with the reason.
+	if out := run(); !strings.Contains(out, `no output aliased "cold"`) {
+		t.Errorf("no cold output: not skipped with the reason\n%s", out)
+	}
+	cold, err := os.ReadFile("../../pkg/propose/testdata/fluent-bit-cold.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "fluent-bit", "fluent-bit.yaml"), cold, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := run()
+	patch, err := os.ReadFile(filepath.Join(dir, "p", report.ManifestDir(repo)+".patch"))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, want := range []string{"a/fluent-bit/fluent-bit.yaml", "+    - name: rewrite_tag", "+      rule: $log ^.*$ tvt.cold.shop.debug false"} {
+		if !strings.Contains(string(patch), want) {
+			t.Errorf("patch lacks %q:\n%s", want, patch)
+		}
 	}
 }
