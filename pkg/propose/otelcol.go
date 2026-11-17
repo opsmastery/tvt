@@ -154,9 +154,14 @@ func otelConditions(d Drop) []string {
 	names := slices.Clone(d.Metrics)
 	slices.Sort(names)
 	names = slices.Compact(names)
-	out := make([]string, len(names))
-	for i, n := range names {
-		out[i] = fmt.Sprintf(`metric.name == "%s"`, n)
+	var out []string
+	for _, n := range names {
+		if d.PromNames {
+			cs, _ := OtelConditions(n)
+			out = append(out, cs...)
+			continue
+		}
+		out = append(out, fmt.Sprintf(`metric.name == "%s"`, n))
 	}
 	return out
 }
@@ -170,6 +175,15 @@ func (d Drop) validateOtel() error {
 		return fmt.Errorf("propose: drop %s names no metric", d.ID)
 	}
 	for _, m := range d.Metrics {
+		if d.PromNames {
+			if !metricName.MatchString(m) {
+				return fmt.Errorf("propose: drop %s: %q is not a metric name", d.ID, m)
+			}
+			if _, ok := OtelConditions(m); !ok {
+				return fmt.Errorf("propose: drop %s: %s may be one series of an OTel histogram, which a collector can't drop alone", d.ID, m)
+			}
+			continue
+		}
 		if !otelName.MatchString(m) {
 			return fmt.Errorf("propose: drop %s: %q is not an OpenTelemetry metric name", d.ID, m)
 		}
@@ -286,4 +300,25 @@ func checkOtelDrop(src []byte, pipelines []string, d Drop) error {
 		}
 	}
 	return nil
+}
+
+// OtelcolPipelines lists a collector config's metrics pipelines (metrics
+// and metrics/<name>), sorted.
+func OtelcolPipelines(src []byte) ([]string, error) {
+	root, err := otelRoot(src)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	if service := value(root, "service"); service != nil {
+		if all := value(service, "pipelines"); all != nil && all.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(all.Content); i += 2 {
+				if n := all.Content[i].Value; n == "metrics" || strings.HasPrefix(n, "metrics/") {
+					out = append(out, n)
+				}
+			}
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
