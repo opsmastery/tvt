@@ -460,6 +460,7 @@ func Build(in Inputs) (Output, error) {
 	res.chains()
 	res.labelRefs()
 	out.Signals = append(out.Signals, res.newSignals...)
+	out.Signals = append(out.Signals, unreadStreams(in.StreamVolumes, out.Signals)...)
 	if in.StreamVolumes != nil {
 		costs, vols, err := streamCosts(in.StreamVolumes, out.Signals, in.Start)
 		if err != nil {
