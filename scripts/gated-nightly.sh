@@ -47,7 +47,8 @@ tests() {
   if command -v helm >/dev/null; then env+=(TVT_TEST_HELM=1); else echo "helm missing: chart renders skipped"; fi
   if ! podman info >/dev/null 2>&1; then echo "podman isn't answering: the validators can't run"; fi
   local rc=0
-  env "${env[@]}" go test -count=1 -timeout 45m ./... || rc=$?
+  # -p 2: fewer validator containers at once on the Podman machine.
+  env "${env[@]}" go test -count=1 -p 2 -timeout 45m ./... || rc=$?
   if [[ $rc -eq 0 ]]; then echo "PASS"; else echo "FAIL (go test exit $rc)"; fi
   return $rc
 }
