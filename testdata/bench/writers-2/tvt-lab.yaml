@@ -50,7 +50,8 @@ pipelines:
     branch: main
     checkout: checkout   # tvt-lab's pipeline files at the capture (S7 item 9)
     files: [alloy/config.alloy]
-    handles: ['{job=~"shop|node"}', '{app="shop", level=~"info|warn|error"}']
+    handles: ['{job=~"shop|node"}', '{app="shop", level=~"info|warn|error"}', '{app="shop", component="worker"}']
+    cold: loki.echo.cold   # tvt-lab #35: the cold tier for Alloy stream reroutes
   - name: fluentbit-shop-debug
     kind: fluentbit
     repo: github.com/Opsmastery-Summit/tvt-lab
@@ -58,6 +59,7 @@ pipelines:
     checkout: checkout   # tvt-lab's pipeline files at the capture (S7 item 9)
     files: [fluent-bit/fluent-bit.yaml]
     handles: ['{app="shop", component="api", level="debug"}']
+    cold: cold   # tvt-lab #35: the file output aliased cold, match tvt.cold.*
   - name: otelcol-agent
     kind: otelcol
     repo: github.com/Opsmastery-Summit/tvt-lab
