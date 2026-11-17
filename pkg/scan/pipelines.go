@@ -354,10 +354,39 @@ func holdUnfollowable(in Inputs, out []graph.PipelineTarget, metricPrefix, label
 	}
 	held := map[string]string{} // metric -> note
 	heldStreams := map[string]string{}
+	heldLabels := map[string]string{} // label subject -> note
 	var gaps []string
 	for _, p := range pipelines {
 		for _, rw := range in.Rewrites[p] {
 			if rw.Unfollowable == "" {
+				continue
+			}
+			if rw.Label {
+				note := fmt.Sprintf("%s (%s %s in %s: %s)", PipelineUnfollowable, p, rw.Component, rw.File, rw.Unfollowable)
+				n := 0
+				for _, t := range out {
+					rest, ok := strings.CutPrefix(t.Subject, labelPrefix)
+					j := strings.LastIndex(rest, ":")
+					if !ok || j < 0 || t.Pipeline != p {
+						continue
+					}
+					metric, label := rest[:j], rest[j+1:]
+					hit := rw.All || slices.Contains(rw.Names, metric)
+					for _, pre := range rw.Prefixes {
+						hit = hit || strings.HasPrefix(metric, pre)
+					}
+					for _, jb := range in.MetricJobs[metric] {
+						hit = hit || slices.Contains(rw.Jobs, jb)
+					}
+					if !hit || (len(rw.Labels) > 0 && !slices.Contains(rw.Labels, label)) {
+						continue
+					}
+					n++
+					if _, ok := heldLabels[t.Subject]; !ok {
+						heldLabels[t.Subject] = note
+					}
+				}
+				gaps = append(gaps, fmt.Sprintf("pipeline %s: %s in %s sets labels tvt doesn't place a removal around (%s): %d labels held, none proposed", p, rw.Component, rw.File, rw.Unfollowable, n))
 				continue
 			}
 			if rw.Streams {
@@ -400,6 +429,10 @@ func holdUnfollowable(in Inputs, out []graph.PipelineTarget, metricPrefix, label
 	}
 	for i, t := range out {
 		if note, ok := heldStreams[t.Subject]; ok {
+			out[i].Pipeline, out[i].Note = "", note
+			continue
+		}
+		if note, ok := heldLabels[t.Subject]; ok {
 			out[i].Pipeline, out[i].Note = "", note
 			continue
 		}

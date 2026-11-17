@@ -33,6 +33,16 @@ type Rewrite struct {
 	// Streams: the rule touches log streams' labels (Alloy loki.process);
 	// with All, every stream the pipeline carries.
 	Streams bool
+	// Label: the rule sets metric labels rather than names (Alloy
+	// prometheus.relabel replace or labelmap, OTel attributes, transform
+	// and metricstransform). Labels are the label names it sets; empty
+	// means tvt can't tell which, so every label of the metrics that pass
+	// it. tvt doesn't place a label removal around such a rule yet, so the
+	// scan holds those labels (Unfollowable says what the rule does).
+	// Prometheus metric_relabel_configs aren't listed: tvt's rules go last
+	// in the list, after every rename, so they act on the stored names.
+	Label  bool
+	Labels []string
 }
 
 // Rewrites reads the name-touching rules of one pipeline file: Alloy
@@ -40,6 +50,14 @@ type Rewrite struct {
 // kinds have none tvt reads yet (nil). It never evaluates an expression
 // (ADR 0013): a non-literal value in a rule on __name__ is unfollowable.
 func Rewrites(kind, file string, src []byte) ([]Rewrite, error) {
+	// tvt's own blocks aren't the pipeline's rewrites.
+	prefix := "#"
+	if kind == "alloy" {
+		prefix = "//"
+	}
+	if stripped, _, err := stripBlocks(src, prefix); err == nil {
+		src = stripped
+	}
 	switch kind {
 	case "alloy":
 		return alloyRewrites(file, src)
@@ -97,9 +115,18 @@ func otelRewrites(file string, src []byte) ([]Rewrite, error) {
 		}
 		typ, _, _ := strings.Cut(id, "/")
 		comp := "processor " + id
+		if strings.Contains(id, "tvt") {
+			continue // tvt's own processors
+		}
 		switch typ {
+		case "attributes":
+			out = append(out, otelAttributesRules(file, comp, cfg)...)
 		case "transform":
 			for _, st := range otelStatements(value(cfg, "metric_statements")) {
+				if rw, ok := otelLabelStatement(file, comp, st); ok {
+					out = append(out, rw)
+					continue
+				}
 				m := otelNameTarget.FindStringSubmatch(st)
 				if m == nil {
 					continue
@@ -116,6 +143,7 @@ func otelRewrites(file string, src []byte) ([]Rewrite, error) {
 				continue
 			}
 			for _, t := range ts.Content {
+				out = append(out, metricstransformLabelOps(file, comp, t)...)
 				newName := str(t, "new_name")
 				if newName == "" && value(t, "new_name") == nil {
 					continue // label operations only
@@ -136,6 +164,69 @@ func otelRewrites(file string, src []byte) ([]Rewrite, error) {
 		}
 	}
 	return out, nil
+}
+
+var (
+	otelSetAttr   = regexp.MustCompile(`^\s*set\(\s*(?:datapoint\.|resource\.|metric\.)?attributes\[\s*"([^"\\]+)"\s*\]\s*,`)
+	otelKeyRename = regexp.MustCompile(`^\s*(replace_all_patterns|replace_all_matches)\(\s*(?:datapoint\.|metric\.)?attributes\s*,\s*"key"`)
+)
+
+// otelLabelStatement reads a transform statement that sets a metric
+// attribute (a label once stored): set(attributes["k"], ...) sets k; a
+// pattern replace on attribute keys renames keys tvt can't list.
+func otelLabelStatement(file, comp, st string) (Rewrite, bool) {
+	if m := otelSetAttr.FindStringSubmatch(st); m != nil {
+		return Rewrite{File: file, Component: comp, Label: true, Labels: []string{m[1]}, All: true,
+			Unfollowable: fmt.Sprintf("sets label %s: %s", m[1], shorten(st))}, true
+	}
+	if m := otelKeyRename.FindStringSubmatch(st); m != nil {
+		return Rewrite{File: file, Component: comp, Label: true, All: true,
+			Unfollowable: fmt.Sprintf("%s renames label keys: %s", m[1], shorten(st))}, true
+	}
+	return Rewrite{}, false
+}
+
+// otelAttributesRules reads an attributes processor's actions. insert,
+// update and upsert set a key; extract sets keys from a pattern's named
+// groups, which tvt doesn't parse; delete, hash and convert set no name.
+func otelAttributesRules(file, comp string, cfg *yaml.Node) []Rewrite {
+	acts := value(cfg, "actions")
+	if acts == nil || acts.Kind != yaml.SequenceNode {
+		return nil
+	}
+	var out []Rewrite
+	for _, a := range acts.Content {
+		key, action := str(a, "key"), str(a, "action")
+		switch action {
+		case "insert", "update", "upsert":
+			if key == "" {
+				out = append(out, Rewrite{File: file, Component: comp, Label: true, All: true, Unfollowable: action + " with no literal key"})
+				continue
+			}
+			out = append(out, Rewrite{File: file, Component: comp, Label: true, Labels: []string{key}, All: true, Unfollowable: fmt.Sprintf("%s sets label %s", action, key)})
+		case "extract":
+			out = append(out, Rewrite{File: file, Component: comp, Label: true, All: true, Unfollowable: fmt.Sprintf("extract sets labels from a pattern on %s", cmpOr(key, "an attribute"))})
+		}
+	}
+	return out
+}
+
+// metricstransformLabelOps reads a transform's label operations:
+// update_label and add_label set new_label.
+func metricstransformLabelOps(file, comp string, t *yaml.Node) []Rewrite {
+	ops := value(t, "operations")
+	if ops == nil || ops.Kind != yaml.SequenceNode {
+		return nil
+	}
+	var out []Rewrite
+	for _, op := range ops.Content {
+		action, nl := str(op, "action"), str(op, "new_label")
+		if (action == "update_label" || action == "add_label") && nl != "" {
+			out = append(out, Rewrite{File: file, Component: comp, Label: true, Labels: []string{nl}, All: true,
+				Unfollowable: fmt.Sprintf("%s sets label %s", action, nl)})
+		}
+	}
+	return out
 }
 
 // otelStatements flattens metric_statements: plain strings, or groups
@@ -208,6 +299,26 @@ func (r rule) nameRule() (touches bool, from, to, why string) {
 	return true, "", "", "action " + action + " on __name__"
 }
 
+// labelRule classifies a rule that sets a label other than __name__:
+// replace (and hashmod) set target_label; labelmap sets labels its regex
+// derives, which tvt can't list. labeldrop and labelkeep only remove.
+// why is empty when the rule sets no label.
+func (r rule) labelRule() (labels []string, why string) {
+	action := r.action
+	if action == "" {
+		action = "replace"
+	}
+	switch {
+	case r.unknown != "":
+		return nil, r.unknown + " isn't a literal tvt can read"
+	case action == "labelmap":
+		return nil, fmt.Sprintf("labelmap %q sets labels tvt can't list", r.regex)
+	case (action == "replace" || action == "hashmod" || action == "lowercase" || action == "uppercase") && r.target != "" && r.target != "__name__":
+		return []string{r.target}, fmt.Sprintf("%s sets label %s", action, r.target)
+	}
+	return nil, ""
+}
+
 func alloyRewrites(file string, src []byte) ([]Rewrite, error) {
 	f, err := parser.ParseFile(file, src)
 	if err != nil {
@@ -253,8 +364,17 @@ func alloyRewrites(file string, src []byte) ([]Rewrite, error) {
 			if !ok || len(rb.Name) != 1 || rb.Name[0] != "rule" {
 				continue
 			}
-			touches, from, to, why := alloyRule(rb).nameRule()
-			if !touches || (why == "" && from == "") {
+			r := alloyRule(rb)
+			touches, from, to, why := r.nameRule()
+			if !touches {
+				if labels, lwhy := r.labelRule(); lwhy != "" {
+					rw := Rewrite{File: file, Component: fmt.Sprintf("prometheus.relabel %q", b.Label), Label: true, Labels: labels, Unfollowable: lwhy}
+					alloySources(&rw, id, blocks, upstream, map[string]bool{})
+					out = append(out, rw)
+				}
+				continue
+			}
+			if why == "" && from == "" {
 				continue
 			}
 			rw := Rewrite{File: file, Component: fmt.Sprintf("prometheus.relabel %q", b.Label), From: from, To: to, Unfollowable: why}
