@@ -41,6 +41,9 @@ type Signal struct {
 	// unknown; Tier is its service tier, nil when unknown.
 	Owner string
 	Tier  *int
+	// Record says why the signal is a record (S7 item 2, ADR 0011): never
+	// dropped, sampled or collapsed, whatever its class. Empty: not one.
+	Record string
 }
 
 // ConsumerKind is the type of thing that depends on a signal.
