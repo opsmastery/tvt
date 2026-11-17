@@ -127,6 +127,23 @@
           "line:startup_burst: not raised, want repeated_line"
         ]
       }
+    },
+    "writers-2": {
+      "evidence": {
+        "found": 82,
+        "total": 82,
+        "score": 1,
+        "missed": []
+      },
+      "recommendations": {
+        "true_positives": 307,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "precision": 1,
+        "recall": 1,
+        "wrong": [],
+        "missed": []
+      }
     }
   }
 }

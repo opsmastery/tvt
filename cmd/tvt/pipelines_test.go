@@ -70,6 +70,9 @@ func TestPipelineTargets(t *testing.T) {
 			if err := node.Decode(&outputs); err != nil {
 				t.Fatal(err)
 			}
+			// The alerting rules' output, written by the ruler like a
+			// recording rule's, though ground truth lists only those.
+			outputs = append(outputs, "ALERTS", "ALERTS_FOR_STATE")
 		default:
 			var p gtPipeline
 			if err := node.Decode(&p); err != nil {
