@@ -12,7 +12,7 @@ Part of the MVP (S7–S12). The MVP is done when `v0.1.0-rc1` is tagged; on the 
 
 - ADR 0012: collect the OTTL corpus and prototype the extractor; below 95% of statements recognized, the ADR reopens. OTTL is v1 from opentelemetry-collector-contrib v0.164.0. Decide between importing contrib's `pkg/ottl` parser (Apache 2.0; measure the dependency weight as spike 3 did for Loki) and a narrow extractor for paths and the editors that change them. Lambda functions, experimental `xottl` functions and `xprofile` are outside the guarantee.
 - ADR 0011: confirm the records rule (S7 item 2).
-- tvt-lab's S8 seeds (`lab-backlog.md`).
+- tvt-lab's S8 seeds (`lab-backlog.md`), landed with their expected `check` results in ground truth before item 1, so `check` is built test-first.
 
 ## Must have (in this order)
 
@@ -32,4 +32,5 @@ Part of the MVP (S7–S12). The MVP is done when `v0.1.0-rc1` is tagged; on the 
 
 ## Should have
 
-1. **Diagnosability after cuts** (optional suite). On a SnowOps Labs cluster (see `lab-backlog.md`), apply the proposed cuts, inject each of its faults, and confirm each is still diagnosable and graded (`labctl incident status`, `labctl scenario verify`). A fault that becomes undiagnosable becomes a ground-truth case in tvt-lab.
+1. **Gated lab tests for applied changes.** The manual tests that apply a proposed patch to the running lab (apply, restart, check that dropped series stop and kept ones don't, revert; and the delta-counter totals after aggregation) become a suite behind `TVT_TEST_LAB=1`, run against the Mac mini lab, once each has passed by hand twice.
+2. **Diagnosability after cuts** (optional suite). On a SnowOps Labs cluster (see `lab-backlog.md`), apply the proposed cuts, inject each of its faults, and confirm each is still diagnosable and graded (`labctl incident status`, `labctl scenario verify`). A fault that becomes undiagnosable becomes a ground-truth case in tvt-lab.
