@@ -217,7 +217,7 @@ A rule is part of an SLO's alerting (a burn-rate alert, or an SLO tool's recorde
 
 ## Pipelines (S6 item 4)
 
-`tvt.yaml` `pipelines:` (ADR 0007) declares where signals are shaped: each pipeline has a `name`, `kind` (`prometheus`, `alloy`, `otelcol`), `repo`, `branch`, `files` or `helm_values` (`file` + `path`, not both), `handles` (label selectors, required) and `reviewers`. The scan maps every signal to the one pipeline whose handles match it:
+`tvt.yaml` `pipelines:` (ADR 0007) declares where signals are shaped: each pipeline has a `name`, `kind` (`prometheus`, `alloy`, `otelcol`), `repo`, `branch`, `files` or `helm_values` (`file`, plus `path`, the config's key, for a collector; not both, except that a `prometheus-operator` pipeline lists its rendered monitors in `files` beside the values it writes), `handles` (label selectors, required) and `reviewers`. The scan maps every signal to the one pipeline whose handles match it:
 
 - A metric's labels come from `prometheus.Client.LabelMetrics`: for each label the handles name, its values (`/api/v1/label/<l>/values`) and the metric names that carry each value (`/api/v1/label/__name__/values?match[]={l="v"}`), over the series lookback. These are metadata reads, which the query log doesn't record. A handle's matchers are checked one by one, so a metric whose series split across pipelines is claimed by both. A label signal takes its metric's pipeline.
 - A stream (each label set the volume API listed, subject `stream:<selector>`) takes the pipeline whose handles match its labels. A stream signal (a selector) takes the pipeline of every stream it selects; streams on different pipelines make it unmapped.
