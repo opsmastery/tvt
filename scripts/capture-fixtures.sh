@@ -53,6 +53,12 @@ get "$PROM/api/v1/targets/metadata"       "$OUT/prometheus/targets_metadata.json
 get "$PROM/api/v1/status/flags"           "$OUT/prometheus/flags.json"             # exemplar-storage
 get "$PROM/metrics"                       "$OUT/prometheus/metrics.txt"            # its own TSDB stats (self-hosted card)
 get "$PROM/api/v1/series?match[]=shop_cart_operations_total&limit=200" "$OUT/prometheus/series_cart_ops.json"
+# Recorded series for the metrics whose label removals the benchmark scores
+# (S6 item 7, S7): served as /api/v1/series answers, so each label's merges
+# are real. series_cart_ops.json above is the older name for the first.
+for m in ${SERIES_METRICS:-shop_http_requests_total}; do
+  get "$PROM/api/v1/series?match[]=$m&limit=2000" "$OUT/prometheus/series_$m.json"
+done
 # Pipeline labels (S6 item 4): label -> value -> metric names, for the
 # labels tvt.yaml's pipelines handles match on. The test server answers
 # /api/v1/label/<l>/values and /api/v1/label/__name__/values?match[]= from it.

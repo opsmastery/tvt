@@ -18,6 +18,7 @@ package main
 //	go test ./cmd/tvt -run TestBenchmark -update-bench
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"flag"
@@ -60,6 +61,11 @@ type benchState struct {
 	// snapshot holds, so the scan must prove them.
 	Proven []string `yaml:"proven"`
 	About  string   `yaml:"about"`
+	// LabelTop is how many of the largest metrics get per-label
+	// cardinality (default 5). Metrics with recorded series
+	// (prometheus/series_<metric>.json) are served those; the rest two
+	// synthetic series.
+	LabelTop int `yaml:"label_top"`
 }
 
 // benchScore is one state's result, as recorded in baseline.json.
@@ -256,29 +262,42 @@ func scanState(t *testing.T, st benchState, dir string) (scanGraph, report.Repor
 	// answer truncated, which tvt refuses (fail closed). Served as the
 	// whole answer, without that warning: a 200-series sample of the label
 	// values is enough to make user_id a label signal.
-	var recorded map[string]any
-	if err := json.Unmarshal(testutil.ReadFile(t, filepath.Join(dir, "prometheus/series_cart_ops.json")), &recorded); err != nil {
-		t.Fatal(err)
+	recordedSeries := func(file string) []byte {
+		var recorded map[string]any
+		if err := json.Unmarshal(testutil.ReadFile(t, file), &recorded); err != nil {
+			t.Fatal(err)
+		}
+		delete(recorded, "warnings")
+		b, err := json.Marshal(recorded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
 	}
-	delete(recorded, "warnings")
-	series, err := json.Marshal(recorded)
-	if err != nil {
-		t.Fatal(err)
+	series := map[string][]byte{"shop_cart_operations_total": recordedSeries(filepath.Join(dir, "prometheus/series_cart_ops.json"))}
+	files, _ := filepath.Glob(filepath.Join(dir, "prometheus", "series_*.json"))
+	for _, f := range files {
+		if name := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(f), "series_"), ".json"); name != "cart_ops" {
+			series[name] = recordedSeries(f)
+		}
 	}
 	l := newLabAt(t, dir, map[string]http.HandlerFunc{
-		// The recorded series of shop_cart_operations_total, so its user_id
-		// label is a signal; two synthetic series for every other metric.
+		// The recorded series where the snapshot has them (shop_cart_operations_total's,
+		// so its user_id label is a signal); two synthetic series for every other metric.
 		"/api/v1/series": func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Query().Get("match[]") == `{__name__="shop_cart_operations_total"}` {
-				w.Write(series)
-				return
+			m := r.URL.Query().Get("match[]")
+			if name, ok := strings.CutPrefix(m, `{__name__="`); ok {
+				if b, ok := series[strings.TrimSuffix(name, `"}`)]; ok {
+					w.Write(b)
+					return
+				}
 			}
 			syntheticSeries(w, r)
 		},
 	})
 	db := filepath.Join(t.TempDir(), "tvt.db")
 	o := labOptionsAt(dir, l, db)
-	o.LabelTop = 5
+	o.LabelTop = cmp.Or(st.LabelTop, 5)
 	o.LokiQueryLogs = stringList{l.lokiLog}
 	var out strings.Builder
 	if err := runScan(context.Background(), o, env, &out); err != nil {
