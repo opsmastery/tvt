@@ -386,6 +386,15 @@ func Build(in Input, limit int) Report {
 		if !ok || s.Class != string(score.ClassCandidate) {
 			continue
 		}
+		// A record is never dropped, sampled or collapsed (S7 item 2, ADR
+		// 0011): held, whatever its readers.
+		if s.Record != "" {
+			if r.Held == nil {
+				r.Held = map[string]int{}
+			}
+			r.Held[HeldRecord]++
+			continue
+		}
 		if sc.Held != "" || sc.Confidence <= 0 {
 			if r.Held == nil {
 				r.Held = map[string]int{}
@@ -631,6 +640,10 @@ func actionFor(k graph.SignalKind) string {
 	}
 	return ActionDrop
 }
+
+// HeldRecord is the held reason for a candidate that is a record (S7 item
+// 2): tvt never proposes changing a record.
+const HeldRecord = "record"
 
 // stronger orders evidence classes: declared and incident outrank observed.
 func stronger(a, b string) bool {

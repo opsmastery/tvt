@@ -18,6 +18,10 @@ clients:
   agents:
     - name: lab-agents
       addresses: [10.89.0.99]   # on the Mac mini since Nov 17
+# Records (S7 item 2, ADR 0011): the shop's audit log, declared. tvt would
+# also find it by name (component="audit").
+records:
+  streams: ['{app="shop", component="audit"}']
 # The lab's services, as ground truth's slo_coverage.services names them
 # (S6 item 3). No tiers: classification is unchanged.
 ownership:

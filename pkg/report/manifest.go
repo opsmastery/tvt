@@ -11,8 +11,8 @@ import (
 const ManifestVersion = 1
 
 // Protected classes: a signal in one of these is never proposed for a
-// drop, and tvt check fails a change that would touch it. Records join in
-// S7 item 2 (ADR 0011).
+// drop, and tvt check fails a change that would touch it. A record (S7
+// item 2, ADR 0011) is protected whatever its class.
 var protectedClasses = map[string]bool{"hard_keep": true, "keep_high": true, "dormant": true}
 
 // Manifest is .tvt/protect.json for one pipeline repo (S7 item 1): every
@@ -45,8 +45,11 @@ type ProtectedSignal struct {
 	Name     string `json:"name"`
 	Parent   string `json:"parent,omitempty"`
 	Pipeline string `json:"pipeline"`
-	// Class is hard_keep, keep_high or dormant.
-	Class   string `json:"class"`
+	// Class is hard_keep, keep_high, dormant, or candidate for a record.
+	Class string `json:"class"`
+	// Record says why the signal is a record: never dropped, sampled or
+	// collapsed; a content cap is allowed when the outcome fields stay.
+	Record  string `json:"record,omitempty"`
 	Dormant string `json:"dormant,omitempty"`
 	Owner   string `json:"owner,omitempty"`
 	// Protectors are the readers behind the class, strongest evidence
@@ -106,7 +109,7 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 		}
 	}
 	for _, s := range in.Signals {
-		if !protectedClasses[s.Class] {
+		if !protectedClasses[s.Class] && s.Record == "" {
 			continue
 		}
 		p := pipelineOf[s.ID]
@@ -116,7 +119,7 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 			continue
 		}
 		ps := ProtectedSignal{ID: s.ID, Kind: string(s.Kind), Name: s.Name, Parent: s.Parent, Pipeline: p,
-			Class: s.Class, Dormant: s.Dormant, Owner: s.Owner, Protectors: []Protector{}}
+			Class: s.Class, Record: s.Record, Dormant: s.Dormant, Owner: s.Owner, Protectors: []Protector{}}
 		if w, err := Explain(in, s.ID); err == nil {
 			seen := map[string]bool{}
 			for _, rd := range w.Readers {

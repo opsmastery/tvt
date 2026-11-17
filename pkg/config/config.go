@@ -31,6 +31,10 @@ type Config struct {
 	// hard keep.
 	ExternalConsumers []ExternalConsumer `yaml:"external_consumers"`
 	Ownership         Ownership          `yaml:"ownership"`
+	// Records are signals tvt never drops, samples or collapses (S7 item 2,
+	// ADR 0011), on top of the ones named like a record (audit, deploy and
+	// change events).
+	Records Records `yaml:"records"`
 	// SLOs are read from files; every signal an SLI reads is a hard keep.
 	SLOs SLOs `yaml:"slos"`
 	// Runbooks says how to read the runbooks alerts link to.
@@ -95,6 +99,13 @@ type Pipeline struct {
 	// series and log streams this pipeline ingests.
 	Handles   []string `yaml:"handles"`
 	Reviewers []string `yaml:"reviewers"`
+}
+
+// Records declares records: metrics entries are anchored regexes, streams
+// entries stream selectors (as ownership's).
+type Records struct {
+	Metrics []string `yaml:"metrics"`
+	Streams []string `yaml:"streams"`
 }
 
 // HelmValues points at the Helm values key a pipeline's config renders from.
@@ -378,6 +389,16 @@ func (c *Config) validate() error {
 	for i, p := range c.Postmortems.Paths {
 		if p == "" {
 			return fmt.Errorf("postmortems.paths[%d]: empty path", i)
+		}
+	}
+	for i, expr := range c.Records.Metrics {
+		if _, err := MetricRegexp(expr); err != nil {
+			return fmt.Errorf("records.metrics[%d]: %w", i, err)
+		}
+	}
+	for i, sel := range c.Records.Streams {
+		if _, err := StreamMatchers(sel); err != nil {
+			return fmt.Errorf("records.streams[%d] %q: %w", i, sel, err)
 		}
 	}
 	owners := map[string]bool{}
