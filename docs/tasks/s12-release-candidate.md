@@ -15,7 +15,7 @@ Part of the MVP (S7–S12). The MVP is done when `v0.1.0-rc1` is tagged; on the 
 ## Must have (in this order)
 
 1. **Supply chain:** reproducible builds verified in CI, cosign-signed releases, govulncheck, gitleaks, Dependabot, and a release checklist in `docs/`.
-2. **`SECURITY.md`** (Sprint 2 item 10, if not done) and an install guide checked against a clean install.
+2. **`SECURITY.md`** (Sprint 2 item 10, if not done) and an install guide checked against a clean install: a fresh macOS user and a fresh Linux VM, where `tvt version` runs and the cosign check verifies `checksums.txt`. The HTML report is opened in a browser on both, not only checked for content.
 3. **Docs for every command.**
 4. **The README claim:** "Every signal tvt marks unread had no reader in your evidence window, and every gap is listed. If you find a reader we missed, that's a bug, and the benchmark gets a new case."
 5. **Sensitive content note.** In the report, unread attributes whose names mark them as prompts, responses, emails or host paths are flagged beside their saving. tvt reads key names and sizes only, never values.
