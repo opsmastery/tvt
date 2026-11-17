@@ -15,3 +15,5 @@ Date: 2026-11-08 · Status: accepted (Nov 16) · Amended by ADR 0007: one manife
 - CI needs no credentials, and the check takes seconds.
 - The manifest has to be refreshed. In continuous mode, the service opens a PR to refresh it.
 - The manifest reveals metric and dashboard names, but no query text or values.
+
+Implementation (S7 item 1, Nov 17, 2026): `tvt report --config tvt.yaml --manifest-dir DIR` writes the manifests, one per pipeline repo, from the stored scan (`tvt scan` writes only the database). Format in `docs/report.md`.
