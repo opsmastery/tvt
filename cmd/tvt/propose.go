@@ -819,7 +819,7 @@ func proposeFluentBit(p config.Pipeline, recs []report.Recommendation, root stri
 				}
 				srcs[f] = b
 			}
-			if _, err := propose.FluentBit(srcs[f], r); err != nil {
+			if _, err := fluentRoutes(f)(srcs[f], []propose.Route{r}); err != nil {
 				last = fmt.Errorf("%s: %w", f, err)
 				continue
 			}
@@ -841,7 +841,7 @@ func proposeFluentBit(p config.Pipeline, recs []report.Recommendation, root stri
 		for _, i := range idx {
 			rs = append(rs, routes[i])
 		}
-		out, err := propose.FluentBitRoutes(srcs[f], rs)
+		out, err := fluentRoutes(f)(srcs[f], rs)
 		if err == nil {
 			err = check(root, f, out)
 		}
@@ -1089,4 +1089,13 @@ func proposeAlloyRoutesOnly(p config.Pipeline, recs []report.Recommendation, rou
 		return written, skipped, propose.Diff(f, src, out)
 	}
 	return fail(fmt.Sprint(last))
+}
+
+// fluentRoutes is the Fluent Bit writer for a file's format: classic for
+// .conf, YAML otherwise.
+func fluentRoutes(file string) func([]byte, []propose.Route) ([]byte, error) {
+	if strings.HasSuffix(strings.ToLower(file), ".conf") {
+		return propose.FluentBitClassicRoutes
+	}
+	return propose.FluentBitRoutes
 }
