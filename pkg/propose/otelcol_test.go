@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-var otelDrop = Drop{ID: "otelcol-agent", Scan: 7, Evidence: "0123456789ab",
+var otelDrop = Drop{ID: "otelcol-agent", Scan: 7, Evidence: "0123456789ab", Collector: "0.165.0",
 	Reason:  "2 unread metrics, see tvt why",
 	Metrics: []string{"gen_ai.client.token.usage", "coding_agent.cost.usage"}}
 
@@ -81,6 +81,8 @@ func TestOtelcolRefuses(t *testing.T) {
 		{"no pipelines", string(src), nil, otelDrop, "no pipeline"},
 		{"bad name", string(src), []string{"metrics"}, Drop{ID: "x", Metrics: []string{"has space"}}, "not an OpenTelemetry metric name"},
 		{"quote in name", string(src), []string{"metrics"}, Drop{ID: "x", Metrics: []string{`a"b`}}, "not an OpenTelemetry metric name"},
+		{"too old", string(src), []string{"metrics"}, Drop{ID: "x", Metrics: []string{"a"}, Collector: "0.79.0"}, "predates v0.80.0"},
+		{"bad version", string(src), []string{"metrics"}, Drop{ID: "x", Metrics: []string{"a"}, Collector: "latest"}, "want MAJOR.MINOR.PATCH"},
 		{"no processors", "service:\n  pipelines:\n    metrics:\n      receivers: [otlp]\n", []string{"metrics"}, otelDrop, "no processors section"},
 		{"hand-written filter/tvt", strings.Replace(string(src), "  batch: {}\n", "  batch: {}\n  filter/tvt: {}\n", 1), []string{"metrics"}, otelDrop, "outside a tvt block"},
 	} {

@@ -129,7 +129,7 @@ func TestOtelConditions(t *testing.T) {
 
 func TestOtelcolPromNames(t *testing.T) {
 	src := read(t, "otelcol.yaml")
-	d := Drop{ID: "otelcol-agent", Scan: 7, PromNames: true, Metrics: []string{"coding_agent_cost_usage_USD_total"}}
+	d := Drop{ID: "otelcol-agent", Scan: 7, PromNames: true, Collector: "0.165.0", Metrics: []string{"coding_agent_cost_usage_USD_total"}}
 	out, err := Otelcol(src, []string{"metrics"}, d)
 	if err != nil {
 		t.Fatal(err)
