@@ -2,14 +2,18 @@
 
 Seeds the lab needs, grouped by the sprint whose tests use them. Land each one in tvt-lab, with its expected result in `ground-truth.yaml`, a sprint ahead of the code that reads it. Then re-run `scripts/capture-fixtures.sh` and vendor the new ground truth into `testdata/lab/`.
 
-## Sprint 2 (now)
+## S2
+
+**Status:** Done.
 
 - Done Nov 12: a Sloth SLO over a metric nothing else reads, and an alert whose runbook has a query step (item 7).
 - Done Nov 12: an `absent()` alert on a shop metric: hard keep, and never a broken rule (item 18).
 - Done Nov 12, in tvt's Grafana fixtures rather than the lab (no Pyroscope there): a panel on a Pyroscope (or other unparsed) data source is an assumed reader and a gap, never an unused dashboard (item 19).
-- Decide the 21 seeded drops the dormant name rules hold back (node `*_errs_total`, `shop_cache_*` latency, error, eviction and lag gauges, the latency histograms' `_sum`/`_count`): narrow the rules, or mark them "dormant: confirm" in ground truth. Needed before S4.
+- Done (tvt-lab #13, `dormant_confirm` in ground truth): decide the 21 seeded drops the dormant name rules hold back (node `*_errs_total`, `shop_cache_*` latency, error, eviction and lag gauges, the latency histograms' `_sum`/`_count`): narrow the rules, or mark them "dormant: confirm" in ground truth. Needed before S4.
 
 ## S3
+
+**Status:** Done Nov 14 (tvt-lab #12).
 
 - A simulated agent client that sweeps every metric name: ground truth expects it to keep nothing.
 - A simulated agent client that queries one shop metric over a 90-day range: it counts as a read, and in S8 it blocks a 30-day retention proposal on that metric.
@@ -17,23 +21,32 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 ## S5
 
+**Status:** Done Nov 15 (tvt-lab #15, #16).
+
 - Distractors: a metric with a near-identical name to a read one, a service that logs background errors all day, and a dashboard that reads a metric through a variable.
 - Two frozen lab states, before and after a deploy that adds a reader (also used by S15's `--as-of`).
 - The shop logs one identical line in a burst at startup: a repeated-line finding.
 
 ## S6
 
+**Status:** Done Nov 16 (tvt-lab #19, #24).
+
 - A service with no SLO, and a paging alert that isn't a burn-rate alert: SLO coverage findings.
 - The shop's traces through an OTel Collector with a spanmetrics connector and a low `aggregation_cardinality_limit` that overflows: an overflow gap.
 
 ## S7
 
+**Status:** Open.
+
 - A pipeline repo (or directory) for the lab's Alloy config, and a Fluent Bit container that tails the shop's debug log and ships it to Loki. Record which pipeline owns each signal.
 - An audit stream, and a span with `gen_ai.operation.name=execute_tool` for a simulated agent rollback that succeeds: both are records.
+- A shop metric renamed in Alloy (`prometheus.relabel` with `action = "replace"` on `__name__`) that only a dashboard reads under its new name: it stays keep_high (S7 item 9). One more rule whose `regex` is `sys.env(...)`: an evidence gap, not a reader or a drop.
 - A Collector pipeline with a `batch` processor (S7 never writes one; S16 flags it).
 - A synthetic coding-agent emitter on the GenAI conventions (interaction, llm_request and tool spans; tool_result, tool_decision and api_request logs; token and cost delta counters carrying `session.id` and `user.email`), every content flag on. Ground truth: content attributes unread (cap), `session.id` on delta counters (aggregate in the ordered pipeline), successful tool spans are records (keep the span), `api_request` logs unread (drop). Synthetic only: no real agent or prompts.
 
 ## S8
+
+**Status:** Open.
 
 - A Collector filter that reads an attribute a later processor sets (`check` refuses it), an uncast status-code comparison and a regex statement with no `where` (S16 flags both).
 - The expected worst-case detection delay for each lab alert, and a scrape interval change that pushes one past its objective.
@@ -41,24 +54,34 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 ## S9
 
+**Status:** Open.
+
 - A `catalog-info.yaml` for the shop with an owner, expected in the recommendation's owner field.
 
 ## S10
+
+**Status:** Open.
 
 - vmagent with stream aggregation in front of one shop metric.
 - A status-code label read only through `=~"5.."`: a bucketing proposal, not a drop.
 
 ## S13–S14
 
+**Status:** Open.
+
 - A flapping alert with no `for`, an alert that fires inside a silence window, two alerts that always co-fire, an alert whose runbook file hasn't changed in over 90 days, and a receiver that fails.
 - A wildcard alert and a resource-specific alert on the same shop metric, and an alert whose threshold sits inside the metric's normal range.
 
 ## S15
 
+**Status:** Open.
+
 - A lab "release" that renames a shop metric a dashboard reads: a readers-broken finding naming the panel and the release.
 - The synthetic coding-agent emitter (S7) also calls a telemetry query tool: an `execute_tool` span and a `tool_result` log whose `tool_parameters` hold a PromQL query on a shop metric. Ground truth: that metric is read by client `agent`, and a reduction rule deleting `tool_parameters` from both fails `check`.
 
 ## S16
+
+**Status:** Open.
 
 - Shop spans named with raw product paths, the spanmetrics histogram on default buckets, a volatile resource attribute in the metric identity, and a debug exporter left on.
 
@@ -85,6 +108,8 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 - Later: the `victoria-metrics-k8s-stack` provider for the VictoriaMetrics adapter and MetricsQL; Promtail for logs beside Alloy for traces as the double-shipping and agent-migration case.
 
 ## Later
+
+**Status:** Open, unscheduled.
 
 - Spike: can the Podman machine VM (kernel 5.10 or newer) run the OTel eBPF profiler and OBI in a privileged container with host PID and `/sys/kernel/tracing`? If yes, an optional `profiling` Compose profile (Pyroscope plus the profiler, off by default), with an `unknown_service` process and a profile fixture.
 - A second agent tailing the shop's debug log under a different job label: double shipping.

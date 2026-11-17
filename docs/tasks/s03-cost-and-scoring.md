@@ -1,5 +1,7 @@
 # S3: cost and scoring core
 
+**Status:** Done Nov 14 (PRs #46–#53).
+
 Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md`, `docs/pricecard.md` and `docs/query-logs.md` first.
 
 **Done when:** every lab signal has a monthly cost on two price cards (a vendor list price and the self-hosted kind), and the simulated agent sweep keeps nothing on its own.

@@ -1,14 +1,14 @@
-# Sprint 2: references, query logs, hard keeps, Grafana Cloud
+# S2: references, query logs, hard keeps, Grafana Cloud
+
+**Status:** Done Nov 16. In detail: items 1–7, 11 and 16–19 are done (see `CLAUDE.md`). Item 11 was finished on the Grafana Cloud test stack (`docs/grafana-cloud.md`), except Adaptive Metrics usage counts, which wait for the stack to have recommendations. Item 7 left Grafana SLO's read API to item 11 (it's a Cloud app; the lab can't exercise it). The rest carry over into the two-day sprints (`docs/tasks/README.md`): item 15 with S3's client tagging and S6's query cost, items 12 and 14 before S6, item 11 by S6, item 13 before S10, and items 8–10 by S12.
 
 Written Nov 11, 2026 for a Claude Code session on the Mac (Go, module downloads and the live tvt-lab are there). Read `CLAUDE.md`, `docs/ROADMAP.md`, `docs/query-logs.md`, `docs/architecture.md` and ADRs 0005, 0007 and 0008 first.
 
 **Rules for every item:** one branch and one PR per numbered item, `--base main`. Tests first or alongside. Keep the read-only guarantee (`internal/testutil` fails any non-GET). Update `testdata/lab/ground-truth.yaml` when a lab seed changes. Update the Status section of `CLAUDE.md` in each PR. Nothing from internal planning (pricing, partners, schedules) goes in the repo.
 
-**Status (Nov 16):** items 1–7, 11 and 16–19 are done (see `CLAUDE.md`). Item 11 was finished on the Grafana Cloud test stack (`docs/grafana-cloud.md`), except Adaptive Metrics usage counts, which wait for the stack to have recommendations. Item 7 left Grafana SLO's read API to item 11 (it's a Cloud app; the lab can't exercise it). The rest carry over into the two-day sprints (`docs/tasks/README.md`): item 15 with S3's client tagging and S6's query cost, items 12 and 14 before S6, item 11 by S6, item 13 before S10, and items 8–10 by S12.
+**Done when:** every dependency seeded in tvt-lab resolves to the right signal, no hard keep is misclassified (including the metric only a Grafana-managed alert reads and one only an SLO reads), and the Grafana Cloud adapters pass the same checks on the Cloud test stack.
 
-**Sprint 2 is done when:** every dependency seeded in tvt-lab resolves to the right signal, no hard keep is misclassified (including the metric only a Grafana-managed alert reads and one only an SLO reads), and the Grafana Cloud adapters pass the same checks on the Cloud test stack.
-
-## Before you start (Jason)
+## Before you start
 
 - Merge the `docs/public-roadmap` PR, then `git switch main && git pull`.
 - Create a free Grafana Cloud stack for testing. Add read-only tokens as repo secrets: `TVT_CLOUD_GRAFANA_URL`, `TVT_CLOUD_GRAFANA_TOKEN` (service account, Viewer + data source query), `TVT_CLOUD_PROM_URL`, `TVT_CLOUD_LOKI_URL`, `TVT_CLOUD_INSTANCE_IDS`, `TVT_CLOUD_TOKEN` (access policy: `metrics:read`, `logs:read`, rules read). Point a second Alloy in tvt-lab at it (item 11).

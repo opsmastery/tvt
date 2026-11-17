@@ -1,8 +1,12 @@
 # S13–S16: continuous-mode work pulled forward
 
+**Status:** Planned. Numbered items are must-haves in order unless marked "(should have)".
+
 These come from the roadmap's "Next" section and start once the MVP's code is complete. All findings are report only with ready-to-apply snippets: tvt never edits a rule, and every signal an alert reads stays a hard keep. Read `CLAUDE.md`, `docs/tasks/README.md` and `docs/architecture.md` first.
 
 ## S13: alert noise I
+
+**Status:** Planned.
 
 **Done when:** lab alert findings match ground truth.
 
@@ -13,6 +17,8 @@ These come from the roadmap's "Next" section and start once the MVP's code is co
 
 ## S14: alert noise II
 
+**Status:** Planned.
+
 **Done when:** each seeded noisy alert lands in the right class.
 
 1. **Firing-history classes** from the `ALERTS` series (and the Mimir or Loki ruler equivalents): transient (resolved within 5 minutes), fires during maintenance (overlaps a silence, `mute_time_intervals` or a change window), co-firing duplicates (heavily overlapping firing intervals on the same target), and silent for 90 days. Each class comes with a snippet (`for`, `keep_firing_for`, `mute_time_intervals`, `inhibit_rules`, `group_by`). A silent alert is flagged for its owner to confirm, never proposed for removal.
@@ -20,6 +26,8 @@ These come from the roadmap's "Next" section and start once the MVP's code is co
 3. **Delivery failures:** `alertmanager_notifications_failed_total` against `alertmanager_notifications_total` per integration. An alert that fires into a failing receiver is silent.
 
 ## S15: agents and history
+
+**Status:** Planned.
 
 **Done when:** `--as-of` shows each lab state with no leakage, and MCP and CLI answers match.
 
@@ -32,6 +40,8 @@ These come from the roadmap's "Next" section and start once the MVP's code is co
 7. **Agent audit evidence survives the cuts.** Agent telemetry on the GenAI conventions is usage evidence: a telemetry-reading tool call (`gen_ai.operation.name=execute_tool` for a query tool, or its `tool_result` log) names the query an agent ran in `tool_parameters` or `full_command`. Read those queries as agent reads (client `agent`). Reduction guides (the CNCF post on filtering agent telemetry, Oct 22, 2026) delete those attributes and drop successful tool spans, which erases the evidence: `propose` caps a telemetry-reading tool's query argument (truncate with a marker) or keeps the metric and stream names extracted from it, and `check` refuses a rule that removes it from both the span and the log.
 
 ## S16: Collector and conventions
+
+**Status:** Planned.
 
 **Done when:** seeded Collector and rename cases are reported correctly.
 
