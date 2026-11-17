@@ -34,6 +34,10 @@ type reportOptions struct {
 	// every label candidate is held as label_drops_off until a precision
 	// review on real data passes.
 	LabelDrops bool
+	// ManifestDir, when set, also writes each pipeline repo's protection
+	// manifest to ManifestDir/<repo>/.tvt/protect.json (S7 item 1, ADR
+	// 0003). It needs Config for the pipelines' repos.
+	ManifestDir string
 }
 
 func cmdReport(args []string, stdout, stderr io.Writer) int {
@@ -47,6 +51,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.PriceCard, "price-card", "", "what-if: reprice the scan at this price card (a file or a preset: "+strings.Join(cost.Presets(), ", ")+") without rescanning")
 	fs.BoolVar(&o.LabelDrops, "label-drops", false, "recommend label removals (labeldrop when no series merge, aggregate when they merge and sum); off until a precision review on real data passes")
 	fs.IntVar(&o.Top, "top", 50, "recommendations to keep, highest savings per minute of checking first (0: all)")
+	fs.StringVar(&o.ManifestDir, "manifest-dir", "", "also write each pipeline repo's protection manifest to DIR/<repo>/.tvt/protect.json (needs --config)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -59,6 +64,10 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	}
 	if o.Top < 0 {
 		fmt.Fprintf(stderr, "tvt report: --top %d: want 0 or more\n", o.Top)
+		return exitUsage
+	}
+	if o.ManifestDir != "" && o.Config == "" {
+		fmt.Fprintln(stderr, "tvt report: --manifest-dir needs --config (the pipelines' repos come from tvt.yaml)")
 		return exitUsage
 	}
 	if err := runReport(context.Background(), o, stdout); err != nil {
@@ -91,6 +100,11 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 		}
 		if in, err = report.Reprice(in, card, tsdb); err != nil {
 			return fmt.Errorf("--price-card %s: %w", o.PriceCard, err)
+		}
+	}
+	if o.ManifestDir != "" {
+		if err := writeManifests(o, in, out); err != nil {
+			return err
 		}
 	}
 	r := report.Build(in, o.Top)
@@ -148,6 +162,42 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 		fmt.Fprintf(out, ", %d acknowledgements match no gap", n)
 	}
 	fmt.Fprintf(out, "; written to %s\n", written)
+	return nil
+}
+
+// writeManifests writes one protection manifest per pipeline repo in
+// o.Config, built from the scan (prices don't matter to it).
+func writeManifests(o reportOptions, in report.Input, out io.Writer) error {
+	cfg, err := config.Load(o.Config)
+	if err != nil {
+		return err
+	}
+	repos := map[string]string{}
+	for _, p := range cfg.Pipelines {
+		repos[p.Name] = p.Repo
+	}
+	ms := report.Manifests(in, repos)
+	names := make([]string, 0, len(ms))
+	for r := range ms {
+		names = append(names, r)
+	}
+	sort.Strings(names)
+	for _, r := range names {
+		m := ms[r]
+		b, err := json.MarshalIndent(m, "", "  ")
+		if err != nil {
+			return err
+		}
+		dir := filepath.Join(o.ManifestDir, report.ManifestDir(r), ".tvt")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		path := filepath.Join(dir, "protect.json")
+		if err := writeFileAtomic(path, append(b, '\n')); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "manifest %s: %d protected signals (%s) written to %s\n", r, len(m.Signals), strings.Join(m.Pipelines, ", "), path)
+	}
 	return nil
 }
 
