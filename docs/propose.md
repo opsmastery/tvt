@@ -50,4 +50,18 @@ Every other recommendation is printed as skipped with the reason: unmapped or cl
 
 ## Validation
 
-The Prometheus writer re-reads its output and checks each job carries its rule; the Alloy writer re-parses its output. Running `promtool check config` and `alloy validate` on the result is S7 item 5.
+A config that doesn't load never goes into a patch (S7 item 5). For each changed file, tvt copies the pipeline's checkout (without `.git`) to a scratch directory under your cache directory, writes its changes in, and runs the pipeline's own validator there, so references to other files resolve:
+
+| Kind | Validator | Image when it isn't on PATH |
+|---|---|---|
+| `prometheus` | `promtool check config <file>` | `prom/prometheus:v3.5.0` |
+| `alloy` | `alloy validate <file>` | `grafana/alloy:v1.10.0` |
+| `otelcol` | `otelcol-contrib validate --config=<file>` | `otel/opentelemetry-collector-contrib:0.165.0` |
+| `fluentbit` | `fluent-bit --dry-run -c <file>` | `fluent/fluent-bit:5.2.0` |
+
+The binary on PATH wins; otherwise the image runs through podman or docker (`--container-runtime`), with no network and the copy mounted read-only. Validate with your own distribution and version with `--validator-image otelcol=ghcr.io/acme/otelcol:1.2.3`. The images are the versions the tvt lab runs.
+
+- A file the validator rejects is left out of the patch, and its recommendations are listed as skipped with the validator's first lines.
+- With `--validate auto` (the default), a file no validator could check is still written, and the patch header and the summary mark it `NOT VALIDATED` with the reason. `--validate require` skips it instead; `--validate off` skips validation.
+
+The writers also check their own output first: the Prometheus writer re-reads it, the Alloy writer re-parses it, and the collector writer confirms the filter is first in each pipeline.

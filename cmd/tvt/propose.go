@@ -21,6 +21,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/propose"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/Opsmastery-Summit/tvt/pkg/validate"
 )
 
 type proposeOptions struct {
@@ -30,6 +31,12 @@ type proposeOptions struct {
 	Output    string
 	Dir       string
 	Checkouts checkoutFlag
+	// Validate: auto (run each pipeline's validator when one is
+	// available, note when not), require (and skip what can't be
+	// validated) or off.
+	Validate string
+	Images   checkoutFlag // kind=image overrides of the validators' images
+	Runtime  string
 }
 
 // checkoutFlag is --checkout repo=path, repeatable: where each pipeline
@@ -49,7 +56,7 @@ func (c checkoutFlag) Set(v string) error {
 }
 
 func cmdPropose(args []string, stdout, stderr io.Writer) int {
-	o := proposeOptions{Checkouts: checkoutFlag{}}
+	o := proposeOptions{Checkouts: checkoutFlag{}, Images: checkoutFlag{}}
 	fs := flag.NewFlagSet("propose", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&o.DB, "db", "tvt.db", "path to the usage graph database (from tvt scan)")
@@ -57,6 +64,9 @@ func cmdPropose(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.Report, "report", "", "the reviewed report JSON (from tvt report); must be of the database's latest scan (default: build it from the database)")
 	fs.StringVar(&o.Output, "output", "patch", "what to write: patch (one git-apply patch per pipeline repo)")
 	fs.StringVar(&o.Dir, "dir", "proposals", "where to write the patches")
+	fs.StringVar(&o.Validate, "validate", "auto", "run each pipeline's own validator on the changed config: auto (when promtool, alloy, otelcol-contrib, fluent-bit or a container runtime is available), require (skip what can't be validated), off")
+	fs.Var(o.Images, "validator-image", "kind=image: validate that pipeline kind with this image, your distribution and version (repeatable)")
+	fs.StringVar(&o.Runtime, "container-runtime", "", "podman or docker for validators not on PATH (default: whichever answers; none: never)")
 	fs.Var(o.Checkouts, "checkout", "repo=path: a pipeline repo's local checkout, as tvt.yaml names the repo (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -74,6 +84,10 @@ func cmdPropose(args []string, stdout, stderr io.Writer) int {
 	}
 	if o.Output != "patch" {
 		fmt.Fprintf(stderr, "tvt propose: --output %q: only patch is built (pull requests come with S9 approvals)\n", o.Output)
+		return exitUsage
+	}
+	if o.Validate != "auto" && o.Validate != "require" && o.Validate != "off" {
+		fmt.Fprintf(stderr, "tvt propose: --validate %q: want auto, require or off\n", o.Validate)
 		return exitUsage
 	}
 	if err := runPropose(context.Background(), o, stdout); err != nil {
@@ -140,6 +154,8 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 			byPipeline[rec.Pipeline] = append(byPipeline[rec.Pipeline], rec)
 		}
 	}
+	v := &validator{o: o}
+	defer v.cleanup()
 	patches := map[string]*strings.Builder{} // by repo
 	var written []proposal
 	for _, p := range cfg.Pipelines {
@@ -147,7 +163,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		if len(recs) == 0 {
 			continue
 		}
-		done, skip, diff := proposePipeline(p, recs, jobs, o.Checkouts, r.Scan.ID)
+		done, skip, diff := proposePipeline(p, recs, jobs, o.Checkouts, r.Scan.ID, v.check(ctx, p))
 		for i := range done {
 			done[i].Repo = p.Repo
 		}
@@ -166,7 +182,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 			skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + name + " isn't in " + o.Config})
 		}
 	}
-	return writeProposals(o, r.Scan.ID, patches, written, skipped, out)
+	return writeProposals(o, r.Scan.ID, patches, written, skipped, v.notes, out)
 }
 
 // proposePipeline writes recs (whole-metric drops) into pipeline p's
@@ -174,7 +190,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 // written only when every job its metric carries has a scrape config in
 // p's files: a drop in some jobs would leave the rest of the series, and
 // the savings, in place.
-func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[string][]string, checkouts checkoutFlag, scan int64) (written, skipped []proposal, diff string) {
+func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[string][]string, checkouts checkoutFlag, scan int64, check checkFunc) (written, skipped []proposal, diff string) {
 	skipAll := func(note string) ([]proposal, []proposal, string) {
 		for _, rec := range recs {
 			skipped = append(skipped, proposal{Rec: rec, Note: note})
@@ -195,7 +211,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		if !ok {
 			return skipAll("no --checkout for " + p.Repo)
 		}
-		return proposeOtelcol(p, recs, root, scan)
+		return proposeOtelcol(p, recs, root, scan, check)
 	default:
 		return skipAll("no writer for " + p.Kind + " pipelines yet")
 	}
@@ -277,6 +293,9 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 			slices.Sort(js)
 			out, err = propose.Alloy(srcs[f], js, dropOf(p.Name, all, scan))
 		}
+		if err == nil {
+			err = check(root, f, out)
+		}
 		if err != nil {
 			for _, rs := range byJob {
 				for _, rec := range rs {
@@ -328,7 +347,7 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 // writeProposals writes each repo's patch to o.Dir/<repo>.patch, headed by
 // the recommendations it carries (git apply skips text before the first
 // diff), and prints what was written and what was skipped, and why.
-func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Builder, written, skipped []proposal, out io.Writer) error {
+func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Builder, written, skipped []proposal, validation []string, out io.Writer) error {
 	repos := make([]string, 0, len(patches))
 	for repo := range patches {
 		repos = append(repos, repo)
@@ -348,6 +367,12 @@ func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Bu
 			}
 			fmt.Fprintf(&b, "  %s\n    %s\n", w.Rec.ID, w.Rec.Claim)
 		}
+		b.WriteString("\nValidation:\n")
+		for _, n := range validation {
+			if strings.HasPrefix(n, repo+" ") {
+				fmt.Fprintf(&b, "  %s\n", strings.TrimPrefix(n, repo+" "))
+			}
+		}
 		b.WriteString("\nCheck each with tvt why <signal> before merging. Apply with: git apply <this file>\n\n")
 		b.WriteString(patches[repo].String())
 		path := filepath.Join(o.Dir, report.ManifestDir(repo)+".patch")
@@ -355,6 +380,9 @@ func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Bu
 			return err
 		}
 		fmt.Fprintf(out, "patch for %s written to %s\n", repo, path)
+	}
+	for _, n := range validation {
+		fmt.Fprintf(out, "validation: %s\n", n)
 	}
 	fmt.Fprintf(out, "scan %d: %d drops written, %d recommendations skipped\n", scan, len(written), len(skipped))
 	sort.SliceStable(skipped, func(i, j int) bool { return skipped[i].Note < skipped[j].Note })
@@ -370,7 +398,7 @@ func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Bu
 // recommended name (propose.OtelConditions, S7 item 9). A name that may
 // be one series of an OTel histogram is skipped: the collector sees the
 // whole histogram.
-func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string, scan int64) (written, skipped []proposal, diff string) {
+func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string, scan int64, check checkFunc) (written, skipped []proposal, diff string) {
 	var ok []report.Recommendation
 	for _, rec := range recs {
 		if _, matchable := propose.OtelConditions(rec.Signal.Name); !matchable {
@@ -402,6 +430,9 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 		d := dropOf(p.Name, ok, scan)
 		d.PromNames = true
 		out, err := propose.Otelcol(src, pipes, d)
+		if err == nil {
+			err = check(root, f, out)
+		}
 		if err != nil {
 			failure = f + ": " + err.Error()
 			break
@@ -423,4 +454,93 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 		return nil, skipped, ""
 	}
 	return written, skipped, b.String()
+}
+
+// checkFunc validates one changed file of a pipeline (S7 item 5): root is
+// the pipeline's checkout, out the file's new content. An error skips the
+// file's recommendations with the reason.
+type checkFunc func(root, file string, out []byte) error
+
+// validator runs each pipeline's own validator on its changed files, in a
+// copy of the checkout with tvt's changes written in, so references to
+// other files (rule files, imports) resolve. notes records, per repo,
+// what validated each file or why nothing did.
+type validator struct {
+	o      proposeOptions
+	notes  []string
+	copies map[string]string // pipeline -> its scratch copy
+	clean  []func()
+}
+
+func (v *validator) cleanup() {
+	for _, c := range v.clean {
+		c()
+	}
+}
+
+func (v *validator) check(ctx context.Context, p config.Pipeline) checkFunc {
+	return func(root, file string, out []byte) error {
+		if v.o.Validate == "off" {
+			v.notes = append(v.notes, fmt.Sprintf("%s %s: not validated (--validate off)", p.Repo, file))
+			return nil
+		}
+		if v.copies == nil {
+			v.copies = map[string]string{}
+		}
+		dir, ok := v.copies[p.Name]
+		if !ok {
+			scratch, done, err := validate.Scratch()
+			if err != nil {
+				return fmt.Errorf("validation: %w", err)
+			}
+			v.clean = append(v.clean, done)
+			dir = filepath.Join(scratch, "repo")
+			if err := copyTree(root, dir); err != nil {
+				return fmt.Errorf("validation: copying the checkout: %w", err)
+			}
+			v.copies[p.Name] = dir
+		}
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(file)), out, 0o644); err != nil {
+			return fmt.Errorf("validation: %w", err)
+		}
+		res := validate.Run(ctx, p.Kind, dir, file, validate.Options{Images: v.o.Images, Runtime: v.o.Runtime})
+		switch {
+		case res.Ran && res.OK:
+			v.notes = append(v.notes, fmt.Sprintf("%s %s: valid (%s)", p.Repo, file, res.By))
+			return nil
+		case res.Ran:
+			return fmt.Errorf("%s rejected the changed config: %s", res.By, validate.FirstLines(res.Output, 3))
+		case v.o.Validate == "require":
+			return fmt.Errorf("not validated (--validate require): %s", res.Skipped)
+		}
+		v.notes = append(v.notes, fmt.Sprintf("%s %s: NOT VALIDATED: %s", p.Repo, file, res.Skipped))
+		return nil
+	}
+}
+
+// copyTree copies a checkout's regular files (not .git) to dst.
+func copyTree(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dst, rel), b, 0o644)
+	})
 }
