@@ -20,6 +20,10 @@ type Drop struct {
 	Reason   string
 	// Metrics are exact metric names; the rule matches nothing else.
 	Metrics []string
+	// PromNames: Metrics are the names Prometheus stores, and a writer
+	// that sees OTel names (Otelcol) matches every OTel name that
+	// translates to one of them (OtelConditions, S7 item 9).
+	PromNames bool
 }
 
 // Regex is the relabel regex that matches exactly d.Metrics (anchored by

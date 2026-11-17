@@ -50,7 +50,7 @@ func TestPropose(t *testing.T) {
 		t.Error("a second run wrote a different patch: output must be deterministic")
 	}
 	t.Logf("patch:\n%s", patch)
-	for _, want := range []string{"a/prometheus/scrape/lab.yml", "a/alloy/config.alloy", "tvt:begin prometheus-scrape/", "tvt:begin alloy-apps scan="} {
+	for _, want := range []string{"a/prometheus/scrape/lab.yml", "a/alloy/config.alloy", "tvt:begin prometheus-scrape/", "tvt:begin alloy-apps scan=", "a/otelcol/config.yaml", "tvt:begin otelcol-agent scan=", `metric.unit == "USD"`} {
 		if !strings.Contains(string(patch), want) {
 			t.Errorf("patch lacks %q", want)
 		}

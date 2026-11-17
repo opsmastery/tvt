@@ -188,10 +188,14 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 	case "alloy":
 		listJobs = propose.AlloyJobs
 	case "otelcol":
-		// propose.Otelcol needs the names the receivers emit, and the
-		// report has the backend's (Prometheus translation adds units and
-		// _total). Mapping one to the other is S7 item 9.
-		return skipAll("the otelcol writer needs each metric's OTel name, which the scan doesn't map yet (S7 item 9)")
+		if p.HelmValues != nil || len(p.Files) == 0 {
+			return skipAll("pipeline " + p.Name + " lists no files (Helm values aren't written yet)")
+		}
+		root, ok := checkouts[p.Repo]
+		if !ok {
+			return skipAll("no --checkout for " + p.Repo)
+		}
+		return proposeOtelcol(p, recs, root, scan)
 	default:
 		return skipAll("no writer for " + p.Kind + " pipelines yet")
 	}
@@ -358,4 +362,65 @@ func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Bu
 		fmt.Fprintf(out, "  skipped %s: %s\n", s.Rec.ID, s.Note)
 	}
 	return nil
+}
+
+// proposeOtelcol writes recs into an OpenTelemetry Collector pipeline: one
+// filter/tvt processor per file, first in each of the file's metrics
+// pipelines, matching every OTel name that Prometheus stores under a
+// recommended name (propose.OtelConditions, S7 item 9). A name that may
+// be one series of an OTel histogram is skipped: the collector sees the
+// whole histogram.
+func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string, scan int64) (written, skipped []proposal, diff string) {
+	var ok []report.Recommendation
+	for _, rec := range recs {
+		if _, matchable := propose.OtelConditions(rec.Signal.Name); !matchable {
+			skipped = append(skipped, proposal{Rec: rec, Note: "may be one series of an OTel histogram, which a collector can't drop alone"})
+			continue
+		}
+		ok = append(ok, rec)
+	}
+	if len(ok) == 0 {
+		return nil, skipped, ""
+	}
+	var b strings.Builder
+	var failure string
+	files := 0
+	for _, f := range p.Files {
+		src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
+		if err != nil {
+			failure = err.Error()
+			break
+		}
+		pipes, err := propose.OtelcolPipelines(src)
+		if err != nil {
+			failure = f + ": " + err.Error()
+			break
+		}
+		if len(pipes) == 0 {
+			continue
+		}
+		d := dropOf(p.Name, ok, scan)
+		d.PromNames = true
+		out, err := propose.Otelcol(src, pipes, d)
+		if err != nil {
+			failure = f + ": " + err.Error()
+			break
+		}
+		b.WriteString(propose.Diff(f, src, out))
+		files++
+	}
+	if failure == "" && files == 0 {
+		failure = "no metrics pipeline in " + strings.Join(p.Files, ", ")
+	}
+	for _, rec := range ok {
+		if failure != "" {
+			skipped = append(skipped, proposal{Rec: rec, Note: failure})
+		} else {
+			written = append(written, proposal{Rec: rec})
+		}
+	}
+	if failure != "" {
+		return nil, skipped, ""
+	}
+	return written, skipped, b.String()
 }
