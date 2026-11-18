@@ -81,6 +81,8 @@ type Inputs struct {
 	// select is a hard keep. Owners map signals to owners and tiers.
 	External []config.ExternalConsumer
 	Owners   []config.Owner
+	// OwnerSources are the owner sources after Owners (S9 item 1).
+	OwnerSources OwnerSources
 	// Records are tvt.yaml records: (S7 item 2).
 	Records config.Records
 	// Pipelines are tvt.yaml's pipelines (S6 item 4); LabelMetrics says
@@ -483,7 +485,7 @@ func Build(in Inputs) (Output, error) {
 	}
 	seasonSources, missed := seasons(in.Seasons, since, in.Start)
 	overlaps := StreamOverlaps(out.Signals, streamLabelSets(in.StreamVolumes))
-	if err := classify(out.Signals, out.Consumers, out.References, overlaps, in.Owners, mentioned(in), missed, since, in.Start); err != nil {
+	if err := classifyOwned(out.Signals, out.Consumers, out.References, overlaps, in.Owners, in.OwnerSources, in.MetricJobs, mentioned(in), missed, since, in.Start); err != nil {
 		return Output{}, err
 	}
 	if err := markRecords(out.Signals, in.Records, streamLabelSets(in.StreamVolumes)); err != nil {

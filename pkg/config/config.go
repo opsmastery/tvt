@@ -309,6 +309,22 @@ type Ownership struct {
 	Labels []string `yaml:"labels"`
 	// Owners map signals to an owner, first match wins.
 	Owners []Owner `yaml:"owners"`
+	// The other owner sources (S9 item 1), tried in this order after
+	// Owners: CODEOWNERS files, the Labels above on the signal's series,
+	// and Backstage catalog files (catalog-info.yaml, or directories
+	// searched for it). A component is named by a path's first segment
+	// (CODEOWNERS) or metadata.name (Backstage), and a signal belongs to
+	// it through its job, app or service_name label, or a metric name
+	// prefix. Paths are relative to tvt.yaml.
+	CODEOWNERS []string `yaml:"codeowners"`
+	Backstage  []string `yaml:"backstage"`
+	// Fallbacks when no source names an owner, marked inferred: Services
+	// maps an OTel service.name (or service.namespace/service.name) to an
+	// owner, and Kubernetes manifests give a workload's namespace team
+	// label (any of Labels) or its app.kubernetes.io/part-of through
+	// Services.
+	Services   map[string]string `yaml:"services"`
+	Kubernetes []string          `yaml:"kubernetes"`
 }
 
 // Owner owns the signals its selectors match.
@@ -343,6 +359,11 @@ func Load(path string) (*Config, error) {
 	}
 	for i, p := range c.Kubernetes.Manifests {
 		c.Kubernetes.Manifests[i] = relTo(dir, p)
+	}
+	for _, l := range []*[]string{&c.Ownership.CODEOWNERS, &c.Ownership.Backstage, &c.Ownership.Kubernetes} {
+		for i, p := range *l {
+			(*l)[i] = relTo(dir, p)
+		}
 	}
 	for i, p := range c.Pipelines {
 		if p.Checkout != "" {
@@ -422,6 +443,18 @@ func (c *Config) validate() error {
 		}
 		if err := checkSelectors("owner "+o.Name, o.Metrics, o.Streams); err != nil {
 			return err
+		}
+	}
+	for svc, owner := range c.Ownership.Services {
+		if svc == "" || owner == "" {
+			return fmt.Errorf("ownership.services: %q: service and owner are both required", svc)
+		}
+	}
+	for _, l := range [][]string{c.Ownership.CODEOWNERS, c.Ownership.Backstage, c.Ownership.Kubernetes} {
+		for _, p := range l {
+			if p == "" {
+				return fmt.Errorf("ownership: an empty path")
+			}
 		}
 	}
 	for i, p := range c.SLOs.Paths {

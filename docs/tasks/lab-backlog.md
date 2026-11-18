@@ -55,9 +55,11 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 ## S9
 
-**Status:** Planned.
+**Status:** Done (tvt-lab #41, Nov 18).
 
 - A `catalog-info.yaml` for the shop with an owner, expected in the recommendation's owner field.
+- `.github/CODEOWNERS` (`/alertmanager/ @jasonvance`), and ground truth `owners:` for each owner source, including the coding agent's owner inferred from its service name (tvt.yaml `ownership.services`) and dormant node metrics no source names.
+- `scripts/s9-reader.sh add METRIC | remove`: a dashboard panel that reads a metric, so a confirmed recommendation's evidence changes and the confirmation reopens.
 
 ## S10
 
