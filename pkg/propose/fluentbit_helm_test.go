@@ -26,7 +26,7 @@ func TestFluentBitHelm(t *testing.T) {
 	s := string(out)
 	for _, want := range []string{
 		"  filters: |\n    [FILTER]\n        Name kubernetes\n",
-		"        Rule         $log ^.*$ tvt.cold.shop.debug false\n",
+		"        Rule         $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ tvt.cold.shop.debug false\n",
 		"  # tvt:end\n",
 	} {
 		if !strings.Contains(s, want) {
@@ -70,7 +70,7 @@ func TestFluentBitHelmRender(t *testing.T) {
 		t.Fatalf("helm template: %v\n%s", err, stderrOf(err))
 	}
 	s := string(r)
-	if !strings.Contains(s, "Name kubernetes") || !strings.Contains(s, "Rule         $log ^.*$ tvt.cold.shop.debug false") {
+	if !strings.Contains(s, "Name kubernetes") || !strings.Contains(s, "Rule         $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ tvt.cold.shop.debug false") {
 		t.Errorf("rendered config lacks the chart's filter or tvt's:\n%s", s)
 	}
 }

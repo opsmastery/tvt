@@ -130,8 +130,8 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 		if l.RuleGroup != nil {
 			return
 		}
-		if _, probe := collect.ProbeNonce(l.Params.Query); probe {
-			return // tvt's own marker, not usage
+		if _, probe := collect.ProbeNonce(l.Params.Query); probe || collect.IsReplay(l.Params.Query) {
+			return // tvt's own marker or replay, not usage
 		}
 		lq := collect.LoggedQuery{
 			Source:   "prometheus",

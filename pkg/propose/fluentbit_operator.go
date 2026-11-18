@@ -147,7 +147,7 @@ func FluentOperatorRoutes(src []byte, routes []Route) ([]byte, error) {
 				fmt.Fprintf(&b, "    %s: %q\n", k, labels[k])
 			}
 		}
-		fmt.Fprintf(&b, "spec:\n  match: %s\n  filters:\n    - rewriteTag:\n        rules:\n          - \"$log ^.*$ %s false\"\n        emitterName: %s\n", tag, newTag, emitter)
+		fmt.Fprintf(&b, "spec:\n  match: %s\n  filters:\n    - rewriteTag:\n        rules:\n          - \"$log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ %s false\"\n        emitterName: %s\n", tag, newTag, emitter)
 		fmt.Fprintf(&b, "# %s\n", endMarker)
 	}
 	if !strings.HasSuffix(string(out), "\n") {

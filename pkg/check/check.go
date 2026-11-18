@@ -256,19 +256,11 @@ func evaluate(m report.Manifest, idx *index, files Files, objectives map[string]
 				continue
 			}
 			var es []effect
-			switch p.Kind {
-			case "prometheus":
-				es, err = prometheusEffects(p, path, src, idx)
-			case "prometheus-operator":
-				es, err = operatorEffects(p, path, src, idx)
-			case "alloy":
-				es, err = alloyEffects(p, path, src, idx)
-			case "otelcol":
-				es, err = otelcolEffects(p, path, src, idx, files)
-			case "fluentbit":
-				es, err = fluentbitEffects(p, path, src, idx)
+			switch {
+			case p.HelmValues != nil && path == p.HelmValues.File && p.Kind != "fluentbit":
+				es, err = helmEffects(p, path, src, idx, files)
 			default:
-				err = fmt.Errorf("check can't read %s pipelines yet", p.Kind)
+				es, err = kindEffects(m, p, path, src, idx, files)
 			}
 			if err != nil {
 				unreadable(err)
@@ -279,4 +271,21 @@ func evaluate(m report.Manifest, idx *index, files Files, objectives map[string]
 	}
 	out = append(out, scrapeEffects(m, idx, files, objectives)...)
 	return out, changed
+}
+
+// kindEffects reads one pipeline file by its pipeline's kind.
+func kindEffects(m report.Manifest, p report.PipelineDef, path string, src []byte, idx *index, files Files) ([]effect, error) {
+	switch p.Kind {
+	case "prometheus":
+		return prometheusEffects(p, path, src, idx)
+	case "prometheus-operator":
+		return operatorEffects(p, path, src, idx, m.UnselectedMonitors)
+	case "alloy":
+		return alloyEffects(p, path, src, idx)
+	case "otelcol":
+		return otelcolEffects(p, path, src, idx, files)
+	case "fluentbit":
+		return fluentbitEffects(p, path, src, idx)
+	}
+	return nil, fmt.Errorf("check can't read %s pipelines yet", p.Kind)
 }

@@ -72,7 +72,7 @@ func (q *QueryLog) Queries(ctx context.Context, since time.Time) ([]collect.Logg
 		if !l.isQuery() || l.fromTvt() || strings.HasPrefix(l.kv["user_agent"], "mimir/") {
 			return
 		}
-		if _, probe := collect.ProbeNonce(l.query()); probe {
+		if _, probe := collect.ProbeNonce(l.query()); probe || collect.IsReplay(l.query()) {
 			return
 		}
 		lq := collect.LoggedQuery{

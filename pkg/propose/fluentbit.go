@@ -145,7 +145,7 @@ func fluentRoute(out []byte, r Route) ([]byte, error) {
 		}
 		fmt.Fprintf(&b, "%s- name: rewrite_tag\n", indent)
 		fmt.Fprintf(&b, "%s  match: %s\n", indent, tag)
-		fmt.Fprintf(&b, "%s  rule: $log ^.*$ %s false\n", indent, newTag)
+		fmt.Fprintf(&b, "%s  rule: $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ %s false\n", indent, newTag)
 		fmt.Fprintf(&b, "%s  emitter_name: %s\n", indent, emitter)
 		fmt.Fprintf(&b, "%s# %s\n", indent, endMarker)
 		return b.String()
@@ -236,7 +236,7 @@ func checkFluentRoute(src []byte, tag, newTag string) error {
 	n := 0
 	if filters != nil {
 		for _, f := range filters.Content {
-			if str(f, "name") == "rewrite_tag" && str(f, "match") == tag && str(f, "rule") == "$log ^.*$ "+newTag+" false" {
+			if str(f, "name") == "rewrite_tag" && str(f, "match") == tag && str(f, "rule") == "$log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ "+newTag+" false" {
 				n++
 			}
 		}
