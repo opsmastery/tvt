@@ -1,0 +1,403 @@
+{"source": "contrib v0.165.0 connector/countconnector/README.md", "kind": "condition", "text": "spanevent.attributes[\"env\"] == \"prod\""}
+{"source": "contrib v0.165.0 connector/countconnector/README.md", "kind": "condition", "text": "spanevent.name == \"prodevent\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "resource.attributes[\"env\"] == \"prod\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "span.attributes[\"http.method\"] == \"GET\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "log.severity_text == \"ERROR\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "otelcol.client.metadata[\"X-Tenant\"][0] == \"acme\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "otelcol.client.metadata[\"X-Tenant\"][0] == \"ecorp\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "log.attributes[\"region\"] == \"east\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "log.attributes[\"region\"] == \"west\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "log.severity_number < SEVERITY_NUMBER_ERROR"}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "resource.attributes[\"service.name\"] == \"service1\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "resource.attributes[\"service.name\"] == \"service2\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "true"}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "log.severity_number >= SEVERITY_NUMBER_ERROR"}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "span.attributes[\"http.duration_ms\"] > 1000"}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "resource.attributes[\"env\"] == \"dev\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "resource.attributes[\"region\"] == \"east\""}
+{"source": "contrib v0.165.0 connector/routingconnector/README.md", "kind": "condition", "text": "resource.attributes[\"region\"] == \"west\""}
+{"source": "contrib v0.165.0 connector/signaltometricsconnector/README.md", "kind": "condition", "text": "resource.attributes[\"service.name\"] != nil"}
+{"source": "contrib v0.165.0 connector/signaltometricsconnector/README.md", "kind": "condition", "text": "resource.attributes[\"foo\"] != nil"}
+{"source": "contrib v0.165.0 connector/signaltometricsconnector/README.md", "kind": "condition", "text": "resource.attributes[\"bar\"] != nil"}
+{"source": "contrib v0.165.0 connector/signaltometricsconnector/README.md", "kind": "condition", "text": "metric.type == 1 AND resource.attributes[\"resource.foo\"] != nil", "invalid": "uppercase AND (the keywords are lowercase)"}
+{"source": "contrib v0.165.0 connector/sumconnector/README.md", "kind": "condition", "text": "attributes[\"total.payment\"] != \"NULL\""}
+{"source": "contrib v0.165.0 connector/sumconnector/README.md", "kind": "statement", "text": "merge_maps(attributes, ParseJSON(body), \"upsert\")"}
+{"source": "contrib v0.165.0 pkg/ottl/LANGUAGE.md", "kind": "statement", "text": "set(log.attributes[\"namespace\"], resource.attributes[\"k8s.namespace.name\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/LANGUAGE.md", "kind": "statement", "text": "set(log.attributes[\"env\"], \"prod\") where resource.attributes[\"k8s.namespace.name\"] == \"prod\""}
+{"source": "contrib v0.165.0 pkg/ottl/LANGUAGE.md", "kind": "statement", "text": "delete_key(log.attributes, \"http.request.header.authorization\") where log.attributes[\"http.request.header.authorization\"] != nil"}
+{"source": "contrib v0.165.0 pkg/ottl/LANGUAGE.md", "kind": "condition", "text": "Int()"}
+{"source": "contrib v0.165.0 pkg/ottl/LANGUAGE.md", "kind": "condition", "text": "IsMatch(field, \".*\")"}
+{"source": "contrib v0.165.0 pkg/ottl/LANGUAGE.md", "kind": "condition", "text": "Split(field, \",\")[1]"}
+{"source": "contrib v0.165.0 pkg/ottl/LANGUAGE.md", "kind": "condition", "text": "sum([1, 2, 3, 4]) + (10 / 1) - 1"}
+{"source": "contrib v0.165.0 pkg/ottl/LANGUAGE.md", "kind": "condition", "text": "not (IsMatch(span.name, \"http_.*\") and span.kind > 0)"}
+{"source": "contrib v0.165.0 pkg/ottl/LANGUAGE.md", "kind": "condition", "text": "IsMatch(resource.attributes[\"host.name\"], \"pod-*\")"}
+{"source": "contrib v0.165.0 pkg/ottl/README.md", "kind": "statement", "text": "set(span.attributes[\"log body\"], log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "append(log.attributes[\"tags\"], \"prod\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "append(log.attributes[\"tags\"], values = [\"staging\", \"staging:east\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "append(log.attributes[\"tags_copy\"], log.attributes[\"tags\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "clear(attributes[\"http.method\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "clear(resource.attributes[\"host.name\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "delete_key(log.attributes, \"http.request.header.authorization\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "delete_key(resource.attributes, \"http.request.header.authorization\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "delete_matching_keys(log.attributes, \"(?i).*password.*\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "delete_matching_keys(resource.attributes, \"(?i).*password.*\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "keep_matching_keys(log.attributes, \"(?i).*version.*\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "keep_matching_keys(resource.attributes, \"(?i).*version.*\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "flatten(resource.attributes)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "flatten(metric.cache, \"k8s\", 4)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "flatten(log.body, depth=2)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "flatten(body, resolveConflicts=true)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "keep_keys(log.attributes, [\"http.method\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "keep_keys(resource.attributes, [\"http.method\", \"http.route\", \"http.url\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "keep_keys(log.attributes, Split(log.attributes[\"keys\"], \",\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "keep_keys(log.attributes, cache[\"keys\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "limit(log.attributes, 100, [])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "limit(resource.attributes, 50, [\"http.host\", \"http.method\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "merge_maps(log.attributes, ParseJSON(log.body), \"upsert\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "merge_maps(log.attributes, ParseJSON(log.attributes[\"kubernetes\"]), \"update\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "merge_maps(log.attributes, resource.attributes, \"insert\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_all_matches(resource.attributes, \"/user/*/list/*\", \"/user/{userId}/list/{listId}\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_all_matches(resource.attributes, \"/user/*/list/*\", \"/user/{userId}/list/{listId}\", SHA256, \"/user/%s\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_all_patterns(resource.attributes, \"value\", \"/account/\\\\d{4}\", \"/account/{accountId}\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_all_patterns(resource.attributes, \"key\", \"/account/\\\\d{4}\", \"/account/{accountId}\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_all_patterns(resource.attributes, \"key\", \"^kube_([0-9A-Za-z]+_)\", \"k8s.$$1.\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_all_patterns(resource.attributes, \"key\", \"^kube_([0-9A-Za-z]+_)\", \"$$1.\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_all_patterns(resource.attributes, \"key\", \"^kube_([0-9A-Za-z]+_)\", \"$$1.\", SHA256, \"k8s.%s\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_match(span.attributes[\"http.target\"], \"/user/*/list/*\", \"/user/{userId}/list/{listId}\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_match(span.attributes[\"http.target\"], \"/user/*/list/*\", \"/user/{userId}/list/{listId}\", SHA256, \"/user/%s\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_pattern(resource.attributes[\"process.command_line\"], \"password\\\\=[^\\\\s]*(\\\\s?)\", \"password=***\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_pattern(metric.name, \"^kube_([0-9A-Za-z]+_)\", \"k8s.$$1.\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "replace_pattern(metric.name, \"^kube_([0-9A-Za-z]+_)\", \"$$1.\", SHA256, \"k8s.%s\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(resource.attributes[\"http.path\"], \"/foo\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(metric.name, resource.attributes[\"http.route\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(span.trace_state[\"svc\"], \"example\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(span.attributes[\"source\"], span.trace_state[\"source\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "stringify_all(log.attributes)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "stringify_all(resource.attributes)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "truncate_all(log.attributes, 100)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "truncate_all(resource.attributes, 50, false)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "truncate_all(log.attributes, 100, truncation_marker = \"(truncated)\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Base64Encode(\"test string\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Base64Encode(resource.attributes[\"field\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Base64Encode(body, \"base64-url\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Base64Encode(attributes[\"data\"], \"base64-raw\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Bool(log.attributes[\"truthy_attribute\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Bool(\"true\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Bool(\"0\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Decode(\"aGVsbG8gd29ybGQ=\", \"base64\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Decode(resource.attributes[\"encoded field\"], \"us-ascii\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Coalesce([attributes[\"user.id\"], attributes[\"enduser.id\"], \"unknown\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Coalesce([resource.attributes[\"deployment.environment.name\"], resource.attributes[\"deployment.environment\"]])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "CommunityID(attributes[\"source.ip\"], attributes[\"source.port\"], attributes[\"destination.ip\"], attributes[\"destination.port\"], \"TCP\", 1)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "CommunityID(\"192.168.1.1\", 54321, \"10.0.0.1\", 90, \"UDP\", 2)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Concat([span.attributes[\"http.method\"], span.attributes[\"http.path\"]], \": \")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Concat([metric.name, 1], \" \")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Concat([\"HTTP method is: \", span.attributes[\"http.method\"]], \"\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Concat(Split(span.attributes[\"request.id\"], \"-\"), \"\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Concat(log.attributes[\"values\"], \",\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ContainsValue(attributes[\"tags\"], \"staging\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ContainsValue([1, 2, 3, 4, 5], 3)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ContainsValue([1.1, 2.2, 3.3, 4.4], 4.4)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ContainsValue([\"GET\", \"PUT\", \"POST\"], \"GET\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ConvertCase(metric.name, \"snake\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ConvertAttributesToElementsXML(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ConvertAttributesToElementsXML(log.body, \"/Log/Record\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ConvertTextToElementsXML(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ConvertTextToElementsXML(log.body, elementName = \"custom\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ConvertTextToElementsXML(log.body, \"/some/part/\", \"value\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Day(Now())"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Double(log.attributes[\"http.status_code\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Double(\"2.0\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Duration(\"3s\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Duration(\"333ms\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Duration(\"1000000h\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "FNV(resource.attributes[\"device.name\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "FNV(\"name\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Format(\"%02d\", [log.attributes[\"priority\"]])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Format(\"%04d-%02d-%02d\", [Year(Now()), Month(Now()), Day(Now())])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Format(\"%s/%s/%04d-%02d-%02d.log\", [resource.attributes[\"hostname\"], log.body[\"program\"], Year(Now()), Month(Now()), Day(Now())])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "FormatTime(Time(\"02/04/2023\", \"%m/%d/%Y\"), \"%A %h %e %Y\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "FormatTime(UnixNano(span.attributes[\"time_nanoseconds\"]), \"%b %d %Y %H:%M:%S\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "FormatTime(TruncateTime(spanevent.time, Duration(\"10h 20m\"))), \"%Y-%m-%d %H:%M:%S\")", "invalid": "unbalanced parentheses"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "GetXML(log.body, \"/a\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "GetXML(log.body, \"//a\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "GetXML(log.body, \"/a[1]\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "GetXML(log.body, \"//a[@b='c']\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "GetXML(log.body, \"/a/text()\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "GetXML(log.body, \"/a/@foo\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "HasPrefix(resource.attributes[\"service.name\"], \"ingest_\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "HasPrefix(\"ingest_service\", \"ingest_\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "HasSuffix(resource.attributes[\"service.name\"], \"_service\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "HasSuffix(\"ingest_service\", \"_service\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Hex(span.attributes[\"http.status_code\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Hex(2.0)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Hour(Now())"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Hours(Duration(\"1h\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Index(\"hello world\", \"world\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Index(log.attributes[\"tags\"], \"error\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Index(log.attributes[\"scores\"], 95)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "InsertXML(log.body, \"/subdoc\", log.attributes[\"subdoc\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Int(log.attributes[\"http.status_code\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Int(\"2.0\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsBool(false)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsBool(pcommon.NewValueBool(false))", "invalid": "Go code, not OTTL"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsBool(42)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsBool(resource.attributes[\"any key\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsDouble(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsDouble(log.attributes[\"maybe a double\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsEmpty(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsEmpty(resource.attributes[\"maybe empty\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsEmpty(\"\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsInCIDR(resource.attributes[\"server.ip\"], [\"192.168.0.0/16\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsInCIDR(resource.attributes[\"server.ip\"], [\"192.168.0.0/16\", \"10.0.0.0/8\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsInt(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsInt(log.attributes[\"maybe a int\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsRootSpan()"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(span.attributes[\"isRoot\"], \"true\") where IsRootSpan()"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsMap(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsMap(log.attributes[\"maybe a map\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsMatch(span.attributes[\"http.path\"], \"foo\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsMatch(\"string\", \".*ring\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsList(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsList(resource.attributes[\"maybe a slice\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsString(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsString(resource.attributes[\"maybe a string\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Keys(resource.attributes)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Keys({\"k1\":\"v1\", \"k2\": \"v2\"})"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Len(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Log(span.attributes[\"duration_ms\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Int(Log(span.attributes[\"duration_ms\"])", "invalid": "unbalanced parentheses"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsValidLuhn(span.attributes[\"credit_card_number\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "IsValidLuhn(\"17893729974\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "MD5(resource.attributes[\"device.name\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "MD5(\"name\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Microseconds(Duration(\"1h\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Milliseconds(Duration(\"1h\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Minute(Now())"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Minutes(Duration(\"1h\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Month(Now())"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Murmur3Hash(attributes[\"order.productId\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Murmur3Hash128(attributes[\"order.productId\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Nanosecond(Now())"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Nanoseconds(Duration(\"1h\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "UnixSeconds(Now())"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(span.start_time, Now())"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseCSV(\"999-999-9999,Joe Smith,joe.smith@example.com\", \"phone,name,email\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseCSV(log.body, \"phone|name|email\", delimiter=\"|\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseCSV(log.attributes[\"csv_line\"], log.attributes[\"csv_headers\"], delimiter=\"|\", headerDelimiter=\",\", mode=\"lazyQuotes\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseCSV(\"\\\"555-555-5556,Joe Smith\\\",joe.smith@example.com\", \"phone,name,email\", mode=\"ignoreQuotes\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseInt(\"12345\", 10)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseInt(\"0xAA\", 0)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseInt(\"AA\", 16)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseInt(\"-20\", 8)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseJSON(\"{\\\"attr\\\":true}\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseJSON(\"[\\\"attr1\\\",\\\"attr2\\\"]\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseJSON(resource.attributes[\"kubernetes\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseJSON(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseKeyValue(\"k1=v1 k2=v2 k3=v3\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseKeyValue(\"k1!v1_k2!v2_k3!v3\", \"!\", \"_\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseKeyValue(log.attributes[\"pairs\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseSeverity(attributes[\"log-level\"], {\"info\":[{\"equals\": [\"inf\"]}, {\"range\":{\"min\":200, \"max\":299}}]})"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseSeverity(attributes[\"log-level\"], {\"info\":[{\"range\":\"2xx\"}]})"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseSeverity(severity_number, {\"info\":[{\"equals\": [\"inf\"]}, {\"range\":{\"min\":200, \"max\":299}}], \"error\":[{\"range\":{\"min\":400, \"max\":499}}]})"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseXML(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ParseXML(log.attributes[\"xml\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "RemoveXML(log.body, \"/a/@foo\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "RemoveXML(log.body, \"/a/b\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "RemoveXML(log.body, \"/a/b[@foo='bar']\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "RemoveXML(log.body, \"//comment()\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "RemoveXML(log.body, \"//*[contains(text(), 'sensitive')]\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Second(Now())"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Seconds(Duration(\"1h\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "SHA1(resource.attributes[\"device.name\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "SHA1(\"name\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "SHA256(resource.attributes[\"device.name\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "SHA256(\"name\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "SHA512(resource.attributes[\"device.name\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "SHA512(\"name\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(resource.attributes[\"thingsMap\"], SliceToMap(resource.attributes[\"things\"], [\"name\"]))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(resource.attributes[\"element_1\"], resource.attributes[\"thingsMap\"][\"foo'])", "invalid": "mismatched quotes"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(resource.attributes[\"element_2\"], resource.attributes[\"thingsMap\"][\"bar'])", "invalid": "mismatched quotes"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Sort(resource.attributes[\"device.tags\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Sort(resource.attributes[\"device.tags\"], \"desc\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "SpanID(0x0000000000000000)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "SpanID(\"0102030405060708\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Trim(\" this is a test \", \" \")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Trim(\"!!this is a test!!\", \"!!\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(resource.attributes[\"service.name\"], TrimPrefix(resource.attributes[\"service.name\"], \"ingest_\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "TrimPrefix(\"ingest_service\", \"ingest_\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "statement", "text": "set(resource.attributes[\"service.name\"], TrimSuffix(resource.attributes[\"service.name\"], \"_service\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "TrimSuffix(\"ingest_service\", \"_service\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "String(\"test\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "String(span.attributes[\"http.method\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "String(span.span_id)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "String([1,2,3])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "String(false)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Substring(\"123456789\", 0, 3)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Substring(\"\u4e00\u4e8c\u4e09\", 0, 4, true)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Time(\"02/04/2023\", \"%m/%d/%Y\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Time(\"Feb 15, 2023\", \"%b %d, %Y\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Time(\"2023-05-26 12:34:56 HST\", \"%Y-%m-%d %H:%M:%S %Z\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Time(\"1986-10-01T00:17:33 MST\", \"%Y-%m-%dT%H:%M:%S %Z\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Time(\"2012-11-01T22:08:41+0000 EST\", \"%Y-%m-%dT%H:%M:%S%z %Z\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Time(\"2023-05-26 12:34:56\", \"%Y-%m-%d %H:%M:%S\", \"America/New_York\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Time(\"mercoled\u00ec set 4 2024\", \"%A %h %e %Y\", \"\", \"it\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Time(\"Febrero 25 lunes, 2002, 02:03:04 p.m.\", \"%B %d %A, %Y, %r\", \"America/New_York\", \"es-ES\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ToCamelCase(metric.name)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ToKeyValueString(log.body)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ToKeyValueString(log.body, \":\", \",\", true)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ToLowerCase(metric.name)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ToSnakeCase(metric.name)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "ToUpperCase(metric.name)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "TraceID(0x00000000000000000000000000000000)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "TraceID(\"a389023abaa839283293ed323892389d\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "TruncateTime(span.start_time, Duration(\"1s\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Unix(1672527600)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "UnixMicro(Time(\"02/04/2023\", \"%m/%d/%Y\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "UnixMilli(Time(\"02/04/2023\", \"%m/%d/%Y\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "UnixNano(Time(\"02/04/2023\", \"%m/%d/%Y\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "UnixSeconds(Time(\"02/04/2023\", \"%m/%d/%Y\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "UserAgent(\"curl/7.81.0\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "URL(\"http://www.example.com\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "URL(\"http://myusername:mypassword@www.example.com:80/foo.gif?key1=val1&key2=val2#fragment\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Values(resource.attributes)"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Values({\"key1\": \"value1\", \"key2\": 5, \"key3\": [1,2], \"key4\": {\"b1\": \"c\"}})"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Weekday(Now())"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "XXH3(resource.attributes[\"device.name\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "XXH3(\"name\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "XXH128(resource.attributes[\"device.name\"])"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "XXH128(\"name\")"}
+{"source": "contrib v0.165.0 pkg/ottl/ottlfuncs/README.md", "kind": "condition", "text": "Year(Now())"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "All(log.attributes[\"tags\"], (_, v) => v == \"prod\")"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "All(log.attributes, (k, _) => HasPrefix(k, \"http.\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(log.attributes[\"all_prod\"], true) where All(log.attributes[\"tags\"], (_, v) => v == \"prod\")"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "Any(log.attributes[\"tags\"], (_, v) => v == \"prod\")"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "Any(log.attributes, (k, _) => HasPrefix(k, \"http.\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(log.attributes[\"has_prod\"], true) where Any(log.attributes[\"tags\"], (_, v) => v == \"prod\")"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "Filter(log.attributes[\"tags\"], (_, v) => v == \"prod\")"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "Filter(log.attributes, (k, _) => HasPrefix(k, \"http.\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(log.attributes[\"prod_tags\"], Filter(log.attributes[\"tags\"], (_, v) => v == \"prod\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "Find(log.attributes[\"tags\"], (_, v) => v == \"prod\")"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "Find(log.attributes, (k, _) => k == \"http.method\")"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "Find(log.attributes, (_, v) => v == \"prod\", (k, _) => k)"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "Find(log.attributes, (_, v) => v == \"prod\", (_, v) => String(v))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(log.attributes[\"first_prod\"], Find(log.attributes[\"tags\"], (_, v) => v == \"prod\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "MapEach(log.attributes[\"counts\"], (_, v) => Int(v) * 2)"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "MapEach(log.attributes, (_, v) => String(v))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(log.attributes[\"doubled\"], MapEach(log.attributes[\"counts\"], (_, v) => Int(v)))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "MapKeys(log.attributes, (k, _) => Concat([\"http.\", k], \"\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "MapKeys(log.attributes, (k, v) => Concat([k, \":\", String(v)], \"\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(log.attributes[\"prefixed\"], MapKeys(log.attributes, (k, _) => Concat([\"http.\", k], \"\")))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "Reduce(log.attributes[\"counts\"], 0, (acc, _, v) => acc + Int(v))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "Reduce(log.attributes[\"labels\"], \"\", (acc, k, v) => Concat([acc, k, \"=\", String(v), \";\"], \"\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(log.attributes[\"total\"], Reduce(log.attributes[\"counts\"], 0, (acc, _, v) => acc + Int(v)))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(log.body, ToValidUTF8(log.body))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(span.name, ToValidUTF8(span.name, \"?\"))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(log.attributes[\"tags\"], MapEach(log.attributes[\"tags\"], (_, v) => ToValidUTF8(v)))"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "When(() => IsMap(log.attributes), \"map\", \"not map\")"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "condition", "text": "When(() => attributes[\"int_value\"] > 0, \"positive\", \"negative\")"}
+{"source": "contrib v0.165.0 pkg/ottl/xottl/ottlfuncs/README.md", "kind": "statement", "text": "set(log.attributes[\"result\"], When(() => IsMap(log.attributes), \"yes\", \"no\"))"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "resource.attributes[\"host.name\"] == \"localhost\""}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "span.attributes[\"container.name\"] == \"container_1\""}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "span.name == \"app_3\""}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "spanevent.attributes[\"grpc\"] == true"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "IsMatch(spanevent.name, \".*grpc.*\")"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "metric.name == \"my.metric\" and resource.attributes[\"my_label\"] == \"abc123\""}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "metric.type == METRIC_DATA_TYPE_HISTOGRAM"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "metric.type == METRIC_DATA_TYPE_SUMMARY"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "IsMatch(log.body, \".*password.*\")"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "log.severity_number < SEVERITY_NUMBER_WARN"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "IsRootSpan()"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "spanevent.name == \"bar\""}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "HasAttrKeyOnDatapoint(\"bad.metric\")"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "HasAttrOnDatapoint(\"bad.metric\", \"true\")"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "HasAttrKeyOnDatapoint(\"http.method\")"}
+{"source": "contrib v0.165.0 processor/filterprocessor/README.md", "kind": "condition", "text": "HasAttrOnDatapoint(\"http.method\", \"GET\")"}
+{"source": "contrib v0.165.0 processor/logdedupprocessor/README.md", "kind": "condition", "text": "log.attributes[\"ID\"] == 1"}
+{"source": "contrib v0.165.0 processor/logdedupprocessor/README.md", "kind": "condition", "text": "resource.attributes[\"service.name\"] == \"my-service\""}
+{"source": "contrib v0.165.0 processor/tailsamplingprocessor/README.md", "kind": "condition", "text": "attributes[\"test_attr_key_1\"] == \"test_attr_val_1\""}
+{"source": "contrib v0.165.0 processor/tailsamplingprocessor/README.md", "kind": "condition", "text": "attributes[\"test_attr_key_2\"] != \"test_attr_val_1\""}
+{"source": "contrib v0.165.0 processor/tailsamplingprocessor/README.md", "kind": "condition", "text": "name != \"test_span_event_name\""}
+{"source": "contrib v0.165.0 processor/tailsamplingprocessor/README.md", "kind": "condition", "text": "attributes[\"test_event_attr_key_2\"] != \"test_event_attr_val_1\""}
+{"source": "contrib v0.165.0 processor/tailsamplingprocessor/README.md", "kind": "condition", "text": "resource.attributes[\"service.name\"] == \"checkout\""}
+{"source": "contrib v0.165.0 processor/tailsamplingprocessor/README.md", "kind": "condition", "text": "span.attributes[\"http.status_code\"] >= 500"}
+{"source": "contrib v0.165.0 processor/tailsamplingprocessor/README.md", "kind": "condition", "text": "spanevent.name == \"exception\""}
+{"source": "contrib v0.165.0 processor/tailsamplingprocessor/README.md", "kind": "condition", "text": "sum (otelcol_processor_tail_sampling_count_traces_sampled) by (policy)", "invalid": "PromQL, not OTTL"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "keep_keys(span.attributes, [\"service.name\", \"service.namespace\", \"cloud.region\", \"process.command_line\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "replace_pattern(span.attributes[\"process.command_line\"], \"password\\\\=[^\\\\s]*(\\\\s?)\", \"password=***\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "limit(span.attributes, 100, [])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "truncate_all(span.attributes, 4096)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "keep_keys(resource.attributes, [\"host.name\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "truncate_all(resource.attributes, 4096)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(metric.description, \"Sum\") where metric.type == \"Sum\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_sum_to_gauge() where metric.name == \"system.processes.count\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_gauge_to_sum(\"cumulative\", false) where metric.name == \"prometheus_metric\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.severity_text, \"FAIL\") where log.body == \"request failed\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "replace_all_matches(log.attributes, \"/user/*/list/*\", \"/user/{userId}/list/{listId}\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "replace_all_patterns(log.attributes, \"value\", \"/account/\\\\d{4}\", \"/account/{accountId}\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.body, log.attributes[\"http.route\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "metric.type == METRIC_DATA_TYPE_SUM"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(metric.description, \"Sum\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "IsMap(log.body) and log.body[\"object\"] != nil"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(metric.description, \"test passed\") where datapoint.attributes[\"test\"] == \"pass\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(resource.attributes[\"test\"], \"passed\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(metric.description, \"test passed\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "limit(datapoint.attributes, 100, [\"host.name\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_exponential_histogram_to_histogram(\"random\", [0.0, 10.0, 100.0, 1000.0, 10000.0])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "delete_matching_keys(resource.attributes, \"(?i).*myRegex.*\") where metric.name == \"system.memory.usage\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "aggregate_on_attributes(\"sum\") where metric.name == \"system.memory.usage\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "aggregate_on_attribute_value(\"sum\", \"attr1\", [\"val1\", \"val2\"], \"new_val\") where metric.name == \"system.memory.usage\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(span.attributes[\"test\"], \"pass\") where span.attributes[\"test\"] == nil"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(resource.attributes[\"namespace\"], resource.attributes[\"k8s.namespace.name\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "delete_key(resource.attributes, \"k8s.namespace.name\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "replace_all_patterns(resource.attributes, \"key\", \"k8s\\\\.namespace\\\\.name\", \"namespace\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.attributes[\"body\"], log.body)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(resource.attributes[\"test\"], Concat([resource.attributes[\"foo\"], resource.attributes[\"bar\"]], \" \"))"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "merge_maps(log.cache, ParseJSON(log.body), \"upsert\") where IsMatch(log.body, \"^\\\\{\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.attributes[\"attr1\"], log.cache[\"attr1\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.attributes[\"attr2\"], log.cache[\"attr2\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.attributes[\"nested.attr3\"], log.cache[\"nested\"][\"attr3\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.attributes[\"namespace\"], log.attributes[\"k8s.namespace.name\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.severity_number, SEVERITY_NUMBER_INFO) where IsString(log.body) and IsMatch(log.body, \"\\\\sINFO\\\\s\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.severity_number, SEVERITY_NUMBER_WARN) where IsString(log.body) and IsMatch(log.body, \"\\\\sWARN\\\\s\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.severity_number, SEVERITY_NUMBER_ERROR) where IsString(log.body) and IsMatch(log.body, \"\\\\sERROR\\\\s\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(resource.cache[\"attrs\"], resource.attributes)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "keep_matching_keys(resource.cache[\"attrs\"], \"pod_labels_.*\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(resource.attributes[\"kubernetes.labels\"], resource.cache[\"attrs\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(resource.attributes[\"test\"], \"pass\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(scope.attributes[\"test\"], [\"pass\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(log.attributes[\"test\"], true)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set(resource.attributes[\"to\"], log.attributes[\"from\"])"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_sum_to_gauge()"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_gauge_to_sum(\"cumulative\", false)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_gauge_to_sum(\"delta\", true)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "extract_avg_metric()"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "extract_avg_metric(\".avg\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "extract_count_metric(true, \".count\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "extract_count_metric(false, \".count\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "extract_sum_metric(true, \".sum\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "extract_sum_metric(false, \".sum\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_summary_count_val_to_sum(\"delta\", true, \".count\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_summary_count_val_to_sum(\"cumulative\", false, \".count\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_summary_quantile_val_to_gauge(\"custom_quantile\", \"custom_suffix\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_summary_quantile_val_to_gauge(\"custom_quantile\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_summary_quantile_val_to_gauge()"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_summary_sum_val_to_sum(\"delta\", true, \".sum\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "convert_summary_sum_val_to_sum(\"cumulative\", false, \".sum\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "copy_metric(name=\"http.request.status_code\", unit=\"s\") where metric.name == \"http.status_code", "invalid": "unterminated string"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "copy_metric(desc=\"new desc\") where metric.description == \"old desc\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "aggregate_on_attributes(\"sum\", [\"attr1\", \"attr2\"]) where metric.name == \"system.memory.usage\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "aggregate_on_attributes(\"max\") where metric.name == \"system.memory.usage\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "aggregate_on_attributes(\"max\", []) where metric.name == \"system.memory.usage\""}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "ParseCEF(body)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "ParseCEF(\"CEF:0|Security|threatmanager|1.0|100|worm successfully stopped|10|src=10.0.0.1 dst=2.1.2.2 spt=1232\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "ParseCLF(body)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "ParseCLF(\"127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] \\\"GET /apache_pb.gif HTTP/1.0\\\" 200 2326\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "ParseCLF(body, \"combined\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "ParseELF(body)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "ParseELF(\"#Version: 1.0\\n#Fields: time cs-method cs-uri\\n00:34:23 GET /foo/bar.html\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "ParseLEEF(body)"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "ParseLEEF(\"LEEF:1.0|Microsoft|MSExchange|4.0 SP1|15345|src=10.50.1.1\\tdst=2.10.20.20\\tsev=5\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "condition", "text": "ParseLEEF(\"LEEF:2.0|Lancope|StealthWatch|1.0|41|^|src=10.0.1.8^dst=10.0.0.5^sev=5\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set_semconv_span_name(\"1.43.0\")"}
+{"source": "contrib v0.165.0 processor/transformprocessor/README.md", "kind": "statement", "text": "set_semconv_span_name(\"1.43.0\", \"original_span_name\")"}

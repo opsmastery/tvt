@@ -10,7 +10,7 @@ Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 
 
 Part of the MVP (S7–S12). The MVP is done when `v0.1.0-rc1` is tagged; on the lab, `tvt propose` opens a draft PR for a seeded drop, `tvt check` passes it and fails a PR that would break any hard keep or record, the PR leaves draft only after a recorded owner confirmation, and the next `tvt scan` records the measured saving in the ledger.
 
-- ADR 0012: collect the OTTL corpus and prototype the extractor; below 95% of statements recognized, the ADR reopens. OTTL is v1 from opentelemetry-collector-contrib v0.164.0. Decide between importing contrib's `pkg/ottl` parser (Apache 2.0; measure the dependency weight as spike 3 did for Loki) and a narrow extractor for paths and the editors that change them. Lambda functions, experimental `xottl` functions and `xprofile` are outside the guarantee.
+- ADR 0012: done Nov 18. The narrow extractor (`parse.OTTLStatement`, `parse.OTTLCondition`) recognizes 99.76% of a 421-statement corpus (`TestOTTLCorpus`, baseline 0.9976); item 8 builds on it. Statements with a lambda or an experimental `xottl` function parse but stay fail-closed.
 - ADR 0011: confirm the records rule (S7 item 2).
 - tvt-lab's S8 seeds (`lab-backlog.md`), landed with their expected `check` results in ground truth before item 1, so `check` is built test-first.
 
