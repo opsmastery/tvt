@@ -58,11 +58,20 @@ records:
   metrics: ["payments_ledger_.*"]
   streams: ['{app="k8s", component="audit"}']
 
-# Who owns which signals, and how critical their service is. First match wins.
-# An unread signal of a tier 0 or 1 service is dormant (ask its owner), never a
-# drop candidate.
+# Who owns each signal, and how critical its service is (owners: first match
+# wins; an unread signal of a tier 0 or 1 service is dormant, ask its owner,
+# never a drop candidate). tvt tries, in order: owners below, CODEOWNERS,
+# the labels below on the signal's series (when its series agree on one
+# value), and Backstage catalog files. A CODEOWNERS path's first segment or a
+# Backstage component's name is a component; a signal belongs to it through
+# its job, app or service_name label, or a metric name that starts with it
+# (dashes read as underscores). When none of them names an owner, services
+# maps the OTel service.name (the job, or namespace/name) to one, then
+# Kubernetes manifests give a workload's namespace team label or its
+# app.kubernetes.io/part-of through services; both are marked inferred. A
+# dormant signal with no owner is a missing-ownership gap, never a guess.
 ownership:
-  labels: [team, service, namespace]   # recorded; read once series label values are collected
+  labels: [team]
   owners:
     - name: payments
       tier: 0
@@ -71,6 +80,10 @@ ownership:
       tier: 2
       metrics: ["shop_.*"]
       streams: ['{app="shop"}']
+  codeowners: [../services/.github/CODEOWNERS]
+  backstage: [../services]              # searched for catalog-info.yaml
+  services: {checkout: payments, ai-platform/coding-agent: ai-platform}
+  kubernetes: [../deploy/manifests]
 
 # SLO definitions (Sloth, Pyrra, OpenSLO): files or directories, relative to
 # this file. Everything an SLI reads is a hard keep; an SLI tvt can't read
