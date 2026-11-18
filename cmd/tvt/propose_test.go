@@ -397,6 +397,10 @@ func TestProposeDeltaLabels(t *testing.T) {
 				Pipeline: "otelcol-agent", Proposable: true, Removal: "aggregate"})
 		}
 	}
+	// The exporter's scope label, which M7 found proposed as a no-op delete.
+	recs = append(recs, report.Recommendation{ID: "label_removal:prom:label:coding_agent_token_usage_total:otel_scope_name", Action: report.ActionLabelRemoval,
+		Signal:   report.SignalRef{ID: "prom:label:coding_agent_token_usage_total:otel_scope_name", Kind: "label", Name: "otel_scope_name", Parent: "coding_agent_token_usage_total", Source: "prom"},
+		Pipeline: "otelcol-agent", Proposable: true, Removal: "aggregate"})
 	r.Recommendations = recs
 	dir := t.TempDir()
 	rj := filepath.Join(dir, "report.json")
@@ -426,8 +430,16 @@ func TestProposeDeltaLabels(t *testing.T) {
 			t.Errorf("patch lacks %q", want)
 		}
 	}
-	if strings.Contains(out.String(), "label_removal:prom:label:coding_agent") && strings.Contains(out.String(), "skipped label_removal") {
-		t.Errorf("a coding agent label removal was skipped:\n%s", out.String())
+	if strings.Contains(string(patch), "otel[^A-Za-z0-9:]+scope") {
+		t.Error("the patch deletes otel_scope_name, which the exporter adds from the scope")
+	}
+	if !strings.Contains(out.String(), "skipped label_removal:prom:label:coding_agent_token_usage_total:otel_scope_name: otel_scope_name isn't a datapoint attribute") {
+		t.Errorf("otel_scope_name wasn't skipped with the reason:\n%s", out.String())
+	}
+	for _, l := range []string{"session_id", "user_email"} {
+		if strings.Contains(out.String(), "skipped label_removal:prom:label:coding_agent_token_usage_total:"+l) {
+			t.Errorf("%s was skipped:\n%s", l, out.String())
+		}
 	}
 }
 
