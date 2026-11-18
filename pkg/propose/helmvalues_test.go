@@ -1,6 +1,7 @@
 package propose
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,7 +95,7 @@ func TestHelmValuesRender(t *testing.T) {
 	version := strings.TrimSpace(string(kps(t, "VERSION")))
 	r, err := exec.Command("helm", "template", "kps", "prometheus-community/kube-prometheus-stack", "--version", version, "--namespace", "monitoring", "-f", f).Output()
 	if err != nil {
-		t.Fatalf("helm template: %v", err)
+		t.Fatalf("helm template: %v\n%s", err, stderrOf(err))
 	}
 	docs := strings.Split(string(r), "\n---\n")
 	monitor := func(name string) string {
@@ -123,4 +124,14 @@ func TestHelmValuesRender(t *testing.T) {
 	if !strings.Contains(monitor("kps-prometheus-node-exporter"), "regex: node_softnet_times_squeezed_total") {
 		t.Error("node-exporter: no drop")
 	}
+}
+
+// stderrOf is helm's own message when it exits non-zero (a missing chart
+// repo says "repo ... not found"), which Output's error alone hides.
+func stderrOf(err error) string {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return strings.TrimSpace(string(ee.Stderr))
+	}
+	return ""
 }
