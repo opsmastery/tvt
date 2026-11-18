@@ -38,13 +38,21 @@ check() {
   return $ok
 }
 
+# The chart repos the render tests pull from (pinned chart versions are in
+# pkg/propose/testdata). Added once, refreshed each run.
+charts() {
+  helm repo list 2>/dev/null | grep -q '^prometheus-community' || helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null
+  helm repo list 2>/dev/null | grep -q '^fluent' || helm repo add fluent https://fluent.github.io/helm-charts >/dev/null
+  helm repo update prometheus-community fluent >/dev/null || echo "helm repo update failed; rendering from the cached index"
+}
+
 tests() {
   echo "tvt gated suites, $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   cd "$REPO"
   git pull --ff-only --quiet || echo "git pull failed; testing the checked-out version"
   echo "commit $(git rev-parse --short HEAD)"
   local env=(TVT_TEST_VALIDATORS=1)
-  if command -v helm >/dev/null; then env+=(TVT_TEST_HELM=1); else echo "helm missing: chart renders skipped"; fi
+  if command -v helm >/dev/null; then env+=(TVT_TEST_HELM=1); charts; else echo "helm missing: chart renders skipped"; fi
   if ! podman info >/dev/null 2>&1; then echo "podman isn't answering: the validators can't run"; fi
   local rc=0
   # -p 2: fewer validator containers at once on the Podman machine.
