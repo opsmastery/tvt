@@ -1,0 +1,26 @@
+{"source": "opentelemetry.io 2025/contrib-unroll-processor.md", "kind": "statement", "text": "set(body, Split(body, \"\\\"},\"))"}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "keep_keys(attributes, [\"host.name\"])"}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "set(description, \"Sum\") where type == \"Sum\""}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "convert_sum_to_gauge() where name == \"system.processes.count\""}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "limit(attributes, 100, [\"host.name\"])"}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "keep_keys(resource.attributes, [\"host.name\"])"}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "set(metric.description, \"Sum\") where metric.type == \"Sum\""}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "convert_sum_to_gauge() where metric.name == \"system.processes.count\""}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "limit(datapoint.attributes, 100, [\"host.name\"])"}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "condition", "text": "resource.attributes[\"service.name\"] == \"my.service\""}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "set(metric.description, \"counter\") where attributes[\"my.attr\"] == \"some\""}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "set(metric.description, \"counter\") where datapoint.attributes[\"my.attr\"] == \"some\""}
+{"source": "opentelemetry.io 2025/ottl-contexts-just-got-easier.md", "kind": "statement", "text": "set(metric.description, \"counter\")"}
+{"source": "opentelemetry.io 2026/lambda-powered-function-land-in-ottl.md", "kind": "statement", "text": "set(span.attributes[\"db.complete\"], true) where All(span.attributes, (k, v) => not HasPrefix(k, \"db.\") or not IsEmpty(v))"}
+{"source": "opentelemetry.io 2026/lambda-powered-function-land-in-ottl.md", "kind": "statement", "text": "merge_maps(span.attributes, MapEach( Filter(span.attributes, (k, v) => IsMatch(k, \"(?i)(email|phone|ssn|credit_card)\")), (_, v) => Format(\"%s (redacted)\", [SHA1(String(v))]) ), \"upsert\")"}
+{"source": "opentelemetry.io 2026/ottl-context-inference-come-to-filterprocessor.md", "kind": "condition", "text": "resource.attributes[\"host.name\"] == \"localhost\""}
+{"source": "opentelemetry.io 2026/ottl-context-inference-come-to-filterprocessor.md", "kind": "condition", "text": "attributes[\"container.name\"] == \"app_container_1\""}
+{"source": "opentelemetry.io 2026/ottl-context-inference-come-to-filterprocessor.md", "kind": "condition", "text": "name == \"app_3\""}
+{"source": "opentelemetry.io 2026/ottl-context-inference-come-to-filterprocessor.md", "kind": "condition", "text": "attributes[\"grpc\"] == true"}
+{"source": "opentelemetry.io 2026/ottl-context-inference-come-to-filterprocessor.md", "kind": "condition", "text": "IsMatch(name, \".*grpc.*\")"}
+{"source": "opentelemetry.io 2026/ottl-context-inference-come-to-filterprocessor.md", "kind": "condition", "text": "log.severity_number < SEVERITY_NUMBER_WARN"}
+{"source": "opentelemetry.io 2026/ottl-context-inference-come-to-filterprocessor.md", "kind": "condition", "text": "resource.attributes[\"service.name\"] == \"noisy-service\""}
+{"source": "opentelemetry.io collector/transforming-telemetry.md", "kind": "condition", "text": "resource.attributes[\"service.name\"] == \"service1\""}
+{"source": "opentelemetry.io collector/transforming-telemetry.md", "kind": "statement", "text": "set(span.status.code, STATUS_CODE_OK) where span.attributes[\"http.request.status_code\"] == 400"}
+{"source": "opentelemetry.io log-deduplication-processor/index.md", "kind": "condition", "text": "severity_number >= SEVERITY_NUMBER_ERROR"}
+{"source": "opentelemetry.io log-deduplication-processor/index.md", "kind": "condition", "text": "attributes[\"log.type\"] == \"connection\""}
