@@ -1,0 +1,359 @@
+package check
+
+import (
+	"fmt"
+	"regexp/syntax"
+	"strconv"
+	"strings"
+
+	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/grafana/alloy/syntax/ast"
+	"github.com/grafana/alloy/syntax/parser"
+)
+
+// alloyEffects reads an Alloy pipeline: prometheus.relabel rules (as
+// Prometheus' metric relabeling), loki.process stages that drop lines or
+// send them elsewhere, and otelcol processors that drop or sample spans.
+func alloyEffects(p report.PipelineDef, path string, src []byte, ix *index) ([]effect, error) {
+	f, err := parser.ParseFile(path, src)
+	if err != nil {
+		return nil, err
+	}
+	blocks := tvtBlocks(src)
+	var out []effect
+	for _, st := range f.Body {
+		b, ok := st.(*ast.BlockStmt)
+		if !ok {
+			continue
+		}
+		name := strings.Join(b.Name, ".")
+		comp := fmt.Sprintf("%s %q", name, b.Label)
+		switch {
+		case name == "prometheus.relabel":
+			var rules []relabelRule
+			for _, rs := range b.Body {
+				rb, ok := rs.(*ast.BlockStmt)
+				if !ok || len(rb.Name) != 1 || rb.Name[0] != "rule" {
+					continue
+				}
+				r, err := alloyRelabelRule(rb)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", comp, err)
+				}
+				rules = append(rules, r)
+			}
+			out = append(out, relabelEffects(p, path, comp, rules, nil, ix, blocks)...)
+		case name == "loki.relabel":
+			out = append(out, lokiRelabelEffects(p, path, comp, b, ix, blocks)...)
+		case name == "loki.process":
+			out = append(out, lokiProcessEffects(p, path, comp, b.Body, nil, ix, blocks)...)
+		case strings.HasPrefix(name, "otelcol.processor."):
+			typ := strings.TrimPrefix(name, "otelcol.processor.")
+			line := ast.StartPos(b).Position().Line
+			switch typ {
+			case "probabilistic_sampler", "tail_sampling", "filter":
+				// Alloy's components take any signal; tvt can't see from
+				// the block alone which pipeline carries spans, so any
+				// span-dropping component may drop record spans.
+				out = append(out, effect{rule: ruleDropMarker, pipeline: p.Name, file: path, component: comp,
+					reason: typ, at: fmt.Sprintf("line %d", line), block: blockAt(blocks, line)})
+				if len(ix.spans) > 0 {
+					out = append(out, effect{rule: RuleRecord, pipeline: p.Name, file: path, component: comp,
+						reason: fmt.Sprintf("%s in an Alloy pipeline may drop record spans (%s): check doesn't evaluate Alloy's otelcol conditions yet", typ, recordSpanText(ix)),
+						at:     fmt.Sprintf("line %d", line), block: blockAt(blocks, line)})
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func recordSpanText(ix *index) string {
+	var ss []string
+	for _, o := range ix.spans {
+		ss = append(ss, o.Where)
+	}
+	return strings.Join(ss, " or ")
+}
+
+func alloyRelabelRule(b *ast.BlockStmt) (relabelRule, error) {
+	var source []string
+	vals := map[string]string{}
+	unreadable := ""
+	for _, st := range b.Body {
+		a, ok := st.(*ast.AttributeStmt)
+		if !ok {
+			continue
+		}
+		n := a.Name.Name
+		if n == "source_labels" {
+			arr, ok := a.Value.(*ast.ArrayExpr)
+			if !ok {
+				unreadable = n
+				continue
+			}
+			for _, el := range arr.Elements {
+				v, ok := literal(el)
+				if !ok {
+					unreadable = n
+					continue
+				}
+				source = append(source, v)
+			}
+			continue
+		}
+		v, ok := literal(a.Value)
+		if !ok {
+			unreadable = n + " isn't a literal"
+			continue
+		}
+		vals[n] = v
+	}
+	line := ast.StartPos(b).Position().Line
+	if unreadable != "" {
+		return relabelRule{Action: strings.ToLower(vals["action"]), Target: vals["target_label"], Line: line, Unreadable: unreadable}, nil
+	}
+	return newRule(source, vals["separator"], vals["regex"], vals["action"], vals["target_label"], vals["replacement"], line)
+}
+
+func literal(e ast.Expr) (string, bool) {
+	l, ok := e.(*ast.LiteralExpr)
+	if !ok {
+		return "", false
+	}
+	if strings.HasPrefix(l.Value, `"`) || strings.HasPrefix(l.Value, "`") {
+		v, err := strconv.Unquote(l.Value)
+		return v, err == nil
+	}
+	return l.Value, true
+}
+
+func attrOf(body ast.Body, name string) (ast.Expr, bool) {
+	for _, st := range body {
+		if a, ok := st.(*ast.AttributeStmt); ok && a.Name.Name == name {
+			return a.Value, true
+		}
+	}
+	return nil, false
+}
+
+// lokiProcessEffects: stage.drop drops lines; stage.match with action
+// "drop" drops the lines its selector picks; a stage.match whose stages
+// drop is scoped to its selector. scope is the enclosing selector.
+func lokiProcessEffects(p report.PipelineDef, path, comp string, body ast.Body, scope []matcher, ix *index, blocks []blockSpan) []effect {
+	var out []effect
+	for _, st := range body {
+		b, ok := st.(*ast.BlockStmt)
+		if !ok {
+			continue
+		}
+		name := strings.Join(b.Name, ".")
+		line := ast.StartPos(b).Position().Line
+		at := fmt.Sprintf("line %d", line)
+		switch name {
+		case "stage.match":
+			sel := scope
+			text := "every stream"
+			if e, ok := attrOf(b.Body, "selector"); ok {
+				s, ok := literal(e)
+				if !ok {
+					out = append(out, effect{rule: RuleFailClosed, pipeline: p.Name, file: path, component: comp, reason: "a stage.match selector that isn't a literal", at: at})
+					continue
+				}
+				ms, ok := selector(s)
+				if !ok {
+					out = append(out, effect{rule: RuleFailClosed, pipeline: p.Name, file: path, component: comp, reason: "a stage.match selector check can't read: " + s, at: at})
+					continue
+				}
+				sel, text = append(append([]matcher{}, scope...), ms...), s
+			}
+			action := "keep"
+			if e, ok := attrOf(b.Body, "action"); ok {
+				action, _ = literal(e)
+			}
+			if action == "drop" {
+				out = append(out, streamDropEffects(p, path, comp, "drops the lines of "+text, sel, at, blockAt(blocks, line), ix)...)
+				continue
+			}
+			out = append(out, lokiProcessEffects(p, path, comp, b.Body, sel, ix, blocks)...)
+		case "stage.drop":
+			text := "drops lines (stage.drop)"
+			out = append(out, streamDropEffects(p, path, comp, text, scope, at, blockAt(blocks, line), ix)...)
+		case "stage.sampling":
+			out = append(out, streamDropEffects(p, path, comp, "samples lines (stage.sampling)", scope, at, blockAt(blocks, line), ix)...)
+		}
+	}
+	return out
+}
+
+func streamDropEffects(p report.PipelineDef, path, comp, what string, sel []matcher, at, block string, ix *index) []effect {
+	out := []effect{{rule: ruleDropMarker, pipeline: p.Name, file: path, component: comp, reason: what, at: at, block: block}}
+	if selectsWarnPlus(sel) {
+		out = append(out, effect{rule: RuleWarnLogs, pipeline: p.Name, file: path, component: comp,
+			reason: what + ", and its selector doesn't rule out warn-and-above lines", at: at, block: block})
+	}
+	for _, s := range ix.of(p.Name, "stream") {
+		ms, ok := selector(s.Name)
+		if ok && !mayOverlap(ms, sel) {
+			continue
+		}
+		out = append(out, effect{rule: ruleFor(s), pipeline: p.Name, file: path, component: comp, signal: s.ID,
+			reason: fmt.Sprintf("%s, which may include %s, %s", what, s.Name, why(s)), at: at, block: block})
+	}
+	return out
+}
+
+// lokiRelabelEffects: a loki.relabel component's drop rules take streams
+// out of whatever it forwards to; its keep rules do too when it forwards
+// to a loki.write (a keep in front of a cold tier only narrows the cold
+// copy).
+func lokiRelabelEffects(p report.PipelineDef, path, comp string, b *ast.BlockStmt, ix *index, blocks []blockSpan) []effect {
+	toLoki := false
+	if e, ok := attrOf(b.Body, "forward_to"); ok {
+		if arr, ok := e.(*ast.ArrayExpr); ok {
+			for _, el := range arr.Elements {
+				if n, ok := refText(el); ok && strings.HasPrefix(n, "loki.write.") {
+					toLoki = true
+				}
+			}
+		}
+	}
+	var out []effect
+	for _, rs := range b.Body {
+		rb, ok := rs.(*ast.BlockStmt)
+		if !ok || len(rb.Name) != 1 || rb.Name[0] != "rule" {
+			continue
+		}
+		r, err := alloyRelabelRule(rb)
+		if err != nil {
+			out = append(out, effect{rule: RuleFailClosed, pipeline: p.Name, file: path, component: comp, reason: err.Error()})
+			continue
+		}
+		if r.Action != "drop" && !(r.Action == "keep" && toLoki) {
+			continue
+		}
+		at := fmt.Sprintf("line %d", r.Line)
+		block := blockAt(blocks, r.Line)
+		what := "drops streams (" + r.text() + ")"
+		out = append(out, effect{rule: ruleDropMarker, pipeline: p.Name, file: path, component: comp, reason: what, at: at, block: block})
+		for _, s := range ix.of(p.Name, "stream") {
+			if streamRuleHits(r, s.Name) == 0 {
+				continue
+			}
+			out = append(out, effect{rule: ruleFor(s), pipeline: p.Name, file: path, component: comp, signal: s.ID,
+				reason: fmt.Sprintf("%s, which may take %s out of Loki, %s", what, s.Name, why(s)), at: at, block: block})
+		}
+		if r.Unreadable == "" && r.Action == "drop" {
+			if streamRuleWarn(r) {
+				out = append(out, effect{rule: RuleWarnLogs, pipeline: p.Name, file: path, component: comp,
+					reason: what + ", which may match warn-and-above streams", at: at, block: block})
+			}
+		}
+	}
+	return out
+}
+
+// streamRuleHits: 0 when the rule surely doesn't act on the stream, 1
+// when it may.
+func streamRuleHits(r relabelRule, sel string) int {
+	if r.Unreadable != "" {
+		return 1
+	}
+	ms, ok := selector(sel)
+	if !ok {
+		return 1
+	}
+	// A literal regex over the source labels (tvt's own stream rules):
+	// each part must be a value the selector's matchers on that label
+	// allow, or the rule can't act on the stream.
+	if lit, ok := literalRegex(r.RegexText); ok && r.Action == "drop" {
+		parts := strings.Split(lit, r.Separator)
+		if len(parts) == len(r.Source) {
+			for i, l := range r.Source {
+				for _, m := range ms {
+					if m.Label == l && !m.matches(parts[i]) {
+						return 0
+					}
+				}
+			}
+			return 1
+		}
+	}
+	known := map[string]string{}
+	for _, m := range ms {
+		if m.Op == "=" {
+			known[m.Label] = m.Value
+		}
+	}
+	src := ""
+	for i, l := range r.Source {
+		v, ok := known[l]
+		if !ok {
+			return 1
+		}
+		if i > 0 {
+			src += r.Separator
+		}
+		src += v
+	}
+	if r.Regex.MatchString(src) == (r.Action == "drop") {
+		return 1
+	}
+	return 0
+}
+
+// streamRuleWarn: a drop rule that reads a level label and whose regex
+// could let a warn-and-above value through: it names one, or has a
+// wildcard. (tvt's own stream rules pin the level exactly.)
+func streamRuleWarn(r relabelRule) bool {
+	reads := false
+	for _, l := range r.Source {
+		switch l {
+		case "level", "severity", "detected_level":
+			reads = true
+		}
+	}
+	if !reads {
+		return false
+	}
+	re := strings.ToLower(r.RegexText)
+	if strings.Contains(re, ".*") || strings.Contains(re, ".+") {
+		return true
+	}
+	for _, lv := range []string{"warn", "error", "fatal", "critical"} {
+		if strings.Contains(re, lv) {
+			return true
+		}
+	}
+	return false
+}
+
+func refText(e ast.Expr) (string, bool) {
+	switch x := e.(type) {
+	case *ast.IdentifierExpr:
+		return x.Ident.Name, true
+	case *ast.AccessExpr:
+		v, ok := refText(x.Value)
+		if !ok {
+			return "", false
+		}
+		return v + "." + x.Name.Name, true
+	}
+	return "", false
+}
+
+// literalRegex: the regex matches exactly one string, which it returns.
+func literalRegex(re string) (string, bool) {
+	r, err := syntax.Parse(re, syntax.Perl)
+	if err != nil {
+		return "", false
+	}
+	r = r.Simplify()
+	if r.Op == syntax.OpLiteral && r.Flags&syntax.FoldCase == 0 {
+		return string(r.Rune), true
+	}
+	if r.Op == syntax.OpEmptyMatch {
+		return "", true
+	}
+	return "", false
+}

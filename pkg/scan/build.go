@@ -292,6 +292,8 @@ func Build(in Inputs) (Output, error) {
 			Expr:        r.Expr,
 			EvaluatedBy: r.EvaluatedBy,
 			Interval:    r.Interval,
+			For:         r.For,
+			Severity:    r.Labels["severity"],
 		}
 		for _, q := range r.Queries {
 			if q.DatasourceUID != "" && !slices.Contains(c.Datasources, q.DatasourceUID) {

@@ -1,6 +1,6 @@
 # S8: check, the safety gate
 
-**Status:** Planned.
+**Status:** In progress (Nov 18). `tvt check` is built (`pkg/check`, `docs/check.md`): items 1 (the gate, its rules and the manifest it reads), 5, 7, 8, 9, 10, 13 and item 12's records part are done, and every tvt-lab fixture is judged as ground truth says (`TestCheckLabFixtures`). Still to do: items 2, 3, 4, 6 (the propose side), 11, 12's delta-counter replicas, the property tests and the GitHub Action.
 
 **Done when:** every unsafe case in ground truth is refused, with the reason in the `check` output.
 

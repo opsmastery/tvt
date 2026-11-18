@@ -45,6 +45,9 @@ type OTTL struct {
 	Experimental bool
 	// Lambda: uses a lambda expression (alpha, behind a feature gate).
 	Lambda bool
+
+	where ottlNode   // the where clause, or the whole condition; nil when none
+	args  []ottlNode // the editor's argument values, in order
 }
 
 // OTTLArg is one editor argument.
@@ -94,7 +97,10 @@ func OTTLStatement(s string) (OTTL, error) {
 	if err := p.end(); err != nil {
 		return OTTL{}, err
 	}
-	o := OTTL{Editor: c.name, Where: whereText}
+	o := OTTL{Editor: c.name, Where: whereText, where: where}
+	for _, a := range c.args {
+		o.args = append(o.args, a.value)
+	}
 	w := &ottlWalk{}
 	w.fn(c.name)
 	for i, a := range c.args {
@@ -144,7 +150,7 @@ func OTTLCondition(s string) (OTTL, error) {
 	}
 	w := &ottlWalk{}
 	w.node(n)
-	o := OTTL{Where: strings.TrimSpace(s), WhereReads: w.reads}
+	o := OTTL{Where: strings.TrimSpace(s), WhereReads: w.reads, where: n}
 	o.finish(w)
 	return o, nil
 }

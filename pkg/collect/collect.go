@@ -186,6 +186,9 @@ type Rule struct {
 	UID string
 	// Interval is how often the rule is evaluated, when known.
 	Interval time.Duration
+	// For is an alert's pending period (for:), zero when it fires on the
+	// first evaluation that holds or when unknown (S8 item 5).
+	For time.Duration
 	// EvaluatedBy is EvaluatedByGrafana when Grafana evaluates the rule and
 	// sends its queries to the datasource on every interval; empty when
 	// the datasource's own ruler does.
