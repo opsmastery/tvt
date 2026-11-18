@@ -1,6 +1,6 @@
 # 0012. Reading the OTTL already in a Collector
 
-Date: 2026-11-16 · Status: accepted (Nov 16): option 2, gated on the corpus test
+Date: 2026-11-16 · Status: accepted (Nov 16): option 2; corpus gate passed Nov 18 (99.8% recognized)
 
 ## Context
 
@@ -20,7 +20,16 @@ Measured on Nov 16, the same way as ADR 0013: importing `pkg/ottl` adds 2.45 MB 
 
 Option 2, a narrow extractor. tvt needs to know which paths a statement reads and changes, not to run it, and the language is frozen, so a grammar written once from the v1 reference stays correct for 1.x. 2.45 MB is about 13% of the binary for that. The parse rate on real configs (the OTTL corpus in the parser tests, SnowOps Labs, partner configs) decides: below 95% of statements recognized, this ADR is reopened for option 1. Until the extractor exists, `check` stays fail-closed on OTTL it can't read.
 
-## Still to do (before S8)
+## Corpus result (Nov 18)
 
-- Collect an OTTL corpus: the contrib docs' examples, the OTel blog posts reviewed Nov 12, tvt-lab's Collector seeds, and SnowOps Labs.
-- Prototype the extractor on that corpus and record the recognized share.
+The prototype is `parse.OTTLStatement` and `parse.OTTLCondition` (`pkg/parse/ottl.go`, `ottl_parser.go`, about 800 lines with no new dependency): a lexer and recursive-descent parser for the v1 grammar that returns, per statement, the editor, its target path, the paths read (all of them, and the where clause's apart), the functions called, and whether any is unknown, experimental or a lambda. `TestOTTLCorpus` is the gate, with `pkg/parse/testdata/ottl-corpus/baseline` at the measured rate.
+
+The corpus (`testdata/ottl-corpus`) has 429 statements and conditions: every example in the contrib READMEs that use OTTL at v0.165.0 (pkg/ottl, the transform, filter, tail sampling and log dedup processors, the routing, count, sum and signal-to-metrics connectors) and the opentelemetry.io OTTL posts and docs page. Eight docs examples are invalid OTTL (unbalanced parentheses, mismatched quotes, uppercase `AND`, PromQL, Go code); they're marked and must fail to parse. Of the other 421:
+
+- 420 recognized (99.76%): parsed, every function known. The miss is LANGUAGE.md's illustrative `sum(...)`, a function no component provides.
+- 389 modeled (92.4%); 31 parse but use a lambda or an experimental `xottl` function, almost all from the xottl README. `check` fails closed on those, as decided.
+- 0 parse failures.
+
+Two named sources added nothing: SnowOps Labs has no OTTL (its traces go through Alloy with no transform or filter), and tvt-lab's Collector config has none of its own yet. The S8 lab seeds add some, and they join the corpus when a benchmark state captures them. Third-party blog posts aren't vendored (license), so they aren't in the measure.
+
+The docs corpus is written by the people who wrote the grammar, so it's the easy case. Partner configs (anonymized, as for the PromQL and LogQL corpora) are the real test; the baseline holds until they arrive, and a drop below 0.95 still reopens this ADR.

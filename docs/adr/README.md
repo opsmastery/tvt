@@ -15,7 +15,7 @@ One decision per file, numbered in the order they were written. A decision that 
 | [0009](0009-fluentbit-exporter-pipelines-source-first.md) | Fluent Bit and exporter pipeline kinds; cut at the source first | Accepted | |
 | [0010](0010-reduce-before-drop.md) | Reduce before drop: the least-lossy order | Accepted | |
 | [0011](0011-records-approvals-end-state.md) | Records, approvals bound to evidence, expected end state | Accepted | |
-| [0012](0012-reading-existing-ottl.md) | Reading the OTTL already in a Collector: a narrow extractor | Accepted; corpus test before S8 | S8 |
+| [0012](0012-reading-existing-ottl.md) | Reading the OTTL already in a Collector: a narrow extractor | Accepted; corpus gate passed Nov 18 (99.8%) | S8 |
 | [0013](0013-alloy-syntax-package.md) | Read Alloy with Grafana's syntax package; write by splicing | Accepted | |
 
 ## Format
