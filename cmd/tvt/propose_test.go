@@ -704,3 +704,23 @@ func TestSelectorLabelsServiceName(t *testing.T) {
 		}
 	}
 }
+
+// TestCapQueue: S9 item 6's per-owner cap keeps each owner's best rows.
+func TestCapQueue(t *testing.T) {
+	var recs []report.Recommendation
+	for i, o := range []string{"a", "a", "b", "a", "", ""} {
+		recs = append(recs, report.Recommendation{ID: string(rune('0' + i)), Owner: o, Proposable: true, Status: report.StatusOpen})
+	}
+	recs = append(recs, report.Recommendation{ID: "x", Owner: "a"}) // not proposable: never counted or cut
+	kept, waiting := capQueue(recs, 1)
+	var ids []string
+	for _, r := range kept {
+		ids = append(ids, r.ID)
+	}
+	if strings.Join(ids, ",") != "0,2,4,x" || len(waiting) != 3 || !strings.Contains(waiting[0].Note, "queued: a already has 1") {
+		t.Errorf("kept %v, waiting %v", ids, waiting)
+	}
+	if k, w := capQueue(recs, 0); len(k) != len(recs) || w != nil {
+		t.Error("0 capped")
+	}
+}

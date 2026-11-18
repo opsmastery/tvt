@@ -98,4 +98,7 @@ type ProposedChange struct {
 	Evidence       string `json:"evidence"`
 	Owner          string `json:"owner,omitempty"`
 	OwnerInferred  bool   `json:"owner_inferred,omitempty"`
+	// Expected is the end state to check after the merge (S9 item 5;
+	// tvt verify, S11).
+	Expected Expected `json:"expected"`
 }
