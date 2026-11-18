@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 	"github.com/prometheus/common/model"
 )
@@ -339,17 +341,25 @@ func buildManifests(cfg *config.Config, in report.Input) map[string]report.Manif
 		det.ObjectivesSec[sev] = d.Seconds()
 	}
 	var gaps []report.ManifestGap
+	var unselected []string
 	for _, g := range report.Build(in, 0).Gaps {
+		if g.Source == scan.SourceMonitors {
+			if m := unselectedRe.FindStringSubmatch(g.Text); m != nil {
+				unselected = append(unselected, m[1]+" "+m[2])
+			}
+		}
 		if !g.Acknowledged {
 			gaps = append(gaps, report.ManifestGap{Source: g.Source, Gap: g.Text})
 		}
 	}
+	sort.Strings(unselected)
 	for r, m := range ms {
 		for _, p := range cfg.Pipelines {
 			if p.Repo != r {
 				continue
 			}
-			d := report.PipelineDef{Name: p.Name, Kind: p.Kind, Files: p.Files, Build: p.Build, Version: p.Version, Handles: p.Handles}
+			d := report.PipelineDef{Name: p.Name, Kind: p.Kind, Files: p.Files, Build: p.Build, Version: p.Version, Handles: p.Handles,
+				Replicas: p.Replicas, LoadBalanced: p.LoadBalanced, Cold: p.Cold}
 			if h := p.HelmValues; h != nil {
 				d.HelmValues = &report.ManifestHelm{File: h.File, Path: h.Path, Defaults: h.Defaults}
 			}
@@ -364,6 +374,7 @@ func buildManifests(cfg *config.Config, in report.Input) map[string]report.Manif
 			m.Alerts = alerts
 		}
 		m.Detection = det
+		m.UnselectedMonitors = unselected
 		ms[r] = m
 	}
 	return ms
@@ -388,3 +399,7 @@ func detectionOf(cfg *config.Config) (map[string]time.Duration, time.Duration) {
 	}
 	return obj, gw
 }
+
+// unselectedRe reads scan.MonitorSelection's gap line for a monitor no
+// server selects.
+var unselectedRe = regexp.MustCompile(`^(ServiceMonitor|PodMonitor) (\S+/\S+) is selected by no `)

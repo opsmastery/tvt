@@ -119,6 +119,14 @@ type Pipeline struct {
 	// can't work out from the manifests (prometheus-operator pipelines: a
 	// ServiceMonitor whose Service isn't in them, such as the apiserver's).
 	MonitorJobs map[string]string `yaml:"monitor_jobs"`
+	// Replicas is how many Collector replicas run this config (otelcol
+	// pipelines; default 1), and LoadBalanced says a load-balancing
+	// exporter in front routes each series to one replica. A delta-counter
+	// label removal needs one Collector to see every session (S8 item
+	// 12): with several replicas and no load balancing, tvt doesn't
+	// propose it and check refuses it.
+	Replicas     int  `yaml:"replicas"`
+	LoadBalanced bool `yaml:"load_balanced"`
 }
 
 // Detection: worst-case detection delay objectives by alert severity

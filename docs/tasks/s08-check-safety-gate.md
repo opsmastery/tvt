@@ -1,6 +1,6 @@
 # S8: check, the safety gate
 
-**Status:** In progress (Nov 18). `tvt check` is built (`pkg/check`, `docs/check.md`): items 1 (the gate, its rules and the manifest it reads), 5, 7, 8, 9, 10, 13 and item 12's records part are done, and every tvt-lab fixture is judged as ground truth says (`TestCheckLabFixtures`). Still to do: items 2, 3, 4, 6 (the propose side), 11, 12's delta-counter replicas, the property tests and the GitHub Action.
+**Status:** Must haves done (Nov 18). `tvt check` (`pkg/check`, `docs/check.md`) covers items 1 to 13, every tvt-lab fixture is judged as ground truth says (`TestCheckLabFixtures`), `TestPropertyRelabel` checks 2,000 random relabel configs against Prometheus' relabel engine, and the repo is a GitHub Action. Item 4's replay runs in `propose --replay-prom`. Item 6's propose side (rewriting count queries over a collapse) waits for S10, when tvt first proposes a collapse; until then check refuses any collapse of a read stream. Item 3 holds back whole drops tvt still proposes for ad hoc-read metrics until S10's less lossy actions. Should haves open: 1 (M3 and M7 have each passed by hand once; the item asks for twice) and 2 (optional).
 
 **Done when:** every unsafe case in ground truth is refused, with the reason in the `check` output.
 

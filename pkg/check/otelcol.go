@@ -274,7 +274,24 @@ func otelcolEffects(p report.PipelineDef, path string, src []byte, ix *index, fi
 					}
 				}
 			case "logdedup":
-				add(effect{rule: RuleCollapse, component: comp, reason: "collapses repeated log lines: every count_over_time, rate or bytes_over_time over them changes unless rewritten to sum the count attribute", at: at})
+				// A collapse changes every count over the lines (S8 item 6).
+				// Records are never collapsed; read streams need their count
+				// queries rewritten to sum the count attribute, which check
+				// can't see offline, so it refuses until an owner confirms.
+				drops = true
+				add(effect{rule: ruleDropMarker, component: comp, reason: "collapses repeated log lines", at: at})
+				readStreams := len(ix.of(p.Name, "stream")) > 0
+				for _, s := range ix.read[p.Name] {
+					if s.Kind == "stream" {
+						readStreams = true
+					}
+				}
+				if len(ix.logEvents) > 0 && pl.signal == "logs" {
+					add(effect{rule: RuleRecord, component: comp, reason: "logdedup collapses log lines, and records (agent tool-call events) are never collapsed (ADR 0011)", at: at})
+				}
+				if readStreams {
+					add(effect{rule: RuleCollapse, component: comp, reason: "collapses repeated lines of streams something reads: every count_over_time, rate or bytes_over_time over them changes unless rewritten to sum the count attribute (S8 item 6)", at: at})
+				}
 			}
 			// Steps tvt can't model run before anything after them.
 			for _, s := range append(append([]stmt{}, conds...), stmts...) {
@@ -306,6 +323,9 @@ func otelcolEffects(p report.PipelineDef, path string, src []byte, ix *index, fi
 					}
 					sat := fmt.Sprintf("line %d", s.line)
 					add(effect{rule: ruleDropMarker, component: comp, reason: "drops " + pl.signal + " where " + shorten(s.text, 100), at: sat})
+					if pl.signal == "logs" && !textGuard(s.text) {
+						add(effect{rule: RuleErrorGuard, component: comp, reason: fmt.Sprintf("the log filter %q has no `and not IsMatch(log.body, %q)` keeping the error pattern (S8 item 2)", shorten(s.text, 80), "(?i)"+guardText), at: sat})
+					}
 					for _, r := range s.o.WhereReads {
 						key := normPath(r)
 						if by, ok := setLater[key]; ok && set[key] == "" {
@@ -340,7 +360,43 @@ func otelcolEffects(p report.PipelineDef, path string, src []byte, ix *index, fi
 		}
 	}
 	out = append(out, buildEffects(p, path, c, files)...)
+	out = append(out, replicaEffects(p, path, c)...)
 	return out, nil
+}
+
+// replicaEffects: a metrics pipeline that deletes datapoint attributes
+// and then sums with delta_to_cumulative (the delta-counter label
+// removal) is wrong behind several replicas with no load balancing: each
+// replica sums only the sessions it sees (S8 item 12).
+func replicaEffects(p report.PipelineDef, path string, c *otelConfig) []effect {
+	if p.Replicas <= 1 || p.LoadBalanced {
+		return nil
+	}
+	var out []effect
+	for _, pl := range c.pipelines {
+		if pl.signal != "metrics" {
+			continue
+		}
+		deletes := ""
+		for _, id := range pl.processors {
+			switch typeOf(id) {
+			case "transform":
+				for _, s := range otelStatements(field(c.processors[id], "metric_statements"), false) {
+					if s.err == nil && deletedKeys(s.o) != nil && normPath(s.o.Target) == "attributes" {
+						deletes = id
+					}
+				}
+			case "delta_to_cumulative":
+				if deletes != "" {
+					out = append(out, effect{rule: RuleDeltaReplicas, pipeline: p.Name, file: path, component: "processor " + deletes + " in " + pl.name,
+						reason: fmt.Sprintf("removes labels from delta counters before delta_to_cumulative, but %d Collector replicas run this config with no load-balancing exporter in front: each sums only the sessions it sees", p.Replicas),
+						at:     fmt.Sprintf("line %d", lineOf(c.processors[deletes]))})
+					deletes = ""
+				}
+			}
+		}
+	}
+	return out
 }
 
 func lineOf(n *yaml.Node) int {

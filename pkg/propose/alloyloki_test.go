@@ -14,8 +14,9 @@ func TestAlloyRoutes(t *testing.T) {
 	}
 	s := string(out)
 	for _, want := range []string{
-		"  // tvt:original forward_to = [loki.write.loki.receiver, loki.process.cloud.receiver]\n  forward_to = [loki.relabel.tvt_hot.receiver, loki.relabel.tvt_cold.receiver]\n",
-		"loki.relabel \"tvt_hot\" {\n  rule {\n    source_labels = [\"app\", \"component\", \"level\"]\n    separator     = \";\"\n    regex         = \"shop;api;info\"\n    action        = \"drop\"\n  }\n  forward_to = [loki.write.loki.receiver, loki.process.cloud.receiver]\n}",
+		"  // tvt:original forward_to = [loki.write.loki.receiver, loki.process.cloud.receiver]\n  forward_to = [loki.process.tvt_hot.receiver, loki.relabel.tvt_cold.receiver]\n",
+		// The hot side drops the stream's lines but the error pattern's (S8 item 2).
+		"loki.process \"tvt_hot\" {\n  stage.match {\n    selector = \"{app=\\\"shop\\\", component=\\\"api\\\", level=\\\"info\\\"} !~ \\\"(?i)error|exception|traceback|critical|fatal\\\"\"\n    action   = \"drop\"\n  }\n  forward_to = [loki.write.loki.receiver, loki.process.cloud.receiver]\n}",
 		"    action        = \"keep\"\n  }\n  forward_to = [loki.write.cold.receiver]\n}\n// tvt:end\n",
 	} {
 		if !strings.Contains(s, want) {
@@ -33,7 +34,7 @@ func TestAlloyRoutes(t *testing.T) {
 	r2 := r
 	r2.ID, r2.Stream = "reroute:shop-warn", map[string]string{"app": "shop", "component": "api", "level": "warn"}
 	out, err = AlloyRoutes([]byte(src), []Route{r, r2})
-	if err != nil || strings.Count(string(out), `action        = "drop"`) < 2 || !strings.Contains(string(out), `regex         = "(?:shop;api;info|shop;api;warn)"`) {
+	if err != nil || strings.Count(string(out), `action   = "drop"`) < 2 || !strings.Contains(string(out), `regex         = "(?:shop;api;info|shop;api;warn)"`) {
 		t.Errorf("two streams: %v\n%s", err, out)
 	}
 	if _, err := AlloyRoutes(read(t, "config.alloy"), []Route{r}); err == nil || !strings.Contains(err.Error(), "no component loki.write.cold") {

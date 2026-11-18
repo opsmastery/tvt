@@ -275,7 +275,7 @@ func TestProposeFluentBit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
-	for _, want := range []string{"a/fluent-bit/fluent-bit.yaml", "+    - name: rewrite_tag", "+      rule: $log ^.*$ tvt.cold.shop.debug false"} {
+	for _, want := range []string{"a/fluent-bit/fluent-bit.yaml", "+    - name: rewrite_tag", "+      rule: $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ tvt.cold.shop.debug false"} {
 		if !strings.Contains(string(patch), want) {
 			t.Errorf("patch lacks %q:\n%s", want, patch)
 		}
@@ -590,7 +590,7 @@ func TestProposeFluentBitClassic(t *testing.T) {
 		Signal: report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel}, Proposable: true}
 	p := config.Pipeline{Name: "fb", Kind: "fluentbit", Files: []string{"fluent-bit.conf"}, Cold: "cold"}
 	written, skipped, diff := proposeFluentBit(p, []report.Recommendation{rec}, root, 3, func(string, string, []byte) error { return nil })
-	if len(written) != 1 || len(skipped) != 0 || !strings.Contains(diff, "+[FILTER]") || !strings.Contains(diff, "+    Rule         $log ^.*$ tvt.cold.shop.debug false") {
+	if len(written) != 1 || len(skipped) != 0 || !strings.Contains(diff, "+[FILTER]") || !strings.Contains(diff, "+    Rule         $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ tvt.cold.shop.debug false") {
 		t.Errorf("written %d skipped %+v\n%s", len(written), skipped, diff)
 	}
 }
@@ -615,7 +615,7 @@ func TestProposeFluentBitHelm(t *testing.T) {
 		Signal: report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel}, Proposable: true}
 	p := config.Pipeline{Name: "fb", Kind: "fluentbit", Cold: "cold", HelmValues: &config.HelmValues{File: "values.yaml", Defaults: "chart-values.yaml"}}
 	written, skipped, diff := proposeFluentBitHelm(p, []report.Recommendation{rec}, root, 3, func(string, string, []byte) error { return nil })
-	if len(written) != 1 || len(skipped) != 0 || !strings.Contains(diff, "+        Name kubernetes") || !strings.Contains(diff, "+        Rule         $log ^.*$ tvt.cold.shop.debug false") {
+	if len(written) != 1 || len(skipped) != 0 || !strings.Contains(diff, "+        Name kubernetes") || !strings.Contains(diff, "+        Rule         $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ tvt.cold.shop.debug false") {
 		t.Errorf("written %d skipped %+v\n%s", len(written), skipped, diff)
 	}
 }
@@ -634,7 +634,7 @@ func TestProposeFluentOperator(t *testing.T) {
 		Signal: report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel}, Proposable: true}
 	p := config.Pipeline{Name: "fo", Kind: "fluentbit", Files: []string{"logging.yaml"}, Cold: "cold"}
 	written, skipped, diff := proposeFluentBit(p, []report.Recommendation{rec}, root, 3, func(string, string, []byte) error { return nil })
-	if len(written) != 1 || len(skipped) != 0 || !strings.Contains(diff, "+kind: ClusterFilter") || !strings.Contains(diff, `+          - "$log ^.*$ tvt.cold.shop.debug false"`) {
+	if len(written) != 1 || len(skipped) != 0 || !strings.Contains(diff, "+kind: ClusterFilter") || !strings.Contains(diff, `+          - "$log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ tvt.cold.shop.debug false"`) {
 		t.Errorf("written %d skipped %+v\n%s", len(written), skipped, diff)
 	}
 }

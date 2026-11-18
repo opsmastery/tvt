@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -185,4 +186,58 @@ func (c *Client) Probe(ctx context.Context, nonce string) error {
 		return err
 	}
 	return body.Close()
+}
+
+// Sample is one series of an instant query's result.
+type Sample struct {
+	Labels map[string]string
+	Value  float64
+}
+
+// Replay runs an instant query tvt replays before a label removal (S8
+// item 4). The query must start with collect.ReplayComment, so query log
+// readers drop it from usage; it's refused otherwise.
+func (c *Client) Replay(ctx context.Context, query string) ([]Sample, error) {
+	if !collect.IsReplay(query) {
+		return nil, fmt.Errorf("prometheus: a replayed query must start with %q", collect.ReplayComment)
+	}
+	var d struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Metric map[string]string `json:"metric"`
+			Value  [2]any            `json:"value"`
+		} `json:"result"`
+	}
+	body, err := c.getWith(ctx, "/api/v1/query", url.Values{"query": {query}}, http.Header{"X-Query-Tags": {collect.ReplayTag}})
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	var env struct {
+		Status string          `json:"status"`
+		Data   json.RawMessage `json:"data"`
+		Error  string          `json:"error"`
+	}
+	if err := json.NewDecoder(io.LimitReader(body, 64<<20)).Decode(&env); err != nil {
+		return nil, err
+	}
+	if env.Status != "success" {
+		return nil, fmt.Errorf("prometheus: query: %s", env.Error)
+	}
+	if err := json.Unmarshal(env.Data, &d); err != nil {
+		return nil, err
+	}
+	if d.ResultType != "vector" {
+		return nil, fmt.Errorf("prometheus: replay wants an instant vector, got %s", d.ResultType)
+	}
+	out := make([]Sample, 0, len(d.Result))
+	for _, r := range d.Result {
+		s, _ := r.Value[1].(string)
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return nil, fmt.Errorf("prometheus: replay value %q", s)
+		}
+		out = append(out, Sample{Labels: r.Metric, Value: v})
+	}
+	return out, nil
 }

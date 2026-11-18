@@ -1,0 +1,58 @@
+name: tvt check
+description: >
+  Refuse a pipeline config change that drops, samples or strips telemetry an
+  alert, SLO, viewed dashboard or record needs (tvt check, offline, no
+  credentials). Needs the repo's committed protection manifest.
+branding:
+  icon: shield
+  color: green
+inputs:
+  manifest:
+    description: The protection manifest, relative to the repo root.
+    default: .tvt/protect.json
+  base:
+    description: Git ref of the version before the change. Defaults to the pull request's base branch.
+    default: ''
+  max-age:
+    description: How old the manifest may be (Go duration).
+    default: 168h
+  skip-confirmation:
+    description: Judge safety only, without requiring an owner confirmation for drops (true/false).
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    # tvt is built from this action's own ref, so the gate is exactly the
+    # code you pinned (uses: Opsmastery-Summit/tvt@<tag or sha>).
+    - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+        cache: false
+    - name: Build tvt
+      shell: bash
+      run: |
+        cd "$GITHUB_ACTION_PATH"
+        CGO_ENABLED=0 go build -o "$RUNNER_TEMP/tvt" ./cmd/tvt
+    - name: tvt check
+      shell: bash
+      env:
+        BASE: ${{ inputs.base }}
+        BASE_REF: ${{ github.base_ref }}
+        MANIFEST: ${{ inputs.manifest }}
+        MAX_AGE: ${{ inputs.max-age }}
+        SKIP: ${{ inputs.skip-confirmation }}
+      run: |
+        set -euo pipefail
+        base="$BASE"
+        if [[ -z "$base" ]]; then
+          if [[ -z "$BASE_REF" ]]; then
+            echo "tvt check: no base: run on pull_request, or set the base input" >&2
+            exit 2
+          fi
+          # Checkout with fetch-depth: 0, or the base isn't there.
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          base="origin/$BASE_REF"
+        fi
+        args=(check --base "$base" --manifest "$MANIFEST" --max-age "$MAX_AGE")
+        if [[ "$SKIP" == "true" ]]; then args+=(--skip-confirmation); fi
+        "$RUNNER_TEMP/tvt" "${args[@]}"
