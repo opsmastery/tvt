@@ -17,10 +17,10 @@ build:
 test:
 	go test ./...
 
-# cmd/tvt runs about 40 s plainly and near 10 minutes under -race on CI
-# runners, Go's default timeout, so race gets room.
+# cmd/tvt runs about 90 s plainly and near 18 minutes under -race on CI
+# runners, past Go's default timeout, so race gets room.
 race:
-	go test -race -timeout 20m ./...
+	go test -race -timeout 40m ./...
 
 # The ground-truth benchmark (S5 item 1): scores evidence found and
 # recommendation precision and recall on the frozen lab states in

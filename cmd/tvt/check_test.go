@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,8 +25,28 @@ const labRepo = "github.com/Opsmastery-Summit/tvt-lab"
 // capture predates tvt-lab's S8 seeds, so the metric the count connector
 // makes is added as the next scan will find it: a hard keep that
 // ShopErrorLogBurst reads.
+// It is built once (a benchmark DB and a report take seconds, minutes
+// under -race) and each caller gets its own copy to change.
 func labManifest(t *testing.T) report.Manifest {
 	t.Helper()
+	labOnce.Do(func() { labJSON, labErr = buildLabManifest(t) })
+	if labErr != nil {
+		t.Fatal(labErr)
+	}
+	var m report.Manifest
+	if err := json.Unmarshal(labJSON, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+var (
+	labOnce sync.Once
+	labJSON []byte
+	labErr  error
+)
+
+func buildLabManifest(t *testing.T) ([]byte, error) {
 	bm, dirs := loadBenchmark(t)
 	var st benchState
 	for _, s := range bm.States {
@@ -35,20 +57,20 @@ func labManifest(t *testing.T) report.Manifest {
 	db := benchDB(t, st, dirs[st.Name])
 	in, _, err := readLatest(context.Background(), db)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	cfg, err := config.Load(filepath.Join(dirs[st.Name], "tvt-lab.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	m, ok := buildManifests(cfg, in)[labRepo]
 	if !ok {
-		t.Fatalf("no manifest for %s", labRepo)
+		return nil, fmt.Errorf("no manifest for %s", labRepo)
 	}
 	m.Signals = append(m.Signals, report.ProtectedSignal{ID: "prom:metric:shop_error_log_lines_total", Kind: "metric",
 		Name: "shop_error_log_lines_total", Pipeline: "otelcol-agent", Class: "hard_keep",
 		Protectors: []report.Protector{{Kind: "alert_rule", Name: "ShopErrorLogBurst", Evidence: "declared", Exact: true}}})
-	return m
+	return json.Marshal(m)
 }
 
 type checkExpect struct {
