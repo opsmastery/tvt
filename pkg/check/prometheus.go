@@ -111,7 +111,11 @@ func prometheusEffects(p report.PipelineDef, path string, src []byte, ix *index)
 // (prometheus-operator pipelines). The jobs a monitor makes depend on its
 // Service, so every protected metric of the pipeline is judged against
 // every monitor.
-func operatorEffects(p report.PipelineDef, path string, src []byte, ix *index) ([]effect, error) {
+func operatorEffects(p report.PipelineDef, path string, src []byte, ix *index, unselectedList []string) ([]effect, error) {
+	unselected := map[string]bool{}
+	for _, u := range unselectedList {
+		unselected[u] = true
+	}
 	blocks := tvtBlocks(src)
 	dec := yaml.NewDecoder(strings.NewReader(string(src)))
 	var out []effect
@@ -145,6 +149,7 @@ func operatorEffects(p report.PipelineDef, path string, src []byte, ix *index) (
 				return nil, fmt.Errorf("%s %s: %w", kind, name, err)
 			}
 			out = append(out, relabelEffects(p, path, fmt.Sprintf("%s %s endpoint %d", kind, name, i), rules, nil, ix, blocks)...)
+			out = append(out, unselectedEffects(p, path, kind, name, ep, unselected)...)
 		}
 	}
 	return out, nil
@@ -190,6 +195,14 @@ func fluentbitEffects(p report.PipelineDef, path string, src []byte, ix *index) 
 		comp := "filter " + name + " match " + scalar(f, "match")
 		out = append(out, effect{rule: ruleDropMarker, pipeline: p.Name, file: path, component: comp, reason: what,
 			at: fmt.Sprintf("line %d", f.Line), block: blockAt(blocks, f.Line)})
+		if name == "grep" && p.Cold != "" {
+			out = append(out, effect{rule: RuleLeastLossy, pipeline: p.Name, file: path, component: comp,
+				reason: "grep drops lines outright: reroute them to the " + p.Cold + " output with rewrite_tag first (ADR 0010: drops are staged)", at: fmt.Sprintf("line %d", f.Line), block: blockAt(blocks, f.Line)})
+		}
+		ruleText := strings.Join(append(strs(field(f, "rule")), append(strs(field(f, "exclude")), strs(field(f, "regex"))...)...), " ")
+		if !textGuard(ruleText) {
+			out = append(out, guardEffect(p, path, comp, what+" with no negative lookahead keeping the error pattern", fmt.Sprintf("line %d", f.Line), blockAt(blocks, f.Line)))
+		}
 		for _, s := range ix.of(p.Name, "stream") {
 			rule := ruleFor(s)
 			reason := fmt.Sprintf("may take lines of %s from Loki, %s", s.Name, why(s))

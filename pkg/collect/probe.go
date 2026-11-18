@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // Query-log probe (Sprint 2 item 4). A scan proves a query log is being
@@ -72,4 +73,17 @@ func LokiProbeNonce(expr string) (nonce string, ok bool) {
 type ProbeSource interface {
 	// ProbeSeen reports whether the log holds the marker for nonce.
 	ProbeSeen(ctx context.Context, nonce string) (bool, error)
+}
+
+// ReplayComment starts every query tvt replays before a label removal
+// (S8 item 4): a PromQL comment, so the query log keeps it with the query
+// text and every reader drops the query from usage, as it does the probe.
+const ReplayComment = "# tvt-replay"
+
+// ReplayTag is the X-Query-Tags value replayed queries carry.
+const ReplayTag = "Source=tvt-replay"
+
+// IsReplay: a logged query is one of tvt's replays.
+func IsReplay(expr string) bool {
+	return strings.HasPrefix(strings.TrimSpace(expr), ReplayComment)
 }

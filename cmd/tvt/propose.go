@@ -41,6 +41,10 @@ type proposeOptions struct {
 	Runtime  string
 	// GitHub opens the draft PRs (--output pr); its token is GITHUB_TOKEN.
 	GitHub vcs.GitHub
+	// ReplayProm is the Prometheus API that protected queries are replayed
+	// against before a label removal (S8 item 4); empty: no replay.
+	ReplayProm string
+	replay     replayer // tests
 }
 
 // prBranch is the branch tvt pushes in each pipeline repo. It's stable,
@@ -77,6 +81,7 @@ func cmdPropose(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.Validate, "validate", "auto", "run each pipeline's own validator on the changed config: auto (when promtool, alloy, otelcol-contrib, fluent-bit or a container runtime is available), require (skip what can't be validated), off")
 	fs.Var(o.Images, "validator-image", "kind=image: validate that pipeline kind with this image, your distribution and version (repeatable)")
 	fs.StringVar(&o.Runtime, "container-runtime", "", "podman or docker for validators not on PATH (default: whichever answers; none: never)")
+	fs.StringVar(&o.ReplayProm, "replay-prom", "", "Prometheus (or Mimir's Prometheus API) to replay protected queries against before a label removal: as written and without the label; a query that goes empty or changes its grouping blocks the removal (token in TVT_PROM_TOKEN)")
 	fs.Var(o.Checkouts, "checkout", "repo=path: a pipeline repo's local checkout, as tvt.yaml names the repo (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -162,6 +167,16 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 	}
 	byPipeline := map[string][]report.Recommendation{}
 	var skipped []proposal
+	var replayLines map[string][]string
+	if o.ReplayProm != "" || o.replay != nil {
+		rp := o.replay
+		if rp == nil {
+			rp = newReplayer(o.ReplayProm)
+		}
+		var blocked []proposal
+		r.Recommendations, blocked, replayLines = replayLabelRemovals(ctx, in, r.Recommendations, rp)
+		skipped = append(skipped, blocked...)
+	}
 	for _, rec := range r.Recommendations {
 		switch {
 		case !rec.Proposable:
@@ -198,6 +213,23 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 	for name, recs := range byPipeline {
 		for _, rec := range recs {
 			skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + name + " isn't in " + o.Config})
+		}
+	}
+	// Replay results go with the validation notes, per repo. Without a
+	// backend to replay against, a written label removal says so.
+	replayed := o.ReplayProm != "" || o.replay != nil
+	for _, p := range cfg.Pipelines {
+		for _, l := range replayLines[p.Name] {
+			v.notes = append(v.notes, p.Repo+" replay: "+l)
+		}
+		if replayed {
+			continue
+		}
+		for _, w := range written {
+			if w.Rec.Pipeline == p.Name && w.Rec.Action == report.ActionLabelRemoval {
+				v.notes = append(v.notes, p.Repo+" replay: not run (no --replay-prom): protected queries weren't replayed without the label")
+				break
+			}
 		}
 	}
 	if err := writeProposals(o, r.Scan.ID, patches, written, skipped, v.notes, v.build, out); err != nil {
@@ -699,6 +731,10 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 	var labels []report.Recommendation
 	for _, rec := range recs {
 		if rec.Action == report.ActionLabelRemoval {
+			if p.Replicas > 1 && !p.LoadBalanced {
+				skipped = append(skipped, proposal{Rec: rec, Note: fmt.Sprintf("%d Collector replicas with no load-balancing exporter in front: summing over a label needs one Collector to see every session (tvt.yaml pipelines[].load_balanced)", p.Replicas)})
+				continue
+			}
 			if _, matchable := propose.OtelConditions(rec.Signal.Parent); !matchable {
 				skipped = append(skipped, proposal{Rec: rec, Note: "its metric may be one series of an OTel histogram"})
 				continue

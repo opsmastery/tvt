@@ -12,7 +12,7 @@ func TestFluentBitClassic(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "    Emitter_Name tvt_cold_shop_debug\n\n# tvt:end\n# Loki: the shop's debug api stream.\n[OUTPUT]"
-	if !strings.Contains(string(out), want) || !strings.Contains(string(out), "[FILTER]\n    Name         rewrite_tag\n    Match        shop.debug\n    Rule         $log ^.*$ tvt.cold.shop.debug false\n") {
+	if !strings.Contains(string(out), want) || !strings.Contains(string(out), "[FILTER]\n    Name         rewrite_tag\n    Match        shop.debug\n    Rule         $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ tvt.cold.shop.debug false\n") {
 		t.Errorf("output:\n%s", out)
 	}
 	onlyAdded(t, src, out)

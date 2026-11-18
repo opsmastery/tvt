@@ -234,6 +234,29 @@ func relabelEffects(p report.PipelineDef, path, component string, rules []relabe
 	for _, s := range ix.of(p.Name, "metric") {
 		judge(s, s.Name, "")
 	}
+	// Read but unprotected metrics: a drop is refused when a less lossy
+	// action keeps their readers (S8 item 3).
+	for _, s := range ix.read[p.Name] {
+		if s.Kind != "metric" {
+			continue
+		}
+		js := commonJobs(jobs, s.Jobs)
+		if jobs != nil && s.Jobs != nil && len(js) == 0 {
+			continue
+		}
+		if len(js) == 0 {
+			js = []string{""}
+		}
+		for _, j := range js {
+			o := evalRelabel(rules, s.Name, j, "")
+			if o.dropped == parse.False {
+				continue
+			}
+			out = append(out, effect{rule: RuleLeastLossy, pipeline: p.Name, file: path, component: component, signal: s.ID,
+				reason: lessLossy(s) + " (" + o.by.text() + ")", at: fmt.Sprintf("line %d", o.by.Line), block: blockAt(blocks, o.by.Line)})
+			break
+		}
+	}
 	for _, s := range ix.of(p.Name, "label") {
 		judge(s, s.Parent, s.Name)
 	}
