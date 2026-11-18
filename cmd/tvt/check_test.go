@@ -308,3 +308,119 @@ func TestCheckCLI(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckOwnerConfirmation is S9 item 2 on the lab's scrape config: a
+// tvt block's drop needs its owner's confirmation at the evidence the
+// manifest has now, and a new reader since makes the confirmation stale.
+func TestCheckOwnerConfirmation(t *testing.T) {
+	m := labManifest(t)
+	m.GeneratedAt = time.Now()
+	m.Gaps = nil
+	const sig = "prom:metric:prometheus_tsdb_head_series"
+	m.Evidence = []report.ManifestEvidence{{Signal: sig, Recommendation: "drop:" + sig, Hash: "aaaaaaaaaaaa", Readers: []string{}, Gaps: []string{}, Owner: "@jasonvance"}}
+	lab := dirFiles("../../testdata/check/lab")
+	src, err := lab("prometheus/scrape/lab.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(src), `      - targets: ["localhost:9090"]
+`, `      - targets: ["localhost:9090"]
+    metric_relabel_configs:
+    # tvt:begin prometheus-scrape/prometheus scan=1 evidence=aaaaaaaaaaaa
+    - source_labels: [__name__]
+      regex: "prometheus_tsdb_head_series"
+      action: drop
+    # tvt:end
+`, 1)
+	if edited == string(src) {
+		t.Fatal("the lab's scrape config changed: update the test's anchor")
+	}
+	head := func(p string) ([]byte, error) {
+		if p == "prometheus/scrape/lab.yml" {
+			return []byte(edited), nil
+		}
+		return lab(p)
+	}
+	proposal := &report.Proposal{Scan: 1, Pipelines: map[string][]report.ProposedChange{
+		"prometheus-scrape": {{Recommendation: "drop:" + sig, Signal: sig, Evidence: "aaaaaaaaaaaa", Owner: "@jasonvance"}}}}
+	rules := func(r check.Result) []string {
+		var out []string
+		for _, f := range r.Findings {
+			out = append(out, f.Rule+": "+f.Reason)
+		}
+		return out
+	}
+	in := check.Input{Manifest: m, Base: lab, Head: head, Now: time.Now(), Proposal: proposal}
+	if r := check.Run(in); r.Pass() || r.Findings[0].Rule != check.RuleUnconfirmed || !strings.Contains(r.Findings[0].Reason, "@jasonvance hasn't confirmed") {
+		t.Errorf("unconfirmed: %v", rules(r))
+	}
+	in.Decisions = []report.Decision{{Signal: sig, Action: report.DecisionConfirm, Owner: "@jasonvance", Evidence: "aaaaaaaaaaaa"}}
+	if r := check.Run(in); !r.Pass() {
+		t.Errorf("confirmed at the current evidence, still refused: %v", rules(r))
+	}
+	// A new reader since the owner looked.
+	in.Manifest.Evidence = []report.ManifestEvidence{{Signal: sig, Recommendation: "drop:" + sig, Hash: "bbbbbbbbbbbb", Readers: []string{"dashboard_panel:s9-reader/1"}, Gaps: []string{}}}
+	if r := check.Run(in); r.Pass() || r.Findings[0].Rule != check.RuleStaleConfirm || !strings.Contains(r.Findings[0].Reason, "dashboard_panel:s9-reader/1") {
+		t.Errorf("stale: %v", rules(r))
+	}
+	// No longer recommended at all.
+	in.Manifest.Evidence = nil
+	if r := check.Run(in); r.Pass() || r.Findings[0].Rule != check.RuleStaleConfirm {
+		t.Errorf("gone: %v", rules(r))
+	}
+}
+
+// TestConfirm: tvt confirm writes the decision with the report's evidence
+// hash, replaces an earlier one for the same signal, and --all takes the
+// owner's recommendations from the proposal.
+func TestConfirm(t *testing.T) {
+	dir := t.TempDir()
+	rep := report.Report{Recommendations: []report.Recommendation{
+		{ID: "drop:prom:metric:a_total", Signal: report.SignalRef{ID: "prom:metric:a_total", Name: "a_total"}, Owner: "team-a", EvidenceHash: "111111111111"},
+		{ID: "drop:prom:metric:b_total", Signal: report.SignalRef{ID: "prom:metric:b_total", Name: "b_total"}, Owner: "team-b", EvidenceHash: "222222222222"},
+	}}
+	b, _ := json.Marshal(rep)
+	rp := filepath.Join(dir, "r.json")
+	if err := os.WriteFile(rp, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)
+	var out strings.Builder
+	if err := runConfirm(confirmOptions{Report: rp, Dir: dir, Owner: "team-a", Now: now}, []string{"a_total"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if err := runConfirm(confirmOptions{Report: rp, Dir: dir, Owner: "team-b", Keep: "read at year end", Now: now}, []string{"drop:prom:metric:b_total"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	read := func() report.Decisions {
+		b, err := os.ReadFile(filepath.Join(dir, report.DecisionsPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var d report.Decisions
+		if err := yaml.Unmarshal(b, &d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	d := read()
+	if len(d.Decisions) != 2 || d.Decisions[0] != (report.Decision{Signal: "prom:metric:a_total", Action: "confirm", Owner: "team-a", Evidence: "111111111111", At: "2026-11-18"}) ||
+		d.Decisions[1].Action != "keep" || d.Decisions[1].Review != "2027-02-16" || d.Decisions[1].Reason != "read at year end" {
+		t.Errorf("decisions: %+v", d.Decisions)
+	}
+	// --all from the proposal replaces team-b's keep with a confirm.
+	p := report.Proposal{Pipelines: map[string][]report.ProposedChange{"x": {{Recommendation: "drop:prom:metric:b_total", Signal: "prom:metric:b_total", Owner: "team-b"}}}}
+	pb, _ := json.Marshal(p)
+	if err := os.WriteFile(filepath.Join(dir, report.ProposalPath), pb, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runConfirm(confirmOptions{Report: rp, Dir: dir, Owner: "team-b", All: true, Now: now}, nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if d := read(); len(d.Decisions) != 2 || d.Decisions[1].Action != "confirm" || d.Decisions[1].Evidence != "222222222222" {
+		t.Errorf("after --all: %+v", d.Decisions)
+	}
+	if err := runConfirm(confirmOptions{Report: rp, Dir: dir, Owner: "team-a", Now: now}, []string{"nope"}, &out); err == nil {
+		t.Error("an unknown recommendation was confirmed")
+	}
+}

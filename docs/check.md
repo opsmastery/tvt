@@ -47,7 +47,20 @@ OTTL is read with tvt's own extractor (ADR 0012) and evaluated three-valued over
 | `unreadable_config` | edits a pipeline file tvt can't read |
 | `stale_manifest` | (any change) the manifest is older than `--max-age`, or predates version 2 |
 | `evidence_gap` | drops anything while the scan has unacknowledged evidence gaps |
-| `unconfirmed_drop` | drops anything without an owner confirmation in the manifest's `decisions` (S9 records them) |
+| `unconfirmed_drop` | drops anything without an owner confirmation: in a tvt PR, each recommendation `.tvt/proposal.json` lists for the pipeline needs a `confirm` in `.tvt/decisions.yaml` (S9); a drop tvt didn't write needs a `confirm` naming its block or signal |
+| `stale_confirmation` | drops something whose owner confirmed an evidence hash the manifest no longer has: a reader appeared or a gap reopened since they looked, or the scan no longer recommends it (S9 item 2). The finding names the current readers and gaps |
+
+## Owner confirmations (S9)
+
+A tvt PR opens as a draft and carries `.tvt/proposal.json`: per pipeline, each recommendation it writes, its owner and its evidence hash (the recommendation's `evidence_hash`: its readers and open gaps, without query times or cost, so a rescan that finds the same readers keeps it). The owner reviews the evidence and records the decision on the PR's branch:
+
+```sh
+tvt confirm --report r.json --dir . --owner group:default/shop-team drop:prom:metric:shop_legacy_queue_depth
+tvt confirm --report r.json --dir . --owner @jasonvance --all     # everything in proposal.json they own
+git add .tvt/decisions.yaml && git commit -m "tvt: confirm" && git push
+```
+
+check then requires, for each listed recommendation, a `confirm` whose `evidence` equals the hash in the manifest's `evidence` (refreshed by every `tvt report --manifest-dir`). Until then the drop is `unconfirmed_drop`; once the evidence moves, it's `stale_confirmation` and the owner looks again. `--dismiss REASON` and `--keep REASON` record the other decisions, with a `--review` date (default 90 days).
 
 ## Detection delay (item 5)
 
