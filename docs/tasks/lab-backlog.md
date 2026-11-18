@@ -46,7 +46,7 @@ Seeds the lab needs, grouped by the sprint whose tests use them. Land each one i
 
 ## S8
 
-**Status:** Planned.
+**Status:** Done Nov 18 (tvt-lab #40). Live: the routing and count connectors, `ShopErrorLogBurst`, `transform/lint` (with the experimental-function feature gate). Fixtures: `check-fixtures/*.patch` in tvt-lab, eleven proposed changes each valid for the real tool, with `check:`, `pipeline_readers:` and `detection:` in its ground truth. Two deviations from the list below: the count connector counts the shop's error lines as Alloy forwards them to the Collector (`otlp/shop`), and the detection-delay change is a pair of scrape interval fixtures (5m refused, 15s accepted).
 
 - A Collector filter that reads an attribute a later processor sets (`check` refuses it), an uncast status-code comparison and a regex statement with no `where` (S16 flags both).
 - The expected worst-case detection delay for each lab alert, and a scrape interval change that pushes one past its objective.
