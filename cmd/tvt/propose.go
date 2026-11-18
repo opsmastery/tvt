@@ -391,6 +391,13 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 			skipped = append(skipped, proposal{Rec: rec, Note: "tvt never removes " + rec.Signal.Name + ": it identifies the scrape target, and rules, alerts and joins rely on it"})
 			continue
 		}
+		if rec.Action == report.ActionLabelRemoval && p.Kind == "otelcol" && strings.HasPrefix(rec.Signal.Name, "otel_scope_") {
+			// The Prometheus exporters add otel_scope_name and friends from
+			// the instrumentation scope; a datapoint attribute delete
+			// changes nothing (test plan M7, Nov 18).
+			skipped = append(skipped, proposal{Rec: rec, Note: rec.Signal.Name + " isn't a datapoint attribute: the Collector's Prometheus exporter adds it from the instrumentation scope, so a transform can't remove it"})
+			continue
+		}
 		if rec.Action == report.ActionLabelRemoval && p.Kind != "otelcol" {
 			switch {
 			case p.Kind != "prometheus" && p.Kind != "alloy":
@@ -433,7 +440,9 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		if !ok {
 			return skipAll("no --checkout for " + p.Repo)
 		}
-		return proposeOtelcol(p, recs, root, scan, check, note)
+		// Keep what the loop above skipped (job, instance, scope labels).
+		w, s, diff := proposeOtelcol(p, recs, root, scan, check, note)
+		return w, append(skipped, s...), diff
 	default:
 		return skipAll("no writer for " + p.Kind + " pipelines yet")
 	}
