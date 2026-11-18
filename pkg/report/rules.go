@@ -28,8 +28,14 @@ type Rule struct {
 	BytesPerDay    float64 `json:"bytes_per_day"`
 	Evaluations    int64   `json:"evaluations"`
 	// CostUnknown says why the daily cost is unknown (never zero).
-	CostUnknown string        `json:"cost_unknown,omitempty"`
-	Findings    []RuleFinding `json:"findings"`
+	CostUnknown string `json:"cost_unknown,omitempty"`
+	// Alerts (S8 item 5): severity, for, and the worst-case detection
+	// delay with its terms, at the scan's scrape intervals.
+	Severity          string        `json:"severity,omitempty"`
+	ForSec            float64       `json:"for_seconds,omitempty"`
+	DetectionDelaySec float64       `json:"detection_delay_seconds,omitempty"`
+	DetectionTerms    string        `json:"detection_terms,omitempty"`
+	Findings          []RuleFinding `json:"findings"`
 }
 
 // RuleFinding is one thing wrong with a rule, with its fix.

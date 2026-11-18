@@ -104,6 +104,10 @@ CREATE TABLE IF NOT EXISTS consumers (
     -- (a datasource type it doesn't parse), '' when it could. Such a
     -- consumer reads unknown signals: never "reads nothing".
     unparsed     TEXT NOT NULL DEFAULT '',
+    -- Schema version 25, alerts only (S8 item 5): for_ms, the pending
+    -- period (NULL if unknown or none); severity, the severity label.
+    for_ms       INTEGER,
+    severity     TEXT NOT NULL DEFAULT '',
     -- Query-log consumers: who sent the query (dashboard, rule, explore,
     -- agent, api); '' for collected consumers.
     client       TEXT NOT NULL DEFAULT ''

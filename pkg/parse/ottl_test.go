@@ -332,3 +332,35 @@ func FuzzOTTL(f *testing.F) {
 		_, _ = OTTLCondition(s)
 	})
 }
+
+type mapEnv map[string]any
+
+func (m mapEnv) Path(p string) (any, bool) { v, ok := m[p]; return v, ok }
+
+func TestOTTLEvalWhere(t *testing.T) {
+	record := mapEnv{`span.attributes["gen_ai.operation.name"]`: "execute_tool"}
+	for _, c := range []struct {
+		cond string
+		env  mapEnv
+		want Tri
+	}{
+		{`span.attributes["success"] == true`, record, Unknown}, // success unknown: can be true
+		{`span.attributes["gen_ai.operation.name"] == "chat"`, record, False},
+		{`span.attributes["gen_ai.operation.name"] == "execute_tool" and span.attributes["x"] == 1`, record, Unknown},
+		{`span.attributes["gen_ai.operation.name"] == "chat" and span.attributes["x"] == 1`, record, False},
+		{`not IsMatch(span.attributes["gen_ai.operation.name"], "^exec")`, record, False},
+		{`span.attributes["gen_ai.operation.name"] != nil or IsRootSpan()`, record, True},
+		{`metric.name == "coding_agent_cost_usage_USD_total" or (metric.is_monotonic == true and IsMatch(metric.name, "^coding[^A-Za-z0-9:]+agent[^A-Za-z0-9:]+cost"))`,
+			mapEnv{"metric.name": "coding_agent_token_usage_total"}, False}, // is_monotonic unknown, but IsMatch false: and is False
+		{`span.attributes["http.response.status_code"] == "500"`, mapEnv{`span.attributes["http.response.status_code"]`: int64(500)}, False},
+		{`Len(span.attributes["p"]) > 3`, mapEnv{`span.attributes["p"]`: "abcd"}, True},
+	} {
+		o, err := OTTLCondition(c.cond)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := o.EvalWhere(c.env); got != c.want {
+			t.Errorf("%s: %v, want %v", c.cond, got, c.want)
+		}
+	}
+}

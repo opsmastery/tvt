@@ -810,8 +810,14 @@ var v23Drops = append(append([]string{}, v24Drops...),
 )
 
 // v24Drops turns a current database's tables back into version 23's.
-var v24Drops = []string{
+var v24Drops = append(append([]string{}, v25Drops...),
 	`ALTER TABLE pipeline_targets DROP COLUMN jobs`,
+)
+
+// v25Drops turns a current database's tables back into version 24's.
+var v25Drops = []string{
+	`ALTER TABLE consumers DROP COLUMN for_ms`,
+	`ALTER TABLE consumers DROP COLUMN severity`,
 }
 
 // v15Drops turns a current database's tables back into version 14's

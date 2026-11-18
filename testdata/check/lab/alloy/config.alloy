@@ -1,0 +1,170 @@
+// tvt-lab's Alloy pipeline (tvt Sprint 2 item 14, ADR 0007). This directory
+// stands in for a pipeline config repo: tvt.yaml's pipelines: names it
+// (alloy-apps) with the signals it handles, {job=~"shop|node"} metrics and
+// {app="shop"} streams. Prometheus still scrapes itself and the backends
+// (prometheus/scrape/lab.yml: the prometheus-scrape pipeline).
+//
+// Series keep the labels they had when Prometheus scraped them (job from
+// job_name, instance from the address), so history continues across the
+// switch (Nov 15, 2026).
+//
+// Everything also goes to prometheus.relabel "cloud" and loki.process
+// "cloud", defined by the output file compose mounts beside this one
+// (outputs/<ALLOY_OUTPUT>.alloy): local (the default) drops it all, cloud
+// forwards a free-tier subset to the Grafana Cloud test stack.
+
+prometheus.scrape "shop" {
+  targets         = [{"__address__" = "shop:8080"}]
+  job_name        = "shop"
+  scrape_interval = "10s"
+  forward_to      = [prometheus.relabel.apps.receiver]
+}
+
+prometheus.scrape "node" {
+  targets         = [{"__address__" = "node-exporter:9100"}]
+  job_name        = "node"
+  scrape_interval = "10s"
+  forward_to      = [prometheus.relabel.apps.receiver]
+}
+
+// Where tvt's proposals for Alloy-scraped metrics land (ADR 0007:
+// prometheus.relabel blocks). The first rule matches no metric. The second
+// renames the shop's search counter before it's stored (tvt S7 item 9): only
+// the new name, shop_search_requests_total, is in Prometheus, and only Shop
+// Overview panel 10 reads it, so tvt must match readers on the stored name.
+prometheus.relabel "apps" {
+  rule {
+    source_labels = ["__name__"]
+    regex         = "tvt_lab_no_such_metric"
+    action        = "drop"
+  }
+  rule {
+    source_labels = ["__name__"]
+    regex         = "shop_search_queries_total"
+    target_label  = "__name__"
+    replacement   = "shop_search_requests_total"
+    action        = "replace"
+  }
+  // Sets a label from another (tvt S7 item 9, label rules): tvt doesn't place
+  // a label removal around a rule that sets a label, so instance_pod is held
+  // on every metric that passes here, never proposed.
+  rule {
+    source_labels = ["instance"]
+    target_label  = "instance_pod"
+    action        = "replace"
+  }
+  forward_to = [prometheus.remote_write.prometheus.receiver, prometheus.relabel.cloud.receiver]
+}
+
+prometheus.remote_write "prometheus" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+// The shop's traces (OTLP/HTTP on :4318) become span metrics (tvt S6 item 5).
+// customer.id is a dimension with a cardinality limit below the shop's 500
+// customers, so the metrics overflow: past the limit, new combinations go to
+// one series per metric with otel.metric.overflow="true" and no dimensions
+// (otel_metric_overflow in Prometheus). The span metrics join the apps path,
+// so tvt's proposals for them land in prometheus.relabel "apps" too.
+otelcol.receiver.otlp "shop" {
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces = [otelcol.connector.spanmetrics.shop.input]
+  }
+}
+
+otelcol.connector.spanmetrics "shop" {
+  dimension {
+    name = "http.route"
+  }
+  dimension {
+    name = "customer.id"
+  }
+  histogram {
+    unit = "s"
+    explicit {
+      buckets = ["0.05s", "0.1s", "0.25s", "0.5s", "1s", "2.5s"]
+    }
+  }
+  aggregation_cardinality_limit = 100
+  output {
+    metrics = [otelcol.exporter.prometheus.shop.input]
+  }
+}
+
+otelcol.exporter.prometheus "shop" {
+  forward_to = [prometheus.relabel.spans.receiver]
+}
+
+// A rule tvt can't follow (tvt S7 item 9, ADR 0013): its regex comes from the
+// environment (TVT_LAB_SPANS_DROP_REGEX in compose.yaml, set to a name no
+// metric has). tvt must treat every signal that passes it, the span metrics
+// and target_info, as an evidence gap: never a reader, never a safe drop.
+prometheus.relabel "spans" {
+  rule {
+    source_labels = ["__name__"]
+    regex         = sys.env("TVT_LAB_SPANS_DROP_REGEX")
+    action        = "drop"
+  }
+  forward_to = [prometheus.relabel.apps.receiver]
+}
+
+// The shop pushes its logs here (Loki push API on :3500) instead of to Loki.
+// The reconciler doesn't: it pushes straight to Loki, the lab's one signal
+// no pipeline claims.
+loki.source.api "shop" {
+  http {
+    listen_address = "0.0.0.0"
+    listen_port    = 3500
+  }
+  use_incoming_timestamp = true
+  forward_to             = [loki.process.apps.receiver]
+}
+
+// Where tvt's proposals for Alloy-shipped streams land (ADR 0007:
+// loki.process blocks). Today it passes every line through.
+loki.process "apps" {
+  forward_to = [loki.write.loki.receiver, loki.process.cloud.receiver, loki.process.shop_errors.receiver]
+}
+
+// The shop's error lines also go to the Collector (tvt S8), whose count
+// connector turns them into shop_error_log_lines_total for the
+// ShopErrorLogBurst alert: a log drop that empties the stream would silence
+// it. Only error lines leave this block.
+loki.process "shop_errors" {
+  stage.match {
+    selector = "{app=\"shop\", level!=\"error\"}"
+    action   = "drop"
+  }
+  forward_to = [otelcol.receiver.loki.shop_errors.receiver]
+}
+
+// Loki labels become log attributes (level, component, app).
+otelcol.receiver.loki "shop_errors" {
+  output {
+    logs = [otelcol.exporter.otlphttp.collector.input]
+  }
+}
+
+otelcol.exporter.otlphttp "collector" {
+  client {
+    endpoint = "http://otelcol:4319"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// The lab's cold tier for Alloy streams (tvt S7, pipelines[].cold): a stand-in
+// for an archive. Nothing forwards here until tvt's reroute block does.
+loki.echo "cold" { }
+
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

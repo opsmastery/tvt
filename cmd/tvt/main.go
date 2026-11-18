@@ -53,8 +53,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "propose":
 		return cmdPropose(args[1:], stdout, stderr)
 	case "check":
-		fmt.Fprintf(stderr, "tvt %s: not implemented yet\n", cmd)
-		return exitNotImplemented
+		return cmdCheck(rest, stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintln(stdout, "tvt", version.String())
 		return exitOK

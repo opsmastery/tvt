@@ -17,7 +17,7 @@ func TestRun(t *testing.T) {
 		{"help", []string{"help"}, exitOK, "Commands:"},
 		{"unknown", []string{"frobnicate"}, exitUsage, `unknown command "frobnicate"`},
 		{"version", []string{"version"}, exitOK, "tvt dev"},
-		{"check stub", []string{"check"}, exitNotImplemented, "not implemented"},
+		{"check needs base or patch", []string{"check"}, exitUsage, "exactly one of --base and --patch"},
 		{"scan missing grafana", []string{"scan", "--prom", "http://p:9090"}, exitUsage, "--grafana is required"},
 		{"scan missing metrics", []string{"scan", "--grafana", "http://g:3000"}, exitUsage, "--prom or --mimir"},
 		{"scan both metrics", []string{"scan", "--grafana", "http://g:3000", "--prom", "http://p", "--mimir", "http://m"}, exitUsage, "mutually exclusive"},

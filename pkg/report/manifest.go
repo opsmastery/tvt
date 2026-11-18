@@ -8,7 +8,7 @@ import (
 
 // ManifestVersion is the protection manifest's format (ADR 0003, amended by
 // ADR 0007). Bump it when a field changes meaning.
-const ManifestVersion = 1
+const ManifestVersion = 2
 
 // Protected classes: a signal in one of these is never proposed for a
 // drop, and tvt check fails a change that would touch it. A record (S7
@@ -36,6 +36,68 @@ type Manifest struct {
 	Decisions []Decision `json:"decisions"`
 	// Acknowledged are tvt.yaml gaps.acknowledge entries, sorted.
 	Acknowledged []Acknowledgement `json:"acknowledged"`
+	// Version 2 (S8): what tvt check needs to judge a PR with nothing but
+	// the manifest.
+	//
+	// PipelineDefs are the repo's pipelines as tvt.yaml defines them:
+	// where their config is and what kind it is.
+	PipelineDefs []PipelineDef `json:"pipeline_defs"`
+	// RecordMatches are OTTL conditions that pick out record spans and log
+	// events (S8 item 13, ADR 0011): the built-in ones and tvt.yaml
+	// records.spans and records.log_events.
+	RecordMatches RecordMatches `json:"record_matches"`
+	// Gaps are the scan's unacknowledged evidence gaps: check fails a drop
+	// while any is open.
+	Gaps []ManifestGap `json:"gaps"`
+	// Alerts are every alert's timing (S8 item 5): check refuses a scrape
+	// interval change that starves a window, outruns a for, or pushes an
+	// alert past its severity's detection objective.
+	Alerts    []AlertTiming     `json:"alerts"`
+	Detection ManifestDetection `json:"detection"`
+}
+
+// ManifestDetection is tvt.yaml detection: per-severity objectives and
+// Alertmanager's group_wait, in seconds.
+type ManifestDetection struct {
+	ObjectivesSec map[string]float64 `json:"objectives_seconds,omitempty"`
+	GroupWaitSec  float64            `json:"group_wait_seconds"`
+}
+
+// PipelineDef is one pipeline's config location (tvt.yaml pipelines:).
+type PipelineDef struct {
+	Name       string        `json:"name"`
+	Kind       string        `json:"kind"`
+	Files      []string      `json:"files,omitempty"`
+	HelmValues *ManifestHelm `json:"helm_values,omitempty"`
+	Build      string        `json:"build,omitempty"`
+	Version    string        `json:"version,omitempty"`
+	Handles    []string      `json:"handles,omitempty"`
+}
+
+// ManifestHelm is a pipeline's Helm values (tvt.yaml helm_values).
+type ManifestHelm struct {
+	File     string `json:"file"`
+	Path     string `json:"path,omitempty"`
+	Defaults string `json:"defaults,omitempty"`
+}
+
+// RecordMatches are OTTL conditions over a span or log record.
+type RecordMatches struct {
+	Spans     []string `json:"spans"`
+	LogEvents []string `json:"log_events"`
+}
+
+// BuiltinRecordMatches are the records tvt knows without tvt.yaml: agent
+// tool calls (GenAI semantic conventions) and their log events.
+var BuiltinRecordMatches = RecordMatches{
+	Spans:     []string{`span.attributes["gen_ai.operation.name"] == "execute_tool"`},
+	LogEvents: []string{`log.attributes["event.name"] == "tool_result"`, `log.attributes["event.name"] == "tool_decision"`},
+}
+
+// ManifestGap is an unacknowledged evidence gap.
+type ManifestGap struct {
+	Source string `json:"source"`
+	Gap    string `json:"gap"`
 }
 
 // ProtectedSignal is one signal check must not let a change touch.
@@ -52,6 +114,9 @@ type ProtectedSignal struct {
 	Record  string `json:"record,omitempty"`
 	Dormant string `json:"dormant,omitempty"`
 	Owner   string `json:"owner,omitempty"`
+	// Jobs are a metric's job label values (version 2): the scrape
+	// configs it comes through. Empty for streams, and when unknown.
+	Jobs []string `json:"jobs,omitempty"`
 	// Protectors are the readers behind the class, strongest evidence
 	// first, then by consumer. Sweeps are left out: they never protect.
 	Protectors []Protector `json:"protectors"`
@@ -97,16 +162,20 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 				return acks[i].Match < acks[j].Match
 			})
 			m = Manifest{Version: ManifestVersion, Repo: r, GeneratedAt: in.Scan.StartedAt.UTC(), Scan: in.Scan.ID,
-				Signals: []ProtectedSignal{}, Decisions: []Decision{}, Acknowledged: acks}
+				Signals: []ProtectedSignal{}, Decisions: []Decision{}, Acknowledged: acks,
+				PipelineDefs: []PipelineDef{}, RecordMatches: BuiltinRecordMatches, Gaps: []ManifestGap{}, Alerts: []AlertTiming{},
+				Detection: ManifestDetection{GroupWaitSec: DefaultGroupWait.Seconds()}}
 		}
 		m.Pipelines = append(m.Pipelines, p)
 		out[r] = m
 	}
 	pipelineOf := map[string]string{}
+	jobsOf := map[string][]string{}
 	for _, t := range in.PipelineTargets {
 		if t.Pipeline != "" {
 			pipelineOf[t.Subject] = t.Pipeline
 		}
+		jobsOf[t.Subject] = t.Jobs
 	}
 	for _, s := range in.Signals {
 		if !protectedClasses[s.Class] && s.Record == "" {
@@ -119,7 +188,7 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 			continue
 		}
 		ps := ProtectedSignal{ID: s.ID, Kind: string(s.Kind), Name: s.Name, Parent: s.Parent, Pipeline: p,
-			Class: s.Class, Record: s.Record, Dormant: s.Dormant, Owner: s.Owner, Protectors: []Protector{}}
+			Class: s.Class, Record: s.Record, Dormant: s.Dormant, Owner: s.Owner, Jobs: jobsOf[s.ID], Protectors: []Protector{}}
 		if w, err := Explain(in, s.ID); err == nil {
 			seen := map[string]bool{}
 			for _, rd := range w.Readers {

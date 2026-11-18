@@ -26,7 +26,7 @@ func TestRulesFixture(t *testing.T) {
 	}
 	want := []collect.Rule{{
 		Source: "grafana", Namespace: "cg3qdhms8urr4c", Group: "shop-grafana-alerts", Name: "Shop order export lag",
-		UID: "shop-order-export-lag", Kind: collect.RuleAlert, EvaluatedBy: collect.EvaluatedByGrafana, Interval: time.Minute,
+		UID: "shop-order-export-lag", Kind: collect.RuleAlert, EvaluatedBy: collect.EvaluatedByGrafana, Interval: time.Minute, For: 5 * time.Minute,
 		Expr:        "max(shop_order_export_lag_seconds)",
 		Queries:     []collect.PanelQuery{{DatasourceUID: "prometheus", DatasourceType: "prometheus", Expr: "max(shop_order_export_lag_seconds)"}},
 		Annotations: map[string]string{"summary": "Orders haven't been exported to the warehouse for over 5 minutes"},

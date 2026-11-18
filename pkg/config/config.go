@@ -22,6 +22,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
+	"github.com/prometheus/common/model"
 )
 
 // Config is tvt.yaml.
@@ -31,6 +32,8 @@ type Config struct {
 	// hard keep.
 	ExternalConsumers []ExternalConsumer `yaml:"external_consumers"`
 	Ownership         Ownership          `yaml:"ownership"`
+	// Detection sets detection objectives (S8 item 5).
+	Detection Detection `yaml:"detection"`
 	// Records are signals tvt never drops, samples or collapses (S7 item 2,
 	// ADR 0011), on top of the ones named like a record (audit, deploy and
 	// change events).
@@ -118,11 +121,24 @@ type Pipeline struct {
 	MonitorJobs map[string]string `yaml:"monitor_jobs"`
 }
 
+// Detection: worst-case detection delay objectives by alert severity
+// ("critical": "15m"), and Alertmanager's group_wait (default 30s).
+type Detection struct {
+	Objectives map[string]string `yaml:"objectives"`
+	GroupWait  string            `yaml:"group_wait"`
+}
+
 // Records declares records: metrics entries are anchored regexes, streams
 // entries stream selectors (as ownership's).
 type Records struct {
 	Metrics []string `yaml:"metrics"`
 	Streams []string `yaml:"streams"`
+	// Spans and LogEvents are OTTL conditions over a span or a log record
+	// (S8 item 13): span.attributes["gen_ai.operation.name"] ==
+	// "deploy". tvt check never lets a pipeline drop, sample or strip the
+	// outcome fields of one. Agent tool calls are built in.
+	Spans     []string `yaml:"spans"`
+	LogEvents []string `yaml:"log_events"`
 }
 
 // HelmValues points at the Helm values key a pipeline's config renders from.
@@ -353,6 +369,26 @@ func Parse(b []byte) (*Config, error) {
 }
 
 func (c *Config) validate() error {
+	for sev, o := range c.Detection.Objectives {
+		if _, err := model.ParseDuration(o); err != nil {
+			return fmt.Errorf("detection.objectives.%s: %q isn't a duration (15m, 1h)", sev, o)
+		}
+	}
+	if g := c.Detection.GroupWait; g != "" {
+		if _, err := model.ParseDuration(g); err != nil {
+			return fmt.Errorf("detection.group_wait: %q isn't a duration", g)
+		}
+	}
+	for _, list := range []struct {
+		key   string
+		conds []string
+	}{{"records.spans", c.Records.Spans}, {"records.log_events", c.Records.LogEvents}} {
+		for i, s := range list.conds {
+			if _, err := parse.OTTLCondition(s); err != nil {
+				return fmt.Errorf("%s[%d]: %v", list.key, i, err)
+			}
+		}
+	}
 	seen := map[string]bool{}
 	for i, e := range c.ExternalConsumers {
 		if e.Name == "" {
