@@ -43,6 +43,8 @@ type reportOptions struct {
 	// manifest to ManifestDir/<repo>/.tvt/protect.json (S7 item 1, ADR
 	// 0003). It needs Config for the pipelines' repos.
 	ManifestDir string
+	// Digest is where each owner's weekly digest goes (S9 item 6).
+	Digest string
 }
 
 func cmdReport(args []string, stdout, stderr io.Writer) int {
@@ -56,6 +58,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.PriceCard, "price-card", "", "what-if: reprice the scan at this price card (a file or a preset: "+strings.Join(cost.Presets(), ", ")+") without rescanning")
 	fs.BoolVar(&o.LabelDrops, "label-drops", false, "recommend label removals (labeldrop when no series merge, aggregate when they merge and sum); off until a precision review on real data passes")
 	fs.IntVar(&o.Top, "top", 50, "recommendations to keep, highest savings per minute of checking first (0: all)")
+	fs.StringVar(&o.Digest, "digest", "", "also write each owner's weekly digest (Markdown, for a GitHub issue) to DIR/<owner>.md")
 	fs.StringVar(&o.ManifestDir, "manifest-dir", "", "also write each pipeline repo's protection manifest to DIR/<repo>/.tvt/protect.json (needs --config)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -95,11 +98,13 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 		return err
 	}
 	in.LabelDrops = o.LabelDrops
+	queue := 0
 	if o.Config != "" {
 		cfg, err := config.Load(o.Config)
 		if err != nil {
 			return err
 		}
+		queue = cfg.Queue.PerOwner
 		in.Objectives, in.GroupWait = detectionOf(cfg)
 		if in.Decisions, err = repoDecisions(cfg); err != nil {
 			return err
@@ -123,6 +128,18 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 		}
 	}
 	r := report.Build(in, o.Top)
+	if o.Digest != "" {
+		// Every open row counts toward the digests, not just --top's.
+		if err := os.MkdirAll(o.Digest, 0o755); err != nil {
+			return err
+		}
+		for _, d := range report.Digests(report.Build(in, 0), queue) {
+			if err := writeFileAtomic(filepath.Join(o.Digest, d.File), []byte(d.Markdown)); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "digest for %s: %s\n", d.Owner, filepath.Join(o.Digest, d.File))
+		}
+	}
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return err

@@ -87,6 +87,11 @@ ownership:
   # The GitHub user or team tvt propose asks to review each owner's changes.
   github: {payments: "@acme/payments", shop: "@acme/shop", ai-platform: "@acme/ai-platform"}
 
+# At most this many open recommendations per owner in each tvt propose run
+# and in each owner's weekly digest (tvt report --digest), best first.
+queue:
+  per_owner: 20
+
 # SLO definitions (Sloth, Pyrra, OpenSLO): files or directories, relative to
 # this file. Everything an SLI reads is a hard keep; an SLI tvt can't read
 # (a Sloth plugin, a non-Prometheus OpenSLO source) is a recorded gap.

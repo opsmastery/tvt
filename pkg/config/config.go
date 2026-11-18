@@ -32,6 +32,8 @@ type Config struct {
 	// hard keep.
 	ExternalConsumers []ExternalConsumer `yaml:"external_consumers"`
 	Ownership         Ownership          `yaml:"ownership"`
+	// Queue caps what tvt puts in front of each owner (S9 item 6).
+	Queue Queue `yaml:"queue"`
 	// Detection sets detection objectives (S8 item 5).
 	Detection Detection `yaml:"detection"`
 	// Records are signals tvt never drops, samples or collapses (S7 item 2,
@@ -449,6 +451,9 @@ func (c *Config) validate() error {
 			return err
 		}
 	}
+	if c.Queue.PerOwner < 0 {
+		return fmt.Errorf("queue.per_owner %d: want 0 (the default) or more", c.Queue.PerOwner)
+	}
 	for svc, owner := range c.Ownership.Services {
 		if svc == "" || owner == "" {
 			return fmt.Errorf("ownership.services: %q: service and owner are both required", svc)
@@ -656,4 +661,13 @@ func StreamMatchers(sel string) ([]parse.Matcher, error) {
 		}
 	}
 	return refs[0].Matchers, nil
+}
+
+// Queue caps the recommendations in front of one owner at a time (S9 item
+// 6): tvt propose writes at most PerOwner of an owner's open
+// recommendations per run, highest savings per minute of checking first,
+// and the weekly digest lists the same. Zero: propose writes them all and
+// the digest lists report.DefaultQueue.
+type Queue struct {
+	PerOwner int `yaml:"per_owner"`
 }

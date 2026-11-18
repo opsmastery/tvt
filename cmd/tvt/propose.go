@@ -177,6 +177,9 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		r.Recommendations, blocked, replayLines = replayLabelRemovals(ctx, in, r.Recommendations, rp)
 		skipped = append(skipped, blocked...)
 	}
+	var queued []proposal
+	r.Recommendations, queued = capQueue(r.Recommendations, cfg.Queue.PerOwner)
+	skipped = append(skipped, queued...)
 	for _, rec := range r.Recommendations {
 		switch {
 		case !rec.Proposable:
@@ -325,6 +328,28 @@ func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, git
 	return nil
 }
 
+// capQueue keeps at most perOwner proposable open recommendations per
+// owner (S9 item 6; 0: no cap). recs are highest savings per minute of
+// checking first, so each owner gets their best ones; the rest wait.
+func capQueue(recs []report.Recommendation, perOwner int) (kept []report.Recommendation, waiting []proposal) {
+	if perOwner <= 0 {
+		return recs, nil
+	}
+	n := map[string]int{}
+	for _, rec := range recs {
+		if rec.Proposable && rec.Status == report.StatusOpen {
+			owner := cmp.Or(rec.Owner, report.Unowned)
+			if n[owner] >= perOwner {
+				waiting = append(waiting, proposal{Rec: rec, Note: fmt.Sprintf("queued: %s already has %d recommendations in front of them (queue.per_owner); it comes up as those are decided", owner, perOwner)})
+				continue
+			}
+			n[owner]++
+		}
+		kept = append(kept, rec)
+	}
+	return kept, waiting
+}
+
 // ownerHandle is the GitHub user or team that reviews owner's changes:
 // its tvt.yaml ownership.github entry, or the owner itself when it's
 // already a handle.
@@ -348,7 +373,7 @@ func proposalDiff(checkout string, scan int64, repo string, written []proposal) 
 			continue
 		}
 		p.Pipelines[w.Rec.Pipeline] = append(p.Pipelines[w.Rec.Pipeline], report.ProposedChange{Recommendation: w.Rec.ID, Signal: w.Rec.Signal.ID,
-			Evidence: w.Rec.EvidenceHash, Owner: w.Rec.Owner, OwnerInferred: w.Rec.OwnerInferred})
+			Evidence: w.Rec.EvidenceHash, Owner: w.Rec.Owner, OwnerInferred: w.Rec.OwnerInferred, Expected: w.Rec.Expected})
 	}
 	for k := range p.Pipelines {
 		sort.Slice(p.Pipelines[k], func(i, j int) bool { return p.Pipelines[k][i].Recommendation < p.Pipelines[k][j].Recommendation })
@@ -405,14 +430,15 @@ func prBody(repo string, scan int64, written []proposal, validation, build []str
 		if w.Rec.OwnerInferred {
 			who += " (inferred)"
 		}
-		row := fmt.Sprintf("| `%s` | %s | `%s` | %s |\n", w.Rec.ID, strings.ReplaceAll(who, "|", "\\|"), w.Rec.EvidenceHash, strings.ReplaceAll(w.Rec.Claim, "|", "\\|"))
+		after := strings.Join(w.Rec.Expected.Statements, "; ")
+		row := fmt.Sprintf("| `%s` | %s | `%s` | %s | %s |\n", w.Rec.ID, strings.ReplaceAll(who, "|", "\\|"), w.Rec.EvidenceHash, strings.ReplaceAll(w.Rec.Claim, "|", "\\|"), strings.ReplaceAll(after, "|", "\\|"))
 		if rows.Len()+len(row) > budget {
 			continue
 		}
 		rows.WriteString(row)
 		shown++
 	}
-	fmt.Fprintf(&b, "%d recommendations.\n\n| Recommendation | Owner | Evidence | Why |\n|---|---|---|---|\n%s", n, rows.String())
+	fmt.Fprintf(&b, "%d recommendations.\n\n| Recommendation | Owner | Evidence | Why | After the merge |\n|---|---|---|---|---|\n%s", n, rows.String())
 	if shown < n {
 		fmt.Fprintf(&b, "\n%d more aren't listed here (GitHub caps a PR description); each rule's block in the diff names its recommendation and evidence.\n", n-shown)
 	}

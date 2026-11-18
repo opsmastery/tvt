@@ -185,7 +185,9 @@ type Recommendation struct {
 	// Review says why an owner's earlier decision no longer holds (S9
 	// item 4): the row is open again.
 	Review string `json:"review,omitempty"`
-	Score  Score  `json:"score"`
+	// Expected is what should be true after the merge (S9 item 5).
+	Expected Expected `json:"expected"`
+	Score    Score    `json:"score"`
 	// SavingsPerMinute ranks recommendations: the score's priority (savings
 	// discounted by usage and confidence) per minute of checking.
 	SavingsPerMinute float64 `json:"savings_per_minute"`
@@ -440,6 +442,10 @@ func Build(in Input, limit int) Report {
 		}
 		recs = append(recs, rec)
 	}
+	var totalStreamBytes int64
+	for _, v := range in.StreamVolumes {
+		totalStreamBytes += v.BytesPerDay
+	}
 	for _, rec := range recs {
 		if rec.Action == ActionLabelRemoval && dropped[rec.Signal.Parent] {
 			continue
@@ -453,6 +459,7 @@ func Build(in Input, limit int) Report {
 				continue
 			}
 		}
+		rec.Expected = expected(rec, costs[rec.Signal.ID], totalStreamBytes)
 		r.Recommendations = append(r.Recommendations, rec)
 	}
 	r.Services = services(in.Signals, r.Recommendations, refs, costs)
