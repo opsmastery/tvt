@@ -15,9 +15,11 @@ import (
 // Alloy stream reroutes (S7 item 3, ADR 0009 for Alloy). Alloy has no
 // per-stream route inside loki.process, so tvt splits the stream off
 // where the loki.process that ships to Loki forwards it: that
-// component's forward_to points at two loki.relabel components tvt owns.
-// tvt_hot drops the stream and forwards everything else to the original
-// targets; tvt_cold keeps only the stream and forwards it to the cold
+// component's forward_to points at two components tvt owns. tvt_hot (a
+// loki.process) drops the stream's lines except the ones matching the
+// error pattern (S8 item 2: in case a stream's level label is wrong) and
+// forwards everything else to the original targets; tvt_cold (a
+// loki.relabel) keeps only the stream and forwards it to the cold
 // component pipelines[].cold names. The original forward_to line is kept
 // in the block, and stripping the block puts it back.
 
@@ -25,6 +27,10 @@ const (
 	alloyHot  = "tvt_hot"
 	alloyCold = "tvt_cold"
 )
+
+// ErrorPattern is the error-pattern guard (S8 item 2): every log rule tvt
+// writes keeps lines matching it, in case a stream's level label is wrong.
+const ErrorPattern = "(?i)error|exception|traceback|critical|fatal"
 
 // AlloyRoutes reroutes each route's stream to its cold component (r.Cold
 // is a component name such as loki.write.cold, which must exist in the
@@ -122,7 +128,7 @@ func AlloyRoutesKeep(out []byte, routes []Route) ([]byte, error) {
 	begin := routes[0].begin()
 	// 1. The shipper's forward_to, replaced inside a block that keeps the
 	// original line.
-	replaced := fmt.Sprintf("%s// %s\n%s// %s%s\n%sforward_to = [loki.relabel.%s.receiver, loki.relabel.%s.receiver]\n%s// %s\n",
+	replaced := fmt.Sprintf("%s// %s\n%s// %s%s\n%sforward_to = [loki.process.%s.receiver, loki.relabel.%s.receiver]\n%s// %s\n",
 		indent, begin, indent, originalMarker, strings.TrimSpace(orig), indent, alloyHot, alloyCold, indent, endMarker)
 	lines[line-1] = replaced
 	out = []byte(strings.Join(lines, ""))
@@ -137,9 +143,9 @@ func AlloyRoutesKeep(out []byte, routes []Route) ([]byte, error) {
 			fmt.Fprintf(&b, "// %s: %s\n", fluentLabelString(r.Stream), r.Reason)
 		}
 	}
-	fmt.Fprintf(&b, "loki.relabel %q {\n", alloyHot)
+	fmt.Fprintf(&b, "loki.process %q {\n", alloyHot)
 	for _, r := range routes {
-		writeStreamRule(&b, r.Stream, "drop")
+		fmt.Fprintf(&b, "  stage.match {\n    selector = %s\n    action   = \"drop\"\n  }\n", strconv.Quote(streamSelector(r.Stream)+" !~ "+strconv.Quote(ErrorPattern)))
 	}
 	fmt.Fprintf(&b, "  forward_to = [%s]\n}\n\n", strings.Join(receivers(targets), ", "))
 	fmt.Fprintf(&b, "loki.relabel %q {\n", alloyCold)
@@ -156,16 +162,14 @@ func AlloyRoutesKeep(out []byte, routes []Route) ([]byte, error) {
 	return out, nil
 }
 
-// writeStreamRule writes a loki.relabel rule matching exactly the
-// stream's label values.
-func writeStreamRule(b *strings.Builder, stream map[string]string, action string) {
+// streamSelector is a LogQL selector naming exactly the stream's labels.
+func streamSelector(stream map[string]string) string {
 	keys := slices.Sorted(maps.Keys(stream))
-	vals := make([]string, len(keys))
+	parts := make([]string, len(keys))
 	for i, k := range keys {
-		vals[i] = regexp.QuoteMeta(stream[k])
+		parts[i] = k + "=" + strconv.Quote(stream[k])
 	}
-	fmt.Fprintf(b, "  rule {\n    source_labels = [%s]\n    separator     = \";\"\n    regex         = %s\n    action        = %q\n  }\n",
-		quoteList(keys), strconv.Quote(strings.Join(vals, ";")), action)
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 // streamsRegex is one keep rule's labels (every label any stream has) and

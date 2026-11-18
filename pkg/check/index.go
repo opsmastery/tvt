@@ -3,6 +3,7 @@ package check
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
@@ -12,15 +13,20 @@ import (
 // index is the manifest arranged for evaluation.
 type index struct {
 	byPipeline map[string][]report.ProtectedSignal
+	// read are unprotected signals with readers, by pipeline (S8 item 3).
+	read map[string][]report.ReadSignal
 	// spans and logEvents pick out record spans and log events.
 	spans, logEvents []parse.OTTL
 	matchErrs        []string
 }
 
 func newIndex(m report.Manifest) *index {
-	ix := &index{byPipeline: map[string][]report.ProtectedSignal{}}
+	ix := &index{byPipeline: map[string][]report.ProtectedSignal{}, read: map[string][]report.ReadSignal{}}
 	for _, s := range m.Signals {
 		ix.byPipeline[s.Pipeline] = append(ix.byPipeline[s.Pipeline], s)
+	}
+	for _, s := range m.Read {
+		ix.read[s.Pipeline] = append(ix.read[s.Pipeline], s)
 	}
 	for _, c := range m.RecordMatches.Spans {
 		if o, err := parse.OTTLCondition(c); err == nil {
@@ -191,4 +197,70 @@ func blockAt(bs []blockSpan, line int) string {
 		}
 	}
 	return ""
+}
+
+// The error-pattern guard (S8 item 2): a log rule must keep lines that
+// say error, exception, traceback, critical or fatal, in case a stream's
+// level label is wrong.
+var guardWords = []string{"ERROR", "Exception", "Traceback", "CRITICAL", "fatal"}
+
+// guardedRegex: a regex that matches every guard word (the lines a
+// negated filter keeps).
+func guardedRegex(re string) bool {
+	r, err := regexp.Compile(re)
+	if err != nil {
+		return false
+	}
+	for _, w := range guardWords {
+		if !r.MatchString("x " + w + " y") {
+			return false
+		}
+	}
+	return true
+}
+
+// lineFilterGuard: a LogQL selector with a !~ line filter whose regex
+// matches every guard word.
+var negatedFilter = regexp.MustCompile(`!~\s*"((?:[^"\\]|\\.)*)"`)
+
+func lineFilterGuard(sel string) bool {
+	for _, m := range negatedFilter.FindAllStringSubmatch(sel, -1) {
+		re, err := strconvUnquote(`"` + m[1] + `"`)
+		if err == nil && guardedRegex(re) {
+			return true
+		}
+	}
+	return false
+}
+
+// textGuard: a rule's text (a Fluent Bit regex, an OTTL condition) names
+// every guard word in a negated form: a negative lookahead or not IsMatch.
+func textGuard(s string) bool {
+	if !strings.Contains(s, "(?!") && !strings.Contains(s, "not IsMatch") {
+		return false
+	}
+	low := strings.ToLower(s)
+	for _, w := range guardWords {
+		if !strings.Contains(low, strings.ToLower(w)) {
+			return false
+		}
+	}
+	return true
+}
+
+var strconvUnquote = strconv.Unquote
+
+// lessLossy names the less lossy action for a read signal a change drops
+// (ADR 0010's order), for a least_lossy finding.
+func lessLossy(s report.ReadSignal) string {
+	if s.Kind == "stream" {
+		return fmt.Sprintf("%s has %d readers: cap, collapse, keep warn-and-above only or sample it before rerouting or dropping it (ADR 0010)", s.Name, s.Readers)
+	}
+	if !s.AllLabels {
+		if len(s.Labels) == 0 {
+			return fmt.Sprintf("%s has %d readers that use no label: aggregate its labels away rather than drop it (ADR 0010)", s.Name, s.Readers)
+		}
+		return fmt.Sprintf("%s has %d readers, which use only %s: remove the other labels rather than drop it (ADR 0010)", s.Name, s.Readers, strings.Join(s.Labels, ", "))
+	}
+	return fmt.Sprintf("%s has %d readers: lengthen its scrape interval, shorten its retention or reroute it to the archive before dropping it (ADR 0010)", s.Name, s.Readers)
 }

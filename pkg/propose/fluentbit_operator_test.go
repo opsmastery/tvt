@@ -27,7 +27,7 @@ spec:
   filters:
     - rewriteTag:
         rules:
-          - "$log ^.*$ tvt.cold.shop.debug false"
+          - "$log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ tvt.cold.shop.debug false"
         emitterName: tvt_cold_shop_debug
 # tvt:end
 `

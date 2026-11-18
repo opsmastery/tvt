@@ -252,6 +252,8 @@ func TestQueryLogProbe(t *testing.T) {
 	path := writeFile(t, dir, "query.log", strings.Join([]string{
 		`{"httpRequest":{"clientIP":"10.0.0.1","path":"/api/v1/query"},"params":{"query":"` + marker + `"},"time":"2026-11-11T10:00:00Z"}`,
 		`{"httpRequest":{"clientIP":"10.0.0.2","path":"/api/v1/query"},"params":{"query":"up"},"time":"2026-11-11T10:00:01Z"}`,
+		// tvt's replay of a protected query (S8 item 4): never usage.
+		`{"httpRequest":{"clientIP":"10.0.0.1","path":"/api/v1/query"},"params":{"query":"# tvt-replay\nsum(rate(http_requests_total[5m]))"},"time":"2026-11-11T10:00:02Z"}`,
 	}, "\n")+"\n")
 	ql := &QueryLog{Paths: []string{path}}
 	got, err := ql.Queries(context.Background(), time.Time{})

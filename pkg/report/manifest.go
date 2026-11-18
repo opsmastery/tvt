@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 )
 
 // ManifestVersion is the protection manifest's format (ADR 0003, amended by
@@ -54,6 +56,12 @@ type Manifest struct {
 	// alert past its severity's detection objective.
 	Alerts    []AlertTiming     `json:"alerts"`
 	Detection ManifestDetection `json:"detection"`
+	// UnselectedMonitors are the ServiceMonitors and PodMonitors no
+	// Prometheus selects ("ServiceMonitor ns/name"): a change to one does
+	// nothing (S8 item 11).
+	UnselectedMonitors []string `json:"unselected_monitors,omitempty"`
+	// Read are the repo's unprotected signals that have readers.
+	Read []ReadSignal `json:"read"`
 }
 
 // ManifestDetection is tvt.yaml detection: per-severity objectives and
@@ -72,6 +80,29 @@ type PipelineDef struct {
 	Build      string        `json:"build,omitempty"`
 	Version    string        `json:"version,omitempty"`
 	Handles    []string      `json:"handles,omitempty"`
+	// Replicas and LoadBalanced (otelcol pipelines, S8 item 12).
+	Replicas     int  `json:"replicas,omitempty"`
+	LoadBalanced bool `json:"load_balanced,omitempty"`
+	// Cold is the pipeline's cold tier (pipelines[].cold): a stream drop
+	// is refused where a reroute there would do (S8 item 3).
+	Cold string `json:"cold,omitempty"`
+}
+
+// ReadSignal is a signal that isn't protected but has readers that count
+// (ad hoc queries from people, agents or API clients): check refuses a
+// drop of it when a less lossy action keeps those readers working (S8
+// item 3, ADR 0010).
+type ReadSignal struct {
+	ID       string   `json:"id"`
+	Kind     string   `json:"kind"`
+	Name     string   `json:"name"`
+	Pipeline string   `json:"pipeline"`
+	Jobs     []string `json:"jobs,omitempty"`
+	// Labels are the labels its readers match or group on; AllLabels says
+	// some reader may need every label.
+	Labels    []string `json:"labels,omitempty"`
+	AllLabels bool     `json:"all_labels,omitempty"`
+	Readers   int      `json:"readers"`
 }
 
 // ManifestHelm is a pipeline's Helm values (tvt.yaml helm_values).
@@ -163,7 +194,7 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 			})
 			m = Manifest{Version: ManifestVersion, Repo: r, GeneratedAt: in.Scan.StartedAt.UTC(), Scan: in.Scan.ID,
 				Signals: []ProtectedSignal{}, Decisions: []Decision{}, Acknowledged: acks,
-				PipelineDefs: []PipelineDef{}, RecordMatches: BuiltinRecordMatches, Gaps: []ManifestGap{}, Alerts: []AlertTiming{},
+				PipelineDefs: []PipelineDef{}, RecordMatches: BuiltinRecordMatches, Gaps: []ManifestGap{}, Alerts: []AlertTiming{}, Read: []ReadSignal{},
 				Detection: ManifestDetection{GroupWaitSec: DefaultGroupWait.Seconds()}}
 		}
 		m.Pipelines = append(m.Pipelines, p)
@@ -177,8 +208,54 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 		}
 		jobsOf[t.Subject] = t.Jobs
 	}
+	// Readers that still count on an unprotected signal: logged queries
+	// from people, agents and API clients (ad hoc reads). A dashboard
+	// nobody views and a recording rule nobody reads don't.
+	counting := map[string]bool{}
+	for _, c := range in.Consumers {
+		if c.Client != "" && c.Client != "dashboard" && c.Client != "rule" {
+			counting[c.ID] = true
+		}
+	}
+	readers := map[string][]graph.Reference{}
+	for _, ref := range in.References {
+		if !ref.Sweep && counting[ref.ConsumerID] {
+			readers[ref.SignalID] = append(readers[ref.SignalID], ref)
+		}
+	}
 	for _, s := range in.Signals {
 		if !protectedClasses[s.Class] && s.Record == "" {
+			p := pipelineOf[s.ID]
+			m, ok := out[repos[p]]
+			if p == "" || !ok || len(readers[s.ID]) == 0 || (s.Kind != graph.KindMetric && s.Kind != graph.KindStream) {
+				continue
+			}
+			rs := ReadSignal{ID: s.ID, Kind: string(s.Kind), Name: s.Name, Pipeline: p, Jobs: jobsOf[s.ID]}
+			seen := map[string]bool{}
+			cons := map[string]bool{}
+			for _, ref := range readers[s.ID] {
+				cons[ref.ConsumerID] = true
+				if ref.AllLabels || ref.ResultLabels {
+					rs.AllLabels = true
+				}
+				for _, l := range ref.Labels {
+					if !seen[l.Name] {
+						seen[l.Name] = true
+						rs.Labels = append(rs.Labels, l.Name)
+					}
+				}
+			}
+			for _, sub := range in.Signals {
+				// Labels the scan saw read on the metric.
+				if sub.Kind == graph.KindLabel && sub.Parent == s.Name && len(readers[sub.ID]) > 0 && !seen[sub.Name] {
+					seen[sub.Name] = true
+					rs.Labels = append(rs.Labels, sub.Name)
+				}
+			}
+			sort.Strings(rs.Labels)
+			rs.Readers = len(cons)
+			m.Read = append(m.Read, rs)
+			out[repos[p]] = m
 			continue
 		}
 		p := pipelineOf[s.ID]
@@ -213,6 +290,7 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 	for r, m := range out {
 		sort.Strings(m.Pipelines)
 		sort.Slice(m.Signals, func(i, j int) bool { return m.Signals[i].ID < m.Signals[j].ID })
+		sort.Slice(m.Read, func(i, j int) bool { return m.Read[i].ID < m.Read[j].ID })
 		out[r] = m
 	}
 	return out

@@ -38,7 +38,11 @@ OTTL is read with tvt's own extractor (ADR 0012) and evaluated three-valued over
 | `fail_closed` | adds a drop after a statement tvt can't model (an experimental function, a lambda, an unknown function), uses include/exclude matching, Lua or WASM, or a selector tvt can't read (item 8) |
 | `warn_logs` | drops lines whose selector doesn't rule out warn-and-above |
 | `scrape_interval` | changes a scrape interval so a range window holds fewer than four samples, a nonzero `for` is shorter than the interval, or an alert's worst-case detection delay passes its severity's objective (item 5) |
-| `collapse_counts` | collapses repeated lines (`logdedup`), which changes every count over them (item 6) |
+| `error_guard` | adds a log drop, sample or collapse that doesn't keep lines matching `(?i)error\|exception\|traceback\|critical\|fatal`, in case a stream's level label is wrong (item 2) |
+| `least_lossy` | drops a metric or stream that something reads ad hoc (a query-log reader other than a dashboard or rule) when a less lossy action from ADR 0010 would keep that reader working: a cold tier, a reroute, a label removal (item 3) |
+| `collapse_counts` | collapses repeated lines (`logdedup`) whose streams something reads, which changes every count over them (item 6) |
+| `helm_overlay` | sets a values list (`metricRelabelings`, `cAdvisorMetricRelabelings`) that replaces the chart's default without the drops the default had, or changes a monitor Prometheus doesn't select (item 11) |
+| `delta_replicas` | removes a label from a delta counter in a pipeline the manifest records as more than one replica with no load-balancing gateway (`pipelines[].replicas`, `load_balanced` in `tvt.yaml`) (item 12) |
 | `build_component` | uses a processor or connector missing from the pipeline's ocb builder manifest |
 | `unreadable_config` | edits a pipeline file tvt can't read |
 | `stale_manifest` | (any change) the manifest is older than `--max-age`, or predates version 2 |
@@ -56,6 +60,25 @@ detection:
 ```
 
 The manifest carries every alert's timing (`alerts`), so check recomputes the delay at the changed interval offline. The longest window makes multiwindow burn-rate alerts look slow (tvt-lab's `ShopAvailabilityBurn` is 1h3m10s); since a change doesn't cause that, check doesn't refuse it.
+
+## In GitHub Actions
+
+The repo is a composite action. It builds tvt at the action's ref and runs `check --base origin/<base branch>`; the job fails on exit 4 and the findings appear in the log.
+
+```yaml
+on: pull_request
+jobs:
+  tvt-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: Opsmastery-Summit/tvt@main
+```
+
+## Property tests
+
+`TestPropertyRelabel` generates 2,000 random relabel configs against a random protected set and runs each through Prometheus' own relabel engine as the oracle. Whenever the engine drops a protected signal, check must refuse; the test asserts the two counts are equal.
 
 ## Ground truth
 

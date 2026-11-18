@@ -21,7 +21,7 @@ func TestFluentBit(t *testing.T) {
 		"    # never queried; 88% of shop log bytes",
 		"    - name: rewrite_tag",
 		"      match: shop.debug",
-		"      rule: $log ^.*$ tvt.cold.shop.debug false",
+		"      rule: $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ tvt.cold.shop.debug false",
 		"      emitter_name: tvt_cold_shop_debug",
 		"    # tvt:end",
 	}

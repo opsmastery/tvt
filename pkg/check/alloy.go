@@ -20,6 +20,7 @@ func alloyEffects(p report.PipelineDef, path string, src []byte, ix *index) ([]e
 		return nil, err
 	}
 	blocks := tvtBlocks(src)
+	cold := coldKeeps(f, p.Cold)
 	var out []effect
 	for _, st := range f.Body {
 		b, ok := st.(*ast.BlockStmt)
@@ -46,7 +47,7 @@ func alloyEffects(p report.PipelineDef, path string, src []byte, ix *index) ([]e
 		case name == "loki.relabel":
 			out = append(out, lokiRelabelEffects(p, path, comp, b, ix, blocks)...)
 		case name == "loki.process":
-			out = append(out, lokiProcessEffects(p, path, comp, b.Body, nil, ix, blocks)...)
+			out = append(out, lokiProcessEffects(p, path, comp, b.Body, nil, ix, blocks, cold)...)
 		case strings.HasPrefix(name, "otelcol.processor."):
 			typ := strings.TrimPrefix(name, "otelcol.processor.")
 			line := ast.StartPos(b).Position().Line
@@ -140,7 +141,7 @@ func attrOf(body ast.Body, name string) (ast.Expr, bool) {
 // lokiProcessEffects: stage.drop drops lines; stage.match with action
 // "drop" drops the lines its selector picks; a stage.match whose stages
 // drop is scoped to its selector. scope is the enclosing selector.
-func lokiProcessEffects(p report.PipelineDef, path, comp string, body ast.Body, scope []matcher, ix *index, blocks []blockSpan) []effect {
+func lokiProcessEffects(p report.PipelineDef, path, comp string, body ast.Body, scope []matcher, ix *index, blocks []blockSpan, cold []relabelRule) []effect {
 	var out []effect
 	for _, st := range body {
 		b, ok := st.(*ast.BlockStmt)
@@ -173,14 +174,27 @@ func lokiProcessEffects(p report.PipelineDef, path, comp string, body ast.Body, 
 			}
 			if action == "drop" {
 				out = append(out, streamDropEffects(p, path, comp, "drops the lines of "+text, sel, at, blockAt(blocks, line), ix)...)
+				if !lineFilterGuard(text) {
+					out = append(out, guardEffect(p, path, comp, "stage.match drops "+text+" with no !~ line filter keeping the error pattern", at, blockAt(blocks, line)))
+				}
+				if p.Cold != "" && !reroutedTo(cold, sel) {
+					out = append(out, effect{rule: RuleLeastLossy, pipeline: p.Name, file: path, component: comp,
+						reason: "drops the lines of " + text + " outright: reroute them to " + p.Cold + " first, and drop after the quiet period (ADR 0010: drops are staged)", at: at, block: blockAt(blocks, line)})
+				}
 				continue
 			}
-			out = append(out, lokiProcessEffects(p, path, comp, b.Body, sel, ix, blocks)...)
+			out = append(out, lokiProcessEffects(p, path, comp, b.Body, sel, ix, blocks, cold)...)
 		case "stage.drop":
 			text := "drops lines (stage.drop)"
 			out = append(out, streamDropEffects(p, path, comp, text, scope, at, blockAt(blocks, line), ix)...)
+			out = append(out, guardEffect(p, path, comp, "stage.drop can't keep the error pattern: drop with stage.match and a !~ line filter instead", at, blockAt(blocks, line)))
+			if p.Cold != "" {
+				out = append(out, effect{rule: RuleLeastLossy, pipeline: p.Name, file: path, component: comp,
+					reason: "stage.drop drops lines outright: reroute them to " + p.Cold + " first (ADR 0010: drops are staged)", at: at, block: blockAt(blocks, line)})
+			}
 		case "stage.sampling":
 			out = append(out, streamDropEffects(p, path, comp, "samples lines (stage.sampling)", scope, at, blockAt(blocks, line), ix)...)
+			out = append(out, guardEffect(p, path, comp, "stage.sampling can't keep the error pattern: sample inside a stage.match with a !~ line filter", at, blockAt(blocks, line)))
 		}
 	}
 	return out
@@ -188,6 +202,16 @@ func lokiProcessEffects(p report.PipelineDef, path, comp string, body ast.Body, 
 
 func streamDropEffects(p report.PipelineDef, path, comp, what string, sel []matcher, at, block string, ix *index) []effect {
 	out := []effect{{rule: ruleDropMarker, pipeline: p.Name, file: path, component: comp, reason: what, at: at, block: block}}
+	for _, s := range ix.read[p.Name] {
+		if s.Kind != "stream" {
+			continue
+		}
+		if ms, ok := selector(s.Name); ok && !mayOverlap(ms, sel) {
+			continue
+		}
+		out = append(out, effect{rule: RuleLeastLossy, pipeline: p.Name, file: path, component: comp, signal: s.ID,
+			reason: what + ": " + lessLossy(s), at: at, block: block})
+	}
 	if selectsWarnPlus(sel) {
 		out = append(out, effect{rule: RuleWarnLogs, pipeline: p.Name, file: path, component: comp,
 			reason: what + ", and its selector doesn't rule out warn-and-above lines", at: at, block: block})
@@ -236,6 +260,7 @@ func lokiRelabelEffects(p report.PipelineDef, path, comp string, b *ast.BlockStm
 		block := blockAt(blocks, r.Line)
 		what := "drops streams (" + r.text() + ")"
 		out = append(out, effect{rule: ruleDropMarker, pipeline: p.Name, file: path, component: comp, reason: what, at: at, block: block})
+		out = append(out, guardEffect(p, path, comp, what+": a loki.relabel rule drops whole streams and can't keep the error pattern (use loki.process stage.match with a !~ line filter)", at, block))
 		for _, s := range ix.of(p.Name, "stream") {
 			if streamRuleHits(r, s.Name) == 0 {
 				continue
@@ -356,4 +381,72 @@ func literalRegex(re string) (string, bool) {
 		return "", true
 	}
 	return "", false
+}
+
+func guardEffect(p report.PipelineDef, path, comp, reason, at, block string) effect {
+	return effect{rule: RuleErrorGuard, pipeline: p.Name, file: path, component: comp,
+		reason: reason + " (S8 item 2: every log drop, sample or reroute keeps lines matching " + guardText + ")", at: at, block: block}
+}
+
+const guardText = "error|exception|traceback|critical|fatal"
+
+// coldKeeps are the keep rules of loki.relabel components that forward
+// to the pipeline's cold tier: the streams tvt's reroute copies there.
+func coldKeeps(f *ast.File, cold string) []relabelRule {
+	if cold == "" {
+		return nil
+	}
+	var out []relabelRule
+	for _, st := range f.Body {
+		b, ok := st.(*ast.BlockStmt)
+		if !ok || strings.Join(b.Name, ".") != "loki.relabel" {
+			continue
+		}
+		toCold := false
+		if e, ok := attrOf(b.Body, "forward_to"); ok {
+			if arr, ok := e.(*ast.ArrayExpr); ok {
+				for _, el := range arr.Elements {
+					if n, ok := refText(el); ok && strings.TrimSuffix(n, ".receiver") == cold {
+						toCold = true
+					}
+				}
+			}
+		}
+		if !toCold {
+			continue
+		}
+		for _, rs := range b.Body {
+			rb, ok := rs.(*ast.BlockStmt)
+			if !ok || len(rb.Name) != 1 || rb.Name[0] != "rule" {
+				continue
+			}
+			if r, err := alloyRelabelRule(rb); err == nil && r.Unreadable == "" && r.Action == "keep" {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
+// reroutedTo: a cold keep rule copies the stream a drop selector names.
+func reroutedTo(keeps []relabelRule, sel []matcher) bool {
+	known := map[string]string{}
+	for _, m := range sel {
+		if m.Op == "=" {
+			known[m.Label] = m.Value
+		}
+	}
+	for _, r := range keeps {
+		v := ""
+		for i, l := range r.Source {
+			if i > 0 {
+				v += r.Separator
+			}
+			v += known[l]
+		}
+		if r.Regex.MatchString(v) {
+			return true
+		}
+	}
+	return false
 }
