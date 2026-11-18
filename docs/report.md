@@ -90,6 +90,7 @@ A name found in several backends (`prom` and `mimir`) is ambiguous and the error
 | `risk_if_wrong` | The strongest evidence class among its readers (sweeps excluded), the dormant flag and the owner's tier |
 | `assumptions` | Every gap in the sources that could have shown a reader, assumed references with their reasons, and the stream caveats |
 | `owner`, `owner_source`, `owner_inferred` | Who decides, and where tvt found them (S9 item 1): `tvt.yaml` (ownership.owners), `codeowners`, `label` (an ownership label on the signal's series), `backstage` (a component's `spec.owner`), or the inferred fallbacks `service_name` (ownership.services) and `kubernetes` (a workload's namespace team label or `app.kubernetes.io/part-of`). An inferred owner is a guess to confirm, and the row says so |
+| `evidence_hash` | A short hash of the row's readers and unacknowledged gaps (S9 item 2), without query times or cost: what an owner's confirmation records. A new reader or a reopened gap changes it |
 | `status` | `open`, `confirmed` or `dismissed` (with `dismissed_reason`); owner decisions arrive with S9, so every row is `open` for now |
 | `score` | Usage weight, strongest evidence, confidence, priority |
 

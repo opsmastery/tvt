@@ -51,6 +51,10 @@ type Manifest struct {
 	// Gaps are the scan's unacknowledged evidence gaps: check fails a drop
 	// while any is open.
 	Gaps []ManifestGap `json:"gaps"`
+	// Evidence is each recommendation's current evidence for the repo's
+	// pipelines (S9 item 2): an owner's confirmation counts only while
+	// its hash matches.
+	Evidence []ManifestEvidence `json:"evidence"`
 	// Alerts are every alert's timing (S8 item 5): check refuses a scrape
 	// interval change that starves a window, outruns a for, or pushes an
 	// alert past its severity's detection objective.
@@ -165,13 +169,29 @@ type Protector struct {
 	Exact bool `json:"exact"`
 }
 
-// Decision is an owner's decision about a signal (S9).
+// Decision is an owner's decision about a signal (S9), as committed in a
+// pipeline repo's .tvt/decisions.yaml. Signal is a signal ID (or, for a
+// hand-written drop, the tvt block or signal name check reports). Action
+// is confirm, dismiss or keep. Evidence is the recommendation's
+// evidence_hash the owner saw: a confirmation counts only while the
+// current evidence still has that hash. At is when (YYYY-MM-DD); Review
+// is when to ask again (dismissals and keeps).
 type Decision struct {
-	Signal string `json:"signal"`
-	Action string `json:"action"`
-	Owner  string `json:"owner"`
-	Reason string `json:"reason,omitempty"`
+	Signal   string `json:"signal" yaml:"signal"`
+	Action   string `json:"action" yaml:"action"`
+	Owner    string `json:"owner" yaml:"owner"`
+	Reason   string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Evidence string `json:"evidence,omitempty" yaml:"evidence,omitempty"`
+	At       string `json:"at,omitempty" yaml:"at,omitempty"`
+	Review   string `json:"review,omitempty" yaml:"review,omitempty"`
 }
+
+// Decision actions.
+const (
+	DecisionConfirm = "confirm"
+	DecisionDismiss = "dismiss"
+	DecisionKeep    = "keep"
+)
 
 // Manifests builds one manifest per repo. repos maps a pipeline name to
 // its repo (tvt.yaml pipelines:); a pipeline with no repo is left out.
@@ -193,7 +213,7 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 				return acks[i].Match < acks[j].Match
 			})
 			m = Manifest{Version: ManifestVersion, Repo: r, GeneratedAt: in.Scan.StartedAt.UTC(), Scan: in.Scan.ID,
-				Signals: []ProtectedSignal{}, Decisions: []Decision{}, Acknowledged: acks,
+				Signals: []ProtectedSignal{}, Decisions: []Decision{}, Evidence: []ManifestEvidence{}, Acknowledged: acks,
 				PipelineDefs: []PipelineDef{}, RecordMatches: BuiltinRecordMatches, Gaps: []ManifestGap{}, Alerts: []AlertTiming{}, Read: []ReadSignal{},
 				Detection: ManifestDetection{GroupWaitSec: DefaultGroupWait.Seconds()}}
 		}

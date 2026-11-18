@@ -29,6 +29,7 @@ Commands:
   why       Show every reader of one signal and the evidence behind it
   propose   Write drop rules into Prometheus and Alloy configs as patches
   check     CI gate: fail if a config change drops data an alert, SLO or viewed dashboard uses
+  confirm   Record an owner decision (confirm, dismiss, keep) in a pipeline repo
   version   Print version information
 
 Run 'tvt <command> -h' for command flags.
@@ -54,6 +55,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdPropose(args[1:], stdout, stderr)
 	case "check":
 		return cmdCheck(rest, stdout, stderr)
+	case "confirm":
+		return cmdConfirm(rest, stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintln(stdout, "tvt", version.String())
 		return exitOK

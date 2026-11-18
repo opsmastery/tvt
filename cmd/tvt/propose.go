@@ -215,6 +215,14 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 			skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + name + " isn't in " + o.Config})
 		}
 	}
+	// What each repo's patch proposes, for check's confirmations (S9).
+	for repo, pb := range patches {
+		d, err := proposalDiff(o.Checkouts[repo], r.Scan.ID, repo, written)
+		if err != nil {
+			return err
+		}
+		pb.WriteString(d)
+	}
 	// Replay results go with the validation notes, per repo. Without a
 	// backend to replay against, a written label removal says so.
 	replayed := o.ReplayProm != "" || o.replay != nil
@@ -236,7 +244,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		return err
 	}
 	if o.Output == "pr" {
-		return openPRs(ctx, o, cfg.Pipelines, r.Scan.ID, patches, written, v.notes, v.build, out)
+		return openPRs(ctx, o, cfg.Pipelines, cfg.Ownership.GitHub, r.Scan.ID, patches, written, v.notes, v.build, out)
 	}
 	return nil
 }
@@ -246,7 +254,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 // confirmation (S9) is what takes one out of draft. A repo that fails is
 // reported and the others still go ahead; the error at the end says how
 // many failed.
-func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, scan int64, patches map[string]*strings.Builder, written []proposal, validation, build []string, out io.Writer) error {
+func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, githubOf map[string]string, scan int64, patches map[string]*strings.Builder, written []proposal, validation, build []string, out io.Writer) error {
 	repos := make([]string, 0, len(patches))
 	for repo := range patches {
 		repos = append(repos, repo)
@@ -265,6 +273,15 @@ func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, sca
 				if !slices.Contains(reviewers, r) {
 					reviewers = append(reviewers, r)
 				}
+			}
+		}
+		// Each recommendation's owner reviews it (S9 item 2).
+		for _, w := range written {
+			if w.Repo != repo {
+				continue
+			}
+			if h := ownerHandle(w.Rec.Owner, githubOf); h != "" && !slices.Contains(reviewers, h) {
+				reviewers = append(reviewers, h)
 			}
 		}
 		err := func() error {
@@ -308,6 +325,66 @@ func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, sca
 	return nil
 }
 
+// ownerHandle is the GitHub user or team that reviews owner's changes:
+// its tvt.yaml ownership.github entry, or the owner itself when it's
+// already a handle.
+func ownerHandle(owner string, githubOf map[string]string) string {
+	if h := githubOf[owner]; h != "" {
+		return h
+	}
+	if strings.HasPrefix(owner, "@") {
+		return owner
+	}
+	return ""
+}
+
+// proposalDiff adds or updates report.ProposalPath in a repo: what this
+// proposal carries per pipeline, with each recommendation's evidence
+// hash, so tvt check can ask for a matching confirmation of each.
+func proposalDiff(checkout string, scan int64, repo string, written []proposal) (string, error) {
+	p := report.Proposal{Scan: scan, Pipelines: map[string][]report.ProposedChange{}}
+	for _, w := range written {
+		if w.Repo != repo || w.Rec.Pipeline == "" {
+			continue
+		}
+		p.Pipelines[w.Rec.Pipeline] = append(p.Pipelines[w.Rec.Pipeline], report.ProposedChange{Recommendation: w.Rec.ID, Signal: w.Rec.Signal.ID,
+			Evidence: w.Rec.EvidenceHash, Owner: w.Rec.Owner, OwnerInferred: w.Rec.OwnerInferred})
+	}
+	for k := range p.Pipelines {
+		sort.Slice(p.Pipelines[k], func(i, j int) bool { return p.Pipelines[k][i].Recommendation < p.Pipelines[k][j].Recommendation })
+	}
+	b, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	b = append(b, '\n')
+	var old []byte
+	if checkout != "" {
+		old, err = os.ReadFile(filepath.Join(checkout, filepath.FromSlash(report.ProposalPath)))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	}
+	if old == nil {
+		return newFileDiff(report.ProposalPath, b), nil
+	}
+	return propose.Diff(report.ProposalPath, old, b), nil
+}
+
+// newFileDiff is a git patch that creates path with content.
+func newFileDiff(path string, content []byte) string {
+	lines := strings.SplitAfter(string(content), "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "diff --git a/%s b/%s\nnew file mode 100644\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1,%d @@\n", path, path, path, len(lines))
+	for _, l := range lines {
+		b.WriteString("+" + l)
+	}
+	return b.String()
+}
+
 // prBody is a draft PR's description: what changes and why, validation,
 // build notes, and that it stays a draft until its owner confirms.
 func prBody(repo string, scan int64, written []proposal, validation, build []string) string {
@@ -324,14 +401,18 @@ func prBody(repo string, scan int64, written []proposal, validation, build []str
 			continue
 		}
 		n++
-		row := fmt.Sprintf("| `%s` | %s |\n", w.Rec.ID, strings.ReplaceAll(w.Rec.Claim, "|", "\\|"))
+		who := cmp.Or(w.Rec.Owner, "none found")
+		if w.Rec.OwnerInferred {
+			who += " (inferred)"
+		}
+		row := fmt.Sprintf("| `%s` | %s | `%s` | %s |\n", w.Rec.ID, strings.ReplaceAll(who, "|", "\\|"), w.Rec.EvidenceHash, strings.ReplaceAll(w.Rec.Claim, "|", "\\|"))
 		if rows.Len()+len(row) > budget {
 			continue
 		}
 		rows.WriteString(row)
 		shown++
 	}
-	fmt.Fprintf(&b, "%d recommendations.\n\n| Recommendation | Why |\n|---|---|\n%s", n, rows.String())
+	fmt.Fprintf(&b, "%d recommendations.\n\n| Recommendation | Owner | Evidence | Why |\n|---|---|---|---|\n%s", n, rows.String())
 	if shown < n {
 		fmt.Fprintf(&b, "\n%d more aren't listed here (GitHub caps a PR description); each rule's block in the diff names its recommendation and evidence.\n", n-shown)
 	}
@@ -353,7 +434,7 @@ func prBody(repo string, scan int64, written []proposal, validation, build []str
 			fmt.Fprintf(&b, "- %s\n", n)
 		}
 	}
-	b.WriteString("\nCheck each signal with `tvt why <signal>` before merging. This PR stays a draft until its owner confirms the evidence.\n")
+	fmt.Fprintf(&b, "\n**To confirm** (S9)\n\nThis PR stays a draft, and `tvt check` refuses it, until each recommendation's owner confirms the evidence above. Check each signal with `tvt why <signal>`, then, on this branch:\n\n```sh\ntvt confirm --report <report.json> --dir . --owner <you> <recommendation>...\ngit add %s && git commit -m 'tvt: confirm' && git push\n```\n\nA confirmation records the evidence hash. If a new reader or a reopened gap changes it before the merge, `tvt check` asks the owner to look again.\n", report.DecisionsPath)
 	return b.String()
 }
 
