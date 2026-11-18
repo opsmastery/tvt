@@ -12,6 +12,9 @@
 #
 #   scripts/lab-pr.sh check   say what's set up and what's missing
 #   scripts/lab-pr.sh         scan, then open the draft PR
+#   scripts/lab-pr.sh patch   scan, then write the patch only (no GitHub
+#                             token needed): the manual tests that apply a
+#                             change to the lab (M3, M7) start from it
 #
 # The branch is pushed with the tvt-lab checkout's own Git credentials (an
 # SSH remote), not with the token.
@@ -33,8 +36,9 @@ export PATH="/opt/podman/bin:/usr/local/go/bin:/usr/local/bin:/opt/homebrew/bin:
 token() { security find-generic-password -s tvt-lab -a "$1" -w 2>/dev/null; }
 
 check() {
-  local ok=0
-  for a in github-token grafana-token; do
+  local ok=0 a accounts=(grafana-token)
+  [[ "${MODE:-pr}" == pr ]] && accounts+=(github-token)
+  for a in "${accounts[@]}"; do
     if token "$a" >/dev/null; then echo "keychain tvt-lab/$a: set"; else echo "keychain tvt-lab/$a: MISSING"; ok=1; fi
   done
   if [[ -d "$LAB/.git" ]]; then echo "tvt-lab checkout: $LAB ($(git -C "$LAB" remote get-url origin))"; else echo "tvt-lab checkout: MISSING at $LAB (set TVT_LAB_DIR)"; ok=1; fi
@@ -47,8 +51,8 @@ check() {
 
 run() {
   check >/dev/null || { check; exit 1; }
-  local gh gt
-  gh="$(token github-token)"
+  local gh="" gt
+  [[ "$MODE" == pr ]] && gh="$(token github-token)"
   gt="$(token grafana-token)"
   mkdir -p "$OUT"
   # The lab's logs, as tvt's e2e suite reads them: Grafana's router log out
@@ -68,12 +72,13 @@ run() {
     --loki-query-log "$logs/loki.log"
   ./bin/tvt report --db "$OUT/tvt.db" --config "$CONFIG" --label-drops --top 0 --json "$OUT/report.json" --html "$OUT/report.html"
   GITHUB_TOKEN="$gh" ./bin/tvt propose --db "$OUT/tvt.db" --config "$CONFIG" --report "$OUT/report.json" \
-    --checkout "$REPO=$LAB" --validate require --output pr --dir "$OUT/proposals"
-  echo "scan, report and patch in $OUT"
+    --checkout "$REPO=$LAB" --validate require --output "$MODE" --dir "$OUT/proposals"
+  echo "scan, report and $MODE in $OUT"
 }
 
 case "${1:-run}" in
-  run) run ;;
-  check) check ;;
-  *) echo "usage: $0 [check|run]" >&2; exit 2 ;;
+  run) MODE=pr run ;;
+  patch) MODE=patch run ;;
+  check) MODE="${MODE:-pr}" check ;;
+  *) echo "usage: $0 [check|run|patch]" >&2; exit 2 ;;
 esac
