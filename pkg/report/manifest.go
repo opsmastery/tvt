@@ -184,6 +184,9 @@ type Decision struct {
 	Evidence string `json:"evidence,omitempty" yaml:"evidence,omitempty"`
 	At       string `json:"at,omitempty" yaml:"at,omitempty"`
 	Review   string `json:"review,omitempty" yaml:"review,omitempty"`
+	// OwnerOfRecord is the owner tvt named when the decision was made (S9
+	// item 4): if it changes, the decision is reopened.
+	OwnerOfRecord string `json:"owner_of_record,omitempty" yaml:"owner_of_record,omitempty"`
 }
 
 // Decision actions.
