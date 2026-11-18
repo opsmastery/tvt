@@ -57,7 +57,7 @@ seasons:
 
 A season is seen when the scan window touches any of its months. One the window misses is a `season` gap in the header, and every unread signal its services own is dormant ("seasonal reader: quarter close falls outside the window"), not a drop candidate. To clear it, scan with a window that reaches back into one of its months. Runbook mentions come from the runbooks alerts link to; postmortems from `postmortems.paths` in `tvt.yaml` (files or directories of `.md`, `.markdown`, `.txt`, `.html`). A mention is any metric-shaped word (it has `_` or `:`) that names a collected metric.
 
-Dormant signals are never recommendations. Each becomes a `confirm` row: `id` (`confirm:<signal id>`), `signal`, `reason`, `question` (for the owner: nothing read it in the window, it looks incident-critical because of the reason, will they need it in an incident, and what dropping it would save), `owner`, `tier`, `savings` and `gaps`. Rows come highest saving first, limited by `--top`; a label whose metric is also dormant is left out, since the metric's question covers it. `totals.dormant` counts every dormant signal. An owner's answer arrives with S9's owner workflow.
+Dormant signals are never recommendations. Each becomes a `confirm` row: `id` (`confirm:<signal id>`), `signal`, `reason`, `question` (for the owner: nothing read it in the window, it looks incident-critical because of the reason, will they need it in an incident, and what dropping it would save), `owner` (with `owner_source` and `owner_inferred`, as on a recommendation), `tier`, `savings` and `gaps`. A dormant signal no owner source names gets the gap `ownership: no owner source names an owner (missing ownership)`: it stays report only, never routed to a guess. Rows come highest saving first, limited by `--top`; a label whose metric is also dormant is left out, since the metric's question covers it. `totals.dormant` counts every dormant signal. An owner's answer arrives with S9's owner workflow.
 
 Recommendations are ranked by **savings per minute of checking**: the score's priority (monthly cost ÷ (1 + usage weight) × confidence) divided by `check_minutes`. A cheap check of a moderate saving can outrank an expensive check of a larger one.
 
@@ -89,7 +89,7 @@ A name found in several backends (`prom` and `mimir`) is ambiguous and the error
 | `savings` | Monthly, in the price card's currency; `approximate` for a vendor preset or a stream (selectors overlap); `disk_bytes` on a self-hosted card |
 | `risk_if_wrong` | The strongest evidence class among its readers (sweeps excluded), the dormant flag and the owner's tier |
 | `assumptions` | Every gap in the sources that could have shown a reader, assumed references with their reasons, and the stream caveats |
-| `owner` | From `tvt.yaml` ownership |
+| `owner`, `owner_source`, `owner_inferred` | Who decides, and where tvt found them (S9 item 1): `tvt.yaml` (ownership.owners), `codeowners`, `label` (an ownership label on the signal's series), `backstage` (a component's `spec.owner`), or the inferred fallbacks `service_name` (ownership.services) and `kubernetes` (a workload's namespace team label or `app.kubernetes.io/part-of`). An inferred owner is a guess to confirm, and the row says so |
 | `status` | `open`, `confirmed` or `dismissed` (with `dismissed_reason`); owner decisions arrive with S9, so every row is `open` for now |
 | `score` | Usage weight, strongest evidence, confidence, priority |
 

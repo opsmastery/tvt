@@ -166,6 +166,9 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		}
 		in.External, in.Owners, in.Clients, in.SweepShare = cfg.ExternalConsumers, cfg.Ownership.Owners, cfg.Clients, cfg.SweepShare
 		in.Records = cfg.Records
+		if in.OwnerSources, err = scan.LoadOwnerSources(cfg.Ownership); err != nil {
+			return err
+		}
 		in.Pipelines = cfg.Pipelines
 		in.Rewrites, in.RewriteErrs = readRewrites(cfg.Pipelines)
 		in.MinWindowDays = cfg.WindowDays
@@ -301,6 +304,25 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			in.MetricJobs = scan.MetricJobs(in.LabelMetrics)
 		} else if jl, err := pc.LabelMetrics(ctx, []string{"job"}); err == nil {
 			in.MetricJobs = scan.MetricJobs(jl)
+		}
+	}
+	// Owners (S9 item 1) need each metric's jobs, which name its component,
+	// and the ownership labels' values on its series. A failure leaves
+	// those sources out (an owner may then be missing), never the scan.
+	if !in.OwnerSources.Empty() {
+		if in.MetricJobs == nil {
+			if jl, err := pc.LabelMetrics(ctx, []string{"job"}); err == nil {
+				in.MetricJobs = scan.MetricJobs(jl)
+			} else {
+				fmt.Fprintf(out, "%-12s job labels unavailable for owners (%v)\n", "owners", err)
+			}
+		}
+		if ls := in.OwnerSources.LabelNames; len(ls) > 0 {
+			if lm, err := pc.LabelMetrics(ctx, ls); err == nil {
+				in.OwnerSources.Labels = scan.LabelOwners(lm, ls)
+			} else {
+				fmt.Fprintf(out, "%-12s ownership labels unavailable (%v)\n", "owners", err)
+			}
 		}
 	}
 	// Scrape intervals turn series into samples per month. They're a cost

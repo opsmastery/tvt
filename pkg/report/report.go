@@ -151,7 +151,12 @@ type Recommendation struct {
 	// assumed references.
 	Assumptions []string `json:"assumptions"`
 	Owner       string   `json:"owner,omitempty"`
-	Status      string   `json:"status"`
+	// OwnerSource is where Owner came from (S9 item 1); OwnerInferred
+	// marks an owner from a fallback (a service name, Kubernetes
+	// metadata), to be confirmed before it's trusted.
+	OwnerSource   string `json:"owner_source,omitempty"`
+	OwnerInferred bool   `json:"owner_inferred,omitempty"`
+	Status        string `json:"status"`
 	// Pipeline is where the change goes (S6 item 4, ADR 0007): the one
 	// pipeline whose handles claim the signal, or "unmapped" (with
 	// PipelineNote saying why), which is reported but never proposable.
@@ -185,7 +190,10 @@ type Confirm struct {
 	// Question is what to ask the owner.
 	Question string `json:"question"`
 	Owner    string `json:"owner,omitempty"`
-	Tier     *int   `json:"tier,omitempty"`
+	// OwnerSource and OwnerInferred: as on a recommendation.
+	OwnerSource   string `json:"owner_source,omitempty"`
+	OwnerInferred bool   `json:"owner_inferred,omitempty"`
+	Tier          *int   `json:"tier,omitempty"`
 	// Savings is what dropping it would save, if the owner says it can go.
 	Savings Savings `json:"savings"`
 	// Pipeline and PipelineNote: as on a recommendation (S6 item 4).
@@ -469,6 +477,10 @@ func Build(in Input, limit int) Report {
 	return r
 }
 
+// MissingOwnerGap is on every dormant row no owner source names (S9 item
+// 1): the question has no one to go to.
+const MissingOwnerGap = "ownership: no owner source names an owner (missing ownership); the question goes to no one until tvt.yaml, CODEOWNERS, a team label or Backstage names one"
+
 // confirmRows are the dormant signals as questions for their owners,
 // highest saving first. A label whose metric is dormant too is left out:
 // the metric's question covers it.
@@ -488,11 +500,15 @@ func confirmRows(signals []graph.Signal, costs map[string]graph.Cost, gs *gaps, 
 		row := Confirm{
 			ID:     "confirm:" + s.ID,
 			Signal: SignalRef{ID: s.ID, Kind: string(s.Kind), Name: s.Name, Parent: s.Parent, Source: s.Source},
-			Reason: s.Dormant, Owner: s.Owner, Tier: s.Tier,
+			Reason: s.Dormant, Owner: s.Owner, OwnerSource: s.OwnerSource, OwnerInferred: s.OwnerInferred, Tier: s.Tier,
 			Savings: Savings{Monthly: c.MonthlyCost, Currency: meta.Currency, DiskBytes: c.DiskBytes,
 				Approximate: meta.Approximate || s.Kind == graph.KindStream},
 		}
 		row.Gaps, row.Acknowledged = split(gs.forSignal(s, listed))
+		if s.Owner == "" {
+			// S9 item 1: report only, never routed to a guess.
+			row.Gaps = append(row.Gaps, MissingOwnerGap)
+		}
 		row.Question = question(s, row, meta)
 		out = append(out, row)
 	}
@@ -580,7 +596,8 @@ func recommend(s graph.Signal, sc graph.Score, refs []graph.Reference, consumers
 		Downstream:  []Reader{},
 		Assumptions: []string{},
 		Owner:       s.Owner,
-		Status:      StatusOpen,
+		OwnerSource: s.OwnerSource, OwnerInferred: s.OwnerInferred,
+		Status: StatusOpen,
 		Savings: Savings{
 			Monthly: c.MonthlyCost, Currency: meta.Currency, DiskBytes: c.DiskBytes,
 			Approximate: meta.Approximate || s.Kind == graph.KindStream,

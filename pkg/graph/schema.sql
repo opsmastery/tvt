@@ -80,7 +80,12 @@ CREATE TABLE IF NOT EXISTS signals (
     tier       INTEGER,
     -- Schema version 23 (S7 item 2, ADR 0011): why the signal is a record,
     -- never dropped, sampled or collapsed; '' when it isn't.
-    record     TEXT NOT NULL DEFAULT ''
+    record     TEXT NOT NULL DEFAULT '',
+    -- Schema version 26 (S9 item 1): where owner came from (tvt.yaml,
+    -- codeowners, label, backstage, service_name, kubernetes), and whether
+    -- it was inferred from a fallback.
+    owner_source   TEXT NOT NULL DEFAULT '',
+    owner_inferred INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS signals_name ON signals (kind, name);
 CREATE INDEX IF NOT EXISTS signals_scan ON signals (last_scan);

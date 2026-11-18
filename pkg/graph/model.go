@@ -41,6 +41,12 @@ type Signal struct {
 	// unknown; Tier is its service tier, nil when unknown.
 	Owner string
 	Tier  *int
+	// OwnerSource says where Owner came from (S9 item 1): tvt.yaml,
+	// codeowners, label, backstage, service_name or kubernetes.
+	// OwnerInferred: from a fallback (service name or Kubernetes
+	// metadata), which the recommendation marks as inferred.
+	OwnerSource   string
+	OwnerInferred bool
 	// Record says why the signal is a record (S7 item 2, ADR 0011): never
 	// dropped, sampled or collapsed, whatever its class. Empty: not one.
 	Record string
