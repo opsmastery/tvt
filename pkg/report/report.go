@@ -156,7 +156,12 @@ type Recommendation struct {
 	// metadata), to be confirmed before it's trusted.
 	OwnerSource   string `json:"owner_source,omitempty"`
 	OwnerInferred bool   `json:"owner_inferred,omitempty"`
-	Status        string `json:"status"`
+	// EvidenceHash identifies the evidence an owner sees (S9 item 2): the
+	// readers and the open gaps. A confirmation records it, and tvt check
+	// refuses the merge once it no longer matches. Query times and cost
+	// aren't in it, so a rescan with the same readers keeps it.
+	EvidenceHash string `json:"evidence_hash"`
+	Status       string `json:"status"`
 	// Pipeline is where the change goes (S6 item 4, ADR 0007): the one
 	// pipeline whose handles claim the signal, or "unmapped" (with
 	// PipelineNote saying why), which is reported but never proposable.
@@ -418,6 +423,7 @@ func Build(in Input, limit int) Report {
 			continue
 		}
 		rec := recommend(s, sc, refs[s.ID], consumers, costs[s.ID], lastRead, gs, listed, in.Scan)
+		rec.EvidenceHash = EvidenceHash(rec.Evidence)
 		if rec.Action == ActionDrop {
 			dropped[s.Name] = true
 		}

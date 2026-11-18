@@ -325,6 +325,10 @@ type Ownership struct {
 	// Services.
 	Services   map[string]string `yaml:"services"`
 	Kubernetes []string          `yaml:"kubernetes"`
+	// GitHub maps an owner to the GitHub user or team (@user,
+	// @org/team) tvt propose requests a review from (S9 item 2). An owner
+	// that is already a handle (@name) needs no entry.
+	GitHub map[string]string `yaml:"github"`
 }
 
 // Owner owns the signals its selectors match.

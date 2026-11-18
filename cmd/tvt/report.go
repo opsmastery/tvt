@@ -342,7 +342,14 @@ func buildManifests(cfg *config.Config, in report.Input) map[string]report.Manif
 	}
 	var gaps []report.ManifestGap
 	var unselected []string
-	for _, g := range report.Build(in, 0).Gaps {
+	full := report.Build(in, 0)
+	recsByPipeline := map[string][]report.Recommendation{}
+	for _, rec := range full.Recommendations {
+		if rec.Pipeline != "" {
+			recsByPipeline[rec.Pipeline] = append(recsByPipeline[rec.Pipeline], rec)
+		}
+	}
+	for _, g := range full.Gaps {
 		if g.Source == scan.SourceMonitors {
 			if m := unselectedRe.FindStringSubmatch(g.Text); m != nil {
 				unselected = append(unselected, m[1]+" "+m[2])
@@ -354,6 +361,7 @@ func buildManifests(cfg *config.Config, in report.Input) map[string]report.Manif
 	}
 	sort.Strings(unselected)
 	for r, m := range ms {
+		var recs []report.Recommendation
 		for _, p := range cfg.Pipelines {
 			if p.Repo != r {
 				continue
@@ -364,7 +372,9 @@ func buildManifests(cfg *config.Config, in report.Input) map[string]report.Manif
 				d.HelmValues = &report.ManifestHelm{File: h.File, Path: h.Path, Defaults: h.Defaults}
 			}
 			m.PipelineDefs = append(m.PipelineDefs, d)
+			recs = append(recs, recsByPipeline[p.Name]...)
 		}
+		m.Evidence = report.EvidenceOf(recs)
 		sort.Slice(m.PipelineDefs, func(i, j int) bool { return m.PipelineDefs[i].Name < m.PipelineDefs[j].Name })
 		m.RecordMatches = matches
 		if gaps != nil {

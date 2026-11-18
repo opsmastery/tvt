@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Opsmastery-Summit/tvt/pkg/check"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"go.yaml.in/yaml/v3"
 )
 
 // exitRefused: tvt check ran and refused the change.
@@ -118,6 +120,26 @@ func runCheck(o checkOptions) (check.Result, error) {
 	} else {
 		in.Base, in.Head = gitFiles(o.Repo, o.Base), tree
 	}
+	// Owner decisions and the PR's proposal (S9 item 2), as the change
+	// leaves them.
+	if b, err := in.Head(report.DecisionsPath); err == nil {
+		var d report.Decisions
+		if err := yaml.Unmarshal(b, &d); err != nil {
+			return check.Result{}, fmt.Errorf("%s: %w", report.DecisionsPath, err)
+		}
+		in.Decisions = d.Decisions
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return check.Result{}, err
+	}
+	if b, err := in.Head(report.ProposalPath); err == nil {
+		var p report.Proposal
+		if err := json.Unmarshal(b, &p); err != nil {
+			return check.Result{}, fmt.Errorf("%s: %w", report.ProposalPath, err)
+		}
+		in.Proposal = &p
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return check.Result{}, err
+	}
 	return check.Run(in), nil
 }
 
@@ -153,7 +175,7 @@ func patched(repo, patch string, m report.Manifest) (check.Files, func(), error)
 		return nil, nil, err
 	}
 	cleanup := func() { os.RemoveAll(dir) }
-	var paths []string
+	paths := []string{report.DecisionsPath, report.ProposalPath}
 	for _, p := range m.PipelineDefs {
 		paths = append(paths, p.Files...)
 		if p.HelmValues != nil {

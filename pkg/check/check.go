@@ -14,23 +14,24 @@ import (
 // Rules: what a finding is about. Each finding carries one, so a test or a
 // reader can tell an unsafe change from one that only lacks a sign-off.
 const (
-	RuleProtected     = "protected_signal"  // drops, samples or strips a hard keep, keep_high or dormant signal
-	RuleRecord        = "record"            // drops or samples a record, or deletes one of its outcome fields
-	RulePipelineRead  = "pipeline_reader"   // removes what a pipeline's own condition reads (S8 item 9, 10)
-	RuleAttrUnset     = "attribute_unset"   // reads an attribute no earlier step provides (S8 item 7)
-	RuleFailClosed    = "fail_closed"       // a step tvt can't evaluate sits in the change's path (S8 item 8)
-	RuleWarnLogs      = "warn_logs"         // drops warn-and-above log lines
-	RuleBuild         = "build_component"   // uses a component the Collector build lacks
-	RuleStaleManifest = "stale_manifest"    // the manifest is older than its max age
-	RuleGap           = "evidence_gap"      // a drop while the scan has an unacknowledged evidence gap
-	RuleUnconfirmed   = "unconfirmed_drop"  // a drop with no recorded owner confirmation (S9 records them)
-	RuleScrape        = "scrape_interval"   // a scrape interval change breaks an alert (S8 item 5)
-	RuleErrorGuard    = "error_guard"       // a log drop rule without the error-pattern guard (S8 item 2)
-	RuleHelm          = "helm_overlay"      // a values overlay loses the chart's own drops (S8 item 11)
-	RuleCollapse      = "collapse_counts"   // a collapse changes a count over the lines (S8 item 6)
-	RuleLeastLossy    = "least_lossy"       // a less lossy action keeps every reader (S8 item 3)
-	RuleUnreadable    = "unreadable_config" // a changed pipeline file tvt can't read
-	RuleDeltaReplicas = "delta_replicas"    // a delta-counter label removal behind several Collectors
+	RuleProtected     = "protected_signal"   // drops, samples or strips a hard keep, keep_high or dormant signal
+	RuleRecord        = "record"             // drops or samples a record, or deletes one of its outcome fields
+	RulePipelineRead  = "pipeline_reader"    // removes what a pipeline's own condition reads (S8 item 9, 10)
+	RuleAttrUnset     = "attribute_unset"    // reads an attribute no earlier step provides (S8 item 7)
+	RuleFailClosed    = "fail_closed"        // a step tvt can't evaluate sits in the change's path (S8 item 8)
+	RuleWarnLogs      = "warn_logs"          // drops warn-and-above log lines
+	RuleBuild         = "build_component"    // uses a component the Collector build lacks
+	RuleStaleManifest = "stale_manifest"     // the manifest is older than its max age
+	RuleGap           = "evidence_gap"       // a drop while the scan has an unacknowledged evidence gap
+	RuleUnconfirmed   = "unconfirmed_drop"   // a drop with no recorded owner confirmation (S9)
+	RuleStaleConfirm  = "stale_confirmation" // the evidence changed since the owner confirmed (S9 item 2)
+	RuleScrape        = "scrape_interval"    // a scrape interval change breaks an alert (S8 item 5)
+	RuleErrorGuard    = "error_guard"        // a log drop rule without the error-pattern guard (S8 item 2)
+	RuleHelm          = "helm_overlay"       // a values overlay loses the chart's own drops (S8 item 11)
+	RuleCollapse      = "collapse_counts"    // a collapse changes a count over the lines (S8 item 6)
+	RuleLeastLossy    = "least_lossy"        // a less lossy action keeps every reader (S8 item 3)
+	RuleUnreadable    = "unreadable_config"  // a changed pipeline file tvt can't read
+	RuleDeltaReplicas = "delta_replicas"     // a delta-counter label removal behind several Collectors
 )
 
 // Finding is one reason a change is refused.
@@ -87,6 +88,13 @@ type Input struct {
 	SkipConfirmation bool
 	// Objectives are detection objectives by severity (S8 item 5).
 	Objectives map[string]time.Duration
+	// Decisions are the owner decisions committed in the repo
+	// (report.DecisionsPath, S9 item 2), with the manifest's own.
+	Decisions []report.Decision
+	// Proposal is what a tvt PR proposes (report.ProposalPath), nil
+	// when the change isn't tvt's: each of its recommendations needs a
+	// confirmation whose evidence hash still matches.
+	Proposal *report.Proposal
 }
 
 // Run judges a change. It evaluates every pipeline file the manifest
@@ -144,15 +152,7 @@ func Run(in Input) Result {
 			r.Findings = append(r.Findings, Finding{Rule: RuleGap, Reason: fmt.Sprintf("the change drops data while %d evidence gaps are unacknowledged: %s. Acknowledge each in tvt.yaml gaps.acknowledge, or close it, and rerun tvt report --manifest-dir (tvt report lists them)", len(m.Gaps), strings.Join(gs, ", "))})
 		}
 		if !in.SkipConfirmation {
-			for _, d := range drops {
-				if confirmed(m, d) {
-					continue
-				}
-				f := d.finding()
-				f.Rule = RuleUnconfirmed
-				f.Reason = "no recorded owner confirmation for this drop (" + d.reason + ")"
-				r.Findings = append(r.Findings, f)
-			}
+			r.Findings = append(r.Findings, confirmations(m, in, drops)...)
 		}
 	}
 	sort.SliceStable(r.Findings, func(i, j int) bool {
@@ -169,15 +169,94 @@ func Run(in Input) Result {
 	return r
 }
 
-// confirmed: an owner decision with action confirm names the drop's tvt
-// block or the signal it drops.
-func confirmed(m report.Manifest, d effect) bool {
-	for _, dec := range m.Decisions {
-		if dec.Action == "confirm" && (dec.Signal == d.block && d.block != "" || dec.Signal == d.signal && d.signal != "") {
-			return true
+// confirmations judges the drops against the owners' decisions (S9 item
+// 2). A drop in a tvt block needs, for every recommendation the PR's
+// proposal carries for that pipeline, a confirm decision whose evidence
+// hash is the manifest's current one: a new reader or a reopened gap
+// since the owner looked makes it stale. A drop tvt didn't write (or a
+// tvt block with no proposal) needs a confirm naming its block or signal.
+func confirmations(m report.Manifest, in Input, drops []effect) []Finding {
+	decs := append(append([]report.Decision{}, m.Decisions...), in.Decisions...)
+	confirm := map[string]report.Decision{} // the last confirm per signal
+	for _, d := range decs {
+		if d.Action == report.DecisionConfirm {
+			confirm[d.Signal] = d
 		}
 	}
-	return false
+	current := map[string]report.ManifestEvidence{}
+	for _, e := range m.Evidence {
+		current[e.Signal] = e
+	}
+	var out []Finding
+	judged := map[string]bool{}
+	for _, d := range drops {
+		var changes []report.ProposedChange
+		if d.block != "" && in.Proposal != nil {
+			changes = in.Proposal.Pipelines[d.pipeline]
+		}
+		if len(changes) == 0 {
+			if _, ok := confirm[d.block]; ok && d.block != "" {
+				continue
+			}
+			if _, ok := confirm[d.signal]; ok && d.signal != "" {
+				continue
+			}
+			f := d.finding()
+			f.Rule = RuleUnconfirmed
+			f.Reason = "no recorded owner confirmation for this drop (" + d.reason + ")"
+			out = append(out, f)
+			continue
+		}
+		for _, c := range changes {
+			k := d.pipeline + "\x00" + c.Signal
+			if judged[k] {
+				continue
+			}
+			judged[k] = true
+			f := Finding{Pipeline: d.pipeline, File: d.file, Signal: c.Signal}
+			who := c.Owner
+			if who == "" {
+				who = "its owner (none found)"
+			} else if c.OwnerInferred {
+				who += " (inferred)"
+			}
+			dec, ok := confirm[c.Signal]
+			cur, known := current[c.Signal]
+			switch {
+			case !ok:
+				f.Rule = RuleUnconfirmed
+				f.Reason = fmt.Sprintf("%s hasn't confirmed %s (evidence %s): add a confirm to %s with tvt confirm", who, c.Recommendation, c.Evidence, report.DecisionsPath)
+			case !known:
+				f.Rule = RuleStaleConfirm
+				f.Reason = fmt.Sprintf("%s confirmed %s, but the current scan no longer recommends it: rerun tvt propose", dec.Owner, c.Recommendation)
+			case dec.Evidence != cur.Hash:
+				f.Rule = RuleStaleConfirm
+				f.Reason = fmt.Sprintf("%s confirmed %s at evidence %s, but it's now %s (readers: %s; gaps: %s): the owner must look again", dec.Owner, c.Recommendation,
+					cmpOr(dec.Evidence, "none"), cur.Hash, listOr(cur.Readers), listOr(cur.Gaps))
+			default:
+				continue
+			}
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func cmpOr(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+func listOr(s []string) string {
+	if len(s) == 0 {
+		return "none"
+	}
+	if len(s) > 5 {
+		return strings.Join(s[:5], ", ") + fmt.Sprintf(" and %d more", len(s)-5)
+	}
+	return strings.Join(s, ", ")
 }
 
 // effect is one thing a pipeline step does that check cares about.
