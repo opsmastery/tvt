@@ -267,6 +267,8 @@ A manifest lists every hard keep, keep_high and dormant signal that one of the r
 
 `decisions` holds owner decisions once the owner workflow exists (S9).
 
+Version 2 (S8) adds what `tvt check` needs to judge a PR with nothing else (`docs/check.md`): `pipeline_defs` (each pipeline's kind and files from `tvt.yaml`), `jobs` on each metric, `record_matches` (OTTL conditions for record spans and log events: the built-in agent tool calls and `tvt.yaml` `records.spans`/`records.log_events`), `gaps` (the scan's unacknowledged evidence gaps), `alerts` (each alert's severity, `for`, interval, range windows, recording rules, metrics, jobs and scrape interval) and `detection` (`tvt.yaml` objectives and `group_wait`).
+
 ## Records
 
 A record (S7 item 2, ADR 0011) is a signal tvt never drops, samples or collapses, whatever its readers: an audit log, deploy or change events, and agent tool-call spans once tvt reads spans. tvt marks a signal a record when `tvt.yaml` `records:` declares it (`metrics` regexes, `streams` selectors), when its metric name or one of its stream's label values has an audit, deploy-events or change-events token, or, for a stream signal, when it selects any stream that is a record. A record candidate is held as `record` and never recommended; records are in the protection manifest with `record` saying why. Capping a record's content attribute is allowed when its outcome fields stay; that check comes with `tvt check` (S8).

@@ -328,6 +328,10 @@ type Input struct {
 	Acknowledged []Acknowledgement
 	// Now stamps GeneratedAt; zero means the scan's start.
 	Now time.Time
+	// Objectives and GroupWait are tvt.yaml detection (S8 item 5): an
+	// alert past its severity's objective gets a rule finding.
+	Objectives map[string]time.Duration
+	GroupWait  time.Duration
 }
 
 // LastReadOf is a signal's last read, as the store returns it.
@@ -443,6 +447,7 @@ func Build(in Input, limit int) Report {
 	}
 	r.LineFindings = lineFindings(in.LineFindings, in.Scan.Currency)
 	r.Rules, r.Totals.RuleFindings = rules(consumers, in.RuleCosts, in.RuleFindings)
+	r.Totals.RuleFindings += detection(in, r.Rules)
 	r.QueryLoad = queryLoad(consumers, in.QueryCosts)
 	r.SLOCoverage = sloCoverage(in.SLOFindings)
 	r.Totals.SLOFindings = len(in.SLOFindings)
