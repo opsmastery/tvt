@@ -434,7 +434,7 @@ func prBody(repo string, scan int64, written []proposal, validation, build []str
 			fmt.Fprintf(&b, "- %s\n", n)
 		}
 	}
-	fmt.Fprintf(&b, "\n**To confirm** (S9)\n\nThis PR stays a draft, and `tvt check` refuses it, until each recommendation's owner confirms the evidence above. Check each signal with `tvt why <signal>`, then, on this branch:\n\n```sh\ntvt confirm --report <report.json> --dir . --owner <you> <recommendation>...\ngit add %s && git commit -m 'tvt: confirm' && git push\n```\n\nA confirmation records the evidence hash. If a new reader or a reopened gap changes it before the merge, `tvt check` asks the owner to look again.\n", report.DecisionsPath)
+	fmt.Fprintf(&b, "\n**To confirm** (S9)\n\nThis PR stays a draft, and `tvt check` refuses it, until each recommendation's owner confirms the evidence above. Check each signal with `tvt why <signal>`, then, on this branch:\n\n```sh\ntvt confirm --report <report.json> --dir . --owner <you> <recommendation>...\ngit add %s && git commit -m 'tvt: confirm' && git push\n```\n\nBefore confirming, answer one more question: is the signal read only at certain times of year (a year-end report, a holiday peak)? If so, record `--seasonal MONTHS` instead (a keep until after the next season), or `--dismiss REASON`. A confirmation records the evidence hash. If a new reader or a reopened gap changes it before the merge, `tvt check` asks the owner to look again.\n", report.DecisionsPath)
 	return b.String()
 }
 

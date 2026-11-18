@@ -65,6 +65,9 @@ type Report struct {
 	// incident-critical (by name, tier, or a runbook or postmortem naming
 	// them). Each is a question for the owner, never a drop candidate.
 	Confirm []Confirm `json:"confirm"`
+	// Decisions are the owner decisions in the pipeline repos (S9), each
+	// with its state: current, or reopened, expired or orphaned with why.
+	Decisions []DecisionState `json:"decisions"`
 	// LineFindings are line patterns worth cutting inside streams (S5
 	// items 3-4, version 5): reported with an estimated saving and handed
 	// to zeroreads, never acted on (ADR 0006).
@@ -179,7 +182,10 @@ type Recommendation struct {
 	Merges  int64  `json:"merges,omitempty"`
 	// DismissedReason says why, for a dismissed recommendation.
 	DismissedReason string `json:"dismissed_reason,omitempty"`
-	Score           Score  `json:"score"`
+	// Review says why an owner's earlier decision no longer holds (S9
+	// item 4): the row is open again.
+	Review string `json:"review,omitempty"`
+	Score  Score  `json:"score"`
 	// SavingsPerMinute ranks recommendations: the score's priority (savings
 	// discounted by usage and confidence) per minute of checking.
 	SavingsPerMinute float64 `json:"savings_per_minute"`
@@ -199,6 +205,9 @@ type Confirm struct {
 	OwnerSource   string `json:"owner_source,omitempty"`
 	OwnerInferred bool   `json:"owner_inferred,omitempty"`
 	Tier          *int   `json:"tier,omitempty"`
+	// EvidenceHash: as on a recommendation (the row's gaps; a dormant
+	// signal has no readers), for an owner's keep (S9 item 3).
+	EvidenceHash string `json:"evidence_hash"`
 	// Savings is what dropping it would save, if the owner says it can go.
 	Savings Savings `json:"savings"`
 	// Pipeline and PipelineNote: as on a recommendation (S6 item 4).
@@ -345,6 +354,8 @@ type Input struct {
 	// alert past its severity's objective gets a rule finding.
 	Objectives map[string]time.Duration
 	GroupWait  time.Duration
+	// Decisions are the pipeline repos' .tvt/decisions.yaml (S9).
+	Decisions []RepoDecisions
 }
 
 // LastReadOf is a signal's last read, as the store returns it.
@@ -362,7 +373,7 @@ type LastReadOf struct {
 // and so is the every-stream signal. Recommendations come highest savings
 // per minute of checking first; limit > 0 keeps that many.
 func Build(in Input, limit int) Report {
-	r := Report{Version: Version, GeneratedAt: in.Now, Scan: in.Scan, Sources: []Source{}, Gaps: []Gap{}, Recommendations: []Recommendation{}, Confirm: []Confirm{}, Services: []Service{}}
+	r := Report{Version: Version, GeneratedAt: in.Now, Scan: in.Scan, Sources: []Source{}, Gaps: []Gap{}, Recommendations: []Recommendation{}, Confirm: []Confirm{}, Services: []Service{}, Decisions: []DecisionState{}}
 	if r.GeneratedAt.IsZero() {
 		r.GeneratedAt = in.Scan.StartedAt
 	}
@@ -456,6 +467,7 @@ func Build(in Input, limit int) Report {
 	r.Pipelines = pipelineTargets(r.Recommendations, r.Confirm, in.PipelineTargets, in.StreamVolumes, gs)
 	r.Overflow = overflow(in.OverflowFindings, r.Recommendations, r.Confirm, gs)
 	r.Totals.Overflow = len(r.Overflow)
+	r.Decisions = applyDecisions(&r, in.Decisions, in.Signals, in.Scan.StartedAt)
 	if limit > 0 && len(r.Recommendations) > limit {
 		r.Recommendations = r.Recommendations[:limit]
 	}
@@ -515,6 +527,7 @@ func confirmRows(signals []graph.Signal, costs map[string]graph.Cost, gs *gaps, 
 			// S9 item 1: report only, never routed to a guess.
 			row.Gaps = append(row.Gaps, MissingOwnerGap)
 		}
+		row.EvidenceHash = EvidenceHash(Evidence{Gaps: row.Gaps})
 		row.Question = question(s, row, meta)
 		out = append(out, row)
 	}
@@ -547,7 +560,7 @@ func question(s graph.Signal, row Confirm, meta Scan) string {
 	if meta.Currency != "" {
 		money += " " + meta.Currency
 	}
-	return fmt.Sprintf("%s: nothing read %s in the %d days to %s, but it looks incident-critical (%s). Will you need it during an incident? If not, it becomes a drop candidate worth %s a month.",
+	return fmt.Sprintf("%s: nothing read %s in the %d days to %s, but it looks incident-critical (%s). Will you need it during an incident, or at certain times of year? If not, it becomes a drop candidate worth %s a month.",
 		who, what, meta.WindowDays, meta.StartedAt.UTC().Format("2006-01-02"), s.Dormant, money)
 }
 
