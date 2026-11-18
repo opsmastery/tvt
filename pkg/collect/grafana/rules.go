@@ -27,6 +27,7 @@ type rawRuleGroup struct {
 }
 
 type rawRule struct {
+	For          string            `json:"for"`
 	Annotations  map[string]string `json:"annotations"`
 	Labels       map[string]string `json:"labels"`
 	GrafanaAlert struct {
@@ -109,6 +110,9 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 				}
 				if len(raw.Annotations) > 0 {
 					r.Annotations = raw.Annotations
+				}
+				if d, err := time.ParseDuration(raw.For); err == nil {
+					r.For = d
 				}
 				if len(raw.Labels) > 0 {
 					r.Labels = raw.Labels

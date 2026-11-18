@@ -22,6 +22,8 @@ type rulesData struct {
 			Name  string `json:"name"`
 			Query string `json:"query"`
 			Type  string `json:"type"` // "alerting" or "recording"
+			// Duration is an alerting rule's for:, in seconds.
+			Duration float64 `json:"duration"`
 			// Annotations: alerting rules only.
 			Annotations map[string]string `json:"annotations"`
 			Labels      map[string]string `json:"labels"`
@@ -61,6 +63,7 @@ func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
 				Expr:      r.Query,
 				Language:  "promql",
 				Interval:  time.Duration(g.Interval * float64(time.Second)),
+				For:       time.Duration(min(max(r.Duration, 0), 86400*30) * float64(time.Second)),
 				// Clamped: a hostile or broken API can't overflow it.
 				GroupEvaluation: time.Duration(min(max(g.EvaluationTime, 0), 86400) * float64(time.Second)),
 

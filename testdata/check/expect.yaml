@@ -1,0 +1,164 @@
+# tvt-lab ground truth's check:, detection: and pipeline_readers: at LAB_COMMIT
+# (tvt S8, test-first). Regenerate with the lab files when tvt-lab changes.
+check:
+  span-filter-success:
+    file: check-fixtures/span-filter-success.patch
+    item: 13
+    expect: refuse
+    reasons:
+    - a filter span condition can be true for record spans (execute_tool with success=true)
+  span-probabilistic-sampler:
+    file: check-fixtures/span-probabilistic-sampler.patch
+    item: 13
+    expect: refuse
+    reasons:
+    - probabilistic_sampler on a traces pipeline with record spans
+  span-tail-sampling-no-records:
+    file: check-fixtures/span-tail-sampling-no-records.patch
+    item: 13
+    expect: refuse
+    reasons:
+    - tail_sampling has no policy that always keeps execute_tool spans
+  span-delete-tool-call-id:
+    file: check-fixtures/span-delete-tool-call-id.patch
+    item: 13
+    expect: refuse
+    reasons:
+    - deletes the outcome field gen_ai.tool.call.id from record spans
+  span-cap-tool-parameters:
+    file: check-fixtures/span-cap-tool-parameters.patch
+    item: 13
+    expect: accept
+    why: caps a content attribute (Substring) and marks the cut; outcome fields stay
+  routing-attribute-delete:
+    file: check-fixtures/routing-attribute-delete.patch
+    item: 9
+    expect: refuse
+    reasons:
+    - deletes gen_ai.operation.name, which routing/tools reads
+    - deletes the attribute that identifies record spans (records.spans)
+  filter-reads-later-attribute:
+    file: check-fixtures/filter-reads-later-attribute.patch
+    item: 7
+    expect: refuse
+    reasons:
+    - filter/env reads deployment.environment before attributes/env sets it
+    - so the condition drops every agent metric
+  log-filter-counted-stream:
+    file: check-fixtures/log-filter-counted-stream.patch
+    item: 10
+    expect: refuse
+    reasons:
+    - empties the lines count/shop_errors counts
+    - and ShopErrorLogBurst reads its metric
+  log-drop-after-experimental:
+    file: check-fixtures/log-drop-after-experimental.patch
+    item: 8
+    expect: refuse
+    reasons:
+    - the logs pipeline runs transform/lint's experimental ToValidUTF8
+    - which tvt doesn't model
+    - before the drop (fail closed)
+    why: the drop itself is one ground truth expects (genai_agent.logs api_request); only the experimental statement blocks it
+  scrape-interval-5m:
+    file: check-fixtures/scrape-interval-5m.patch
+    item: 5
+    expect: refuse
+    reasons:
+    - rate windows hold fewer than four samples (5m windows hold 1, 15m windows 3) for ShopHealthcheckSlow, ShopErrorRateHigh, ShopHighErrorRate, ShopAvailabilityBurn, ShopLegacyExportStalled and the p99_5m
+      recording rule behind ShopHighLatency
+    - for is shorter than the new interval (ShopAvailabilityBurn, 2m)
+    - ShopHighErrorRate and ShopErrorRateHigh pass the critical objective (16m > 15m)
+    note: for 0 alerts (ShopPaymentQueueSpike, ShopDailyCheckoutsLow) fire on one sample by design; the for rule is for a nonzero for
+  scrape-interval-15s:
+    file: check-fixtures/scrape-interval-15s.patch
+    item: 5
+    expect: accept
+    why: 5m windows still hold 20 samples, every nonzero for is longer, and the worst critical delay is 11m15s
+detection:
+  objectives:
+    critical: 15m
+    warning: 1h
+  alerts:
+    ShopPaymentQueueSpike:
+      severity: critical
+      delay: 45s
+      terms: 10s + 0 + 5s (shop-fast) + 0 + 30s
+    ShopPaymentQueueBacklog:
+      severity: critical
+      delay: 6m10s
+      terms: 10s + 0 + 30s + 5m + 30s
+    ShopHighErrorRate:
+      severity: critical
+      delay: 11m10s
+      terms: 10s + 5m + 30s + 5m + 30s
+    ShopErrorRateHigh:
+      severity: critical
+      delay: 11m10s
+      terms: 10s + 5m + 30s + 5m + 30s
+    ShopAvailabilityBurn:
+      severity: critical
+      delay: 1h3m10s
+      terms: 10s + 1h + 30s + 2m + 30s
+      expect: 'past the critical objective under the plain formula, which takes the longest window. A multiwindow burn alert trips on its short window once the long one is over its threshold (a full outage
+        crosses 14.4x of a 0.1% budget on the 1h window in under a minute), which gives 8m10s. S8 decides which tvt reports; either way it''s a report finding, not a check refusal, since no change caused
+        it.
+
+        '
+    ShopHealthcheckSlow:
+      severity: warning
+      delay: 16m10s
+      terms: 10s + 5m + 30s + 10m + 30s
+    ShopHighLatency:
+      severity: warning
+      delay: 16m40s
+      terms: 10s + 5m + 30s (recording rule) + 30s + 10m + 30s
+    ShopInventorySyncMissing:
+      severity: warning
+      delay: 21m10s
+      terms: 10s + 10m (the 600s staleness threshold) + 30s + 10m + 30s
+    ShopLegacyExportStalled:
+      severity: warning
+      delay: 46m10s
+      terms: 10s + 15m + 30s + 30m + 30s
+    ShopErrorLogBurst:
+      severity: warning
+      delay: 11m
+      terms: 0 (pushed) + 5m + 30s + 5m + 30s
+    ShopCheckoutErrorsFromLogs:
+      severity: warning
+      delay: 12m
+      terms: 0 + 5m + 1m (Loki recording rule) + 30s + 5m + 30s
+    ShopAuditDenials:
+      severity: warning
+      delay: 11m30s
+      terms: 0 + 5m + 1m (Loki ruler) + 5m + 30s
+    Shop order export lag:
+      severity: warning
+      delay: 16m40s
+      terms: 10s + 10m (relative range 600s) + 1m + 5m + 30s
+    Shop checkout errors (logs):
+      severity: warning
+      delay: 11m
+      terms: 0 + 5m (relative range 300s) + 30s + 5m + 30s
+    ShopDailyCheckoutsLow:
+      severity: info
+      delay: 24h1m40s
+      terms: 10s + 24h + 1m (shop-daily) + 0 + 30s
+pipeline_readers:
+- pipeline: otelcol-agent
+  component: connector routing/tools
+  reads:
+    span_attributes:
+    - gen_ai.operation.name
+  why: routes execute_tool spans to traces/tools; deleting the attribute sends every span to traces/other
+- pipeline: otelcol-agent
+  component: connector count/shop_errors
+  makes: shop_error_log_lines_total
+  reads:
+    streams:
+    - '{app="shop", level="error"}'
+    log_attributes:
+    - level
+    - component
+  why: a drop or filter that empties the counted lines silences ShopErrorLogBurst

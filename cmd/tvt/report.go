@@ -13,12 +13,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/cost"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
+	"github.com/prometheus/common/model"
 )
 
 type reportOptions struct {
@@ -90,6 +92,13 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 		return err
 	}
 	in.LabelDrops = o.LabelDrops
+	if o.Config != "" {
+		cfg, err := config.Load(o.Config)
+		if err != nil {
+			return err
+		}
+		in.Objectives, in.GroupWait = detectionOf(cfg)
+	}
 	if in.Acknowledged, err = acknowledgements(o.Config); err != nil {
 		return err
 	}
@@ -172,11 +181,7 @@ func writeManifests(o reportOptions, in report.Input, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	repos := map[string]string{}
-	for _, p := range cfg.Pipelines {
-		repos[p.Name] = p.Repo
-	}
-	ms := report.Manifests(in, repos)
+	ms := buildManifests(cfg, in)
 	names := make([]string, 0, len(ms))
 	for r := range ms {
 		names = append(names, r)
@@ -308,4 +313,78 @@ func writeFileAtomic(path string, b []byte) error {
 		return err
 	}
 	return os.Rename(f.Name(), path)
+}
+
+// buildManifests builds the protection manifests from a scan and
+// tvt.yaml: the signals (report.Manifests), then what tvt check needs
+// beyond them (version 2).
+func buildManifests(cfg *config.Config, in report.Input) map[string]report.Manifest {
+	repos := map[string]string{}
+	for _, p := range cfg.Pipelines {
+		repos[p.Name] = p.Repo
+	}
+	ms := report.Manifests(in, repos)
+	// Version 2: what tvt check needs beyond the signals.
+	matches := report.RecordMatches{
+		Spans:     append(append([]string{}, report.BuiltinRecordMatches.Spans...), cfg.Records.Spans...),
+		LogEvents: append(append([]string{}, report.BuiltinRecordMatches.LogEvents...), cfg.Records.LogEvents...),
+	}
+	alerts := report.AlertTimings(in)
+	obj, gw := detectionOf(cfg)
+	det := report.ManifestDetection{GroupWaitSec: gw.Seconds()}
+	for sev, d := range obj {
+		if det.ObjectivesSec == nil {
+			det.ObjectivesSec = map[string]float64{}
+		}
+		det.ObjectivesSec[sev] = d.Seconds()
+	}
+	var gaps []report.ManifestGap
+	for _, g := range report.Build(in, 0).Gaps {
+		if !g.Acknowledged {
+			gaps = append(gaps, report.ManifestGap{Source: g.Source, Gap: g.Text})
+		}
+	}
+	for r, m := range ms {
+		for _, p := range cfg.Pipelines {
+			if p.Repo != r {
+				continue
+			}
+			d := report.PipelineDef{Name: p.Name, Kind: p.Kind, Files: p.Files, Build: p.Build, Version: p.Version, Handles: p.Handles}
+			if h := p.HelmValues; h != nil {
+				d.HelmValues = &report.ManifestHelm{File: h.File, Path: h.Path, Defaults: h.Defaults}
+			}
+			m.PipelineDefs = append(m.PipelineDefs, d)
+		}
+		sort.Slice(m.PipelineDefs, func(i, j int) bool { return m.PipelineDefs[i].Name < m.PipelineDefs[j].Name })
+		m.RecordMatches = matches
+		if gaps != nil {
+			m.Gaps = gaps
+		}
+		if alerts != nil {
+			m.Alerts = alerts
+		}
+		m.Detection = det
+		ms[r] = m
+	}
+	return ms
+}
+
+// detectionOf reads tvt.yaml detection: objectives by severity and
+// group_wait (Alertmanager's 30s default when unset). Values that don't
+// parse are skipped (config.Load has validated them).
+func detectionOf(cfg *config.Config) (map[string]time.Duration, time.Duration) {
+	gw := report.DefaultGroupWait
+	if d, err := model.ParseDuration(cfg.Detection.GroupWait); err == nil && cfg.Detection.GroupWait != "" {
+		gw = time.Duration(d)
+	}
+	var obj map[string]time.Duration
+	for sev, o := range cfg.Detection.Objectives {
+		if d, err := model.ParseDuration(o); err == nil {
+			if obj == nil {
+				obj = map[string]time.Duration{}
+			}
+			obj[sev] = time.Duration(d)
+		}
+	}
+	return obj, gw
 }

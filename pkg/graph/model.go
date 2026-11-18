@@ -154,6 +154,10 @@ type Consumer struct {
 	EvaluatedBy string
 	Interval    time.Duration
 	Datasources []string
+	// Alerts only (schema version 25, S8 item 5): For is the pending
+	// period, Severity the severity label ("" when it has none).
+	For      time.Duration
+	Severity string
 	// Unparsed says why tvt couldn't read the consumer's query (a panel
 	// on a datasource type it doesn't parse, such as Pyroscope); empty
 	// when it could. Its references are assumed, and a consumer with

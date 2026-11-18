@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 24
+const SchemaVersion = 25
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -462,6 +462,17 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 25 {
+		for _, q := range []string{
+			`ALTER TABLE consumers ADD COLUMN for_ms INTEGER`,
+			`ALTER TABLE consumers ADD COLUMN severity TEXT NOT NULL DEFAULT ''`,
+			`UPDATE meta SET value = '25' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -601,7 +612,7 @@ func (s *Store) Signals(ctx context.Context, scanID int64) ([]graph.Signal, erro
 // Consumers returns the consumers seen in scan scanID, ordered by ID.
 func (s *Store) Consumers(ctx context.Context, scanID int64) ([]graph.Consumer, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, kind, name, expr, team, last_viewed, evaluated_by, interval_ms, datasources, unparsed, client FROM consumers WHERE last_scan = ? ORDER BY id`, scanID)
+		`SELECT id, kind, name, expr, team, last_viewed, evaluated_by, interval_ms, datasources, unparsed, client, for_ms, severity FROM consumers WHERE last_scan = ? ORDER BY id`, scanID)
 	if err != nil {
 		return nil, err
 	}
@@ -610,10 +621,13 @@ func (s *Store) Consumers(ctx context.Context, scanID int64) ([]graph.Consumer, 
 	for rows.Next() {
 		var c graph.Consumer
 		var kind string
-		var viewed, interval sql.NullInt64
+		var viewed, interval, forMs sql.NullInt64
 		var dss string
-		if err := rows.Scan(&c.ID, &kind, &c.Name, &c.Expr, &c.Team, &viewed, &c.EvaluatedBy, &interval, &dss, &c.Unparsed, &c.Client); err != nil {
+		if err := rows.Scan(&c.ID, &kind, &c.Name, &c.Expr, &c.Team, &viewed, &c.EvaluatedBy, &interval, &dss, &c.Unparsed, &c.Client, &forMs, &c.Severity); err != nil {
 			return nil, err
+		}
+		if forMs.Valid {
+			c.For = time.Duration(forMs.Int64) * time.Millisecond
 		}
 		c.Kind, c.LastViewed = graph.ConsumerKind(kind), fromNullMillis(viewed)
 		if interval.Valid {
@@ -1054,12 +1068,12 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 				owner = excluded.owner, tier = excluded.tier, record = excluded.record,
 				first_seen = min(signals.first_seen, excluded.first_seen),
 				last_scan = excluded.last_scan`},
-		{&sc.cons, `INSERT INTO consumers (id, kind, name, expr, team, last_viewed, last_scan, evaluated_by, interval_ms, datasources, unparsed, client)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		{&sc.cons, `INSERT INTO consumers (id, kind, name, expr, team, last_viewed, last_scan, evaluated_by, interval_ms, datasources, unparsed, client, for_ms, severity)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET
 				kind = excluded.kind, name = excluded.name, expr = excluded.expr, team = excluded.team,
 				evaluated_by = excluded.evaluated_by, interval_ms = excluded.interval_ms, datasources = excluded.datasources,
-				unparsed = excluded.unparsed, client = excluded.client,
+				unparsed = excluded.unparsed, client = excluded.client, for_ms = excluded.for_ms, severity = excluded.severity,
 				last_viewed = CASE
 					WHEN consumers.last_viewed IS NULL THEN excluded.last_viewed
 					WHEN excluded.last_viewed IS NULL THEN consumers.last_viewed
@@ -1174,8 +1188,12 @@ func (sc *Scan) PutConsumer(ctx context.Context, c graph.Consumer) error {
 	if c.Interval > 0 {
 		interval = sql.NullInt64{Int64: c.Interval.Milliseconds(), Valid: true}
 	}
+	var forMs sql.NullInt64
+	if c.For > 0 {
+		forMs = sql.NullInt64{Int64: c.For.Milliseconds(), Valid: true}
+	}
 	_, err := sc.cons.ExecContext(ctx, c.ID, string(c.Kind), c.Name, c.Expr, c.Team, nullMillis(c.LastViewed), sc.ID,
-		c.EvaluatedBy, interval, strings.Join(c.Datasources, "\n"), c.Unparsed, c.Client)
+		c.EvaluatedBy, interval, strings.Join(c.Datasources, "\n"), c.Unparsed, c.Client, forMs, c.Severity)
 	return wrap("consumer", c.ID, err)
 }
 
