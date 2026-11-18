@@ -84,6 +84,8 @@ ownership:
   backstage: [../services]              # searched for catalog-info.yaml
   services: {checkout: payments, ai-platform/coding-agent: ai-platform}
   kubernetes: [../deploy/manifests]
+  # The GitHub user or team tvt propose asks to review each owner's changes.
+  github: {payments: "@acme/payments", shop: "@acme/shop", ai-platform: "@acme/ai-platform"}
 
 # SLO definitions (Sloth, Pyrra, OpenSLO): files or directories, relative to
 # this file. Everything an SLI reads is a hard keep; an SLI tvt can't read
