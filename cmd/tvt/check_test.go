@@ -404,7 +404,7 @@ func TestConfirm(t *testing.T) {
 		return d
 	}
 	d := read()
-	if len(d.Decisions) != 2 || d.Decisions[0] != (report.Decision{Signal: "prom:metric:a_total", Action: "confirm", Owner: "team-a", Evidence: "111111111111", At: "2026-11-18"}) ||
+	if len(d.Decisions) != 2 || d.Decisions[0] != (report.Decision{Signal: "prom:metric:a_total", Action: "confirm", Owner: "team-a", Evidence: "111111111111", At: "2026-11-18", OwnerOfRecord: "team-a"}) ||
 		d.Decisions[1].Action != "keep" || d.Decisions[1].Review != "2027-02-16" || d.Decisions[1].Reason != "read at year end" {
 		t.Errorf("decisions: %+v", d.Decisions)
 	}
@@ -422,5 +422,36 @@ func TestConfirm(t *testing.T) {
 	}
 	if err := runConfirm(confirmOptions{Report: rp, Dir: dir, Owner: "team-a", Now: now}, []string{"nope"}, &out); err == nil {
 		t.Error("an unknown recommendation was confirmed")
+	}
+}
+
+// TestConfirmSeasonal: the seasonal answer is a keep until after the next
+// season (S9 item 3), and works on a dormant signal's question too.
+func TestConfirmSeasonal(t *testing.T) {
+	dir := t.TempDir()
+	rep := report.Report{Confirm: []report.Confirm{{ID: "confirm:prom:metric:year_end_total", Signal: report.SignalRef{ID: "prom:metric:year_end_total", Name: "year_end_total"}, Owner: "finance", EvidenceHash: "333333333333"}}}
+	b, _ := json.Marshal(rep)
+	rp := filepath.Join(dir, "r.json")
+	if err := os.WriteFile(rp, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	now := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)
+	if err := runConfirm(confirmOptions{Report: rp, Dir: dir, Owner: "finance", Seasonal: "dec,jan", Now: now}, []string{"year_end_total"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, report.DecisionsPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d report.Decisions
+	if err := yaml.Unmarshal(b, &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Decisions) != 1 || d.Decisions[0].Action != "keep" || d.Decisions[0].Review != "2027-02-01" || d.Decisions[0].Reason != "seasonal: read only in dec,jan" || d.Decisions[0].Evidence != "333333333333" {
+		t.Errorf("seasonal: %+v", d.Decisions)
+	}
+	if err := runConfirm(confirmOptions{Report: rp, Dir: dir, Owner: "finance", Seasonal: "dec", Keep: "x", Now: now}, []string{"year_end_total"}, &out); err == nil {
+		t.Error("--seasonal with --keep was accepted")
 	}
 }

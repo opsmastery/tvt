@@ -23,6 +23,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
 	"github.com/prometheus/common/model"
+	"go.yaml.in/yaml/v3"
 )
 
 type reportOptions struct {
@@ -100,6 +101,9 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 			return err
 		}
 		in.Objectives, in.GroupWait = detectionOf(cfg)
+		if in.Decisions, err = repoDecisions(cfg); err != nil {
+			return err
+		}
 	}
 	if in.Acknowledged, err = acknowledgements(o.Config); err != nil {
 		return err
@@ -413,3 +417,30 @@ func detectionOf(cfg *config.Config) (map[string]time.Duration, time.Duration) {
 // unselectedRe reads scan.MonitorSelection's gap line for a monitor no
 // server selects.
 var unselectedRe = regexp.MustCompile(`^(ServiceMonitor|PodMonitor) (\S+/\S+) is selected by no `)
+
+// repoDecisions reads each pipeline repo's .tvt/decisions.yaml from its
+// tvt.yaml checkout (S9): one read per repo, repos without a checkout or
+// without decisions skipped.
+func repoDecisions(cfg *config.Config) ([]report.RepoDecisions, error) {
+	var out []report.RepoDecisions
+	seen := map[string]bool{}
+	for _, p := range cfg.Pipelines {
+		if p.Checkout == "" || seen[p.Repo] {
+			continue
+		}
+		seen[p.Repo] = true
+		b, err := os.ReadFile(filepath.Join(p.Checkout, filepath.FromSlash(report.DecisionsPath)))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		var d report.Decisions
+		if err := yaml.Unmarshal(b, &d); err != nil {
+			return nil, fmt.Errorf("%s %s: %w", p.Repo, report.DecisionsPath, err)
+		}
+		out = append(out, report.RepoDecisions{Repo: p.Repo, Decisions: d.Decisions})
+	}
+	return out, nil
+}

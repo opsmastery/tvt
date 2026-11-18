@@ -24,7 +24,10 @@ type confirmOptions struct {
 	Dismiss string
 	Keep    string
 	Review  string
-	Now     time.Time
+	// Seasonal: the owner says it's read only in these months (S9 item
+	// 3): a keep until after the next season.
+	Seasonal string
+	Now      time.Time
 }
 
 // cmdConfirm records owner decisions in a pipeline repo's
@@ -43,7 +46,12 @@ for you to commit on the PR: confirm (the default), --dismiss REASON, or
 --keep REASON. A confirm records the evidence hash the report shows; tvt
 check refuses the merge once the evidence changes (a new reader, a gap
 reopened). --all confirms every recommendation in the repo's
-.tvt/proposal.json that --owner owns.`)
+.tvt/proposal.json that --owner owns.
+
+Before confirming, the owner answers one more question: is this signal
+read only at certain times of year (a year-end report, a holiday peak)?
+If so, record --seasonal MONTHS instead: a keep until after the next
+season, when tvt asks again.`)
 		fs.PrintDefaults()
 	}
 	fs.StringVar(&o.Report, "report", "", "the report JSON the owner reviewed (tvt report --json)")
@@ -53,6 +61,7 @@ reopened). --all confirms every recommendation in the repo's
 	fs.StringVar(&o.Dismiss, "dismiss", "", "dismiss instead, for this reason (tvt won't propose it again before --review)")
 	fs.StringVar(&o.Keep, "keep", "", "keep instead, for this reason (for example: read at year end)")
 	fs.StringVar(&o.Review, "review", "", "when to ask again, YYYY-MM-DD (dismiss and keep; default 90 days)")
+	fs.StringVar(&o.Seasonal, "seasonal", "", "it's read only in these months (11,12 or nov,dec): keep it until after the next season")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK
@@ -70,18 +79,33 @@ func runConfirm(o confirmOptions, ids []string, out io.Writer) error {
 	if o.Report == "" || o.Owner == "" {
 		return errors.New("--report and --owner are required")
 	}
-	if o.Dismiss != "" && o.Keep != "" {
-		return errors.New("--dismiss and --keep: choose one")
+	n := 0
+	for _, s := range []string{o.Dismiss, o.Keep, o.Seasonal} {
+		if s != "" {
+			n++
+		}
+	}
+	if n > 1 {
+		return errors.New("--dismiss, --keep and --seasonal: choose one")
 	}
 	action, reason := report.DecisionConfirm, ""
+	review := ""
 	switch {
 	case o.Dismiss != "":
 		action, reason = report.DecisionDismiss, o.Dismiss
 	case o.Keep != "":
 		action, reason = report.DecisionKeep, o.Keep
+	case o.Seasonal != "":
+		months, err := report.ParseMonths(o.Seasonal)
+		if err != nil {
+			return fmt.Errorf("--seasonal: %w", err)
+		}
+		if review, err = report.SeasonReview(months, o.Now); err != nil {
+			return fmt.Errorf("--seasonal: %w", err)
+		}
+		action, reason = report.DecisionKeep, "seasonal: read only in "+o.Seasonal
 	}
-	review := ""
-	if action != report.DecisionConfirm {
+	if action != report.DecisionConfirm && review == "" {
 		review = o.Review
 		if review == "" {
 			review = o.Now.AddDate(0, 0, 90).Format(time.DateOnly)
@@ -146,7 +170,7 @@ func runConfirm(o confirmOptions, ids []string, out io.Writer) error {
 			fmt.Fprintf(out, "note: %s names %s as the owner of %s; recording %s's decision\n", o.Report, rec.Owner, rec.ID, o.Owner)
 		}
 		dec := report.Decision{Signal: rec.Signal.ID, Action: action, Owner: o.Owner, Reason: reason, Evidence: ev,
-			At: o.Now.Format(time.DateOnly), Review: review}
+			At: o.Now.Format(time.DateOnly), Review: review, OwnerOfRecord: rec.Owner}
 		// One decision per signal: a new one replaces the last.
 		kept := d.Decisions[:0]
 		for _, x := range d.Decisions {
@@ -189,6 +213,12 @@ func findRec(r report.Report, id string) (report.Recommendation, bool) {
 	}
 	if len(hit) == 1 {
 		return hit[0], true
+	}
+	// A dormant signal's question (confirm rows): keep or dismiss it.
+	for _, c := range r.Confirm {
+		if c.ID == id || c.Signal.ID == id || c.Signal.Name == id {
+			return report.Recommendation{ID: c.ID, Signal: c.Signal, Owner: c.Owner, OwnerInferred: c.OwnerInferred, EvidenceHash: c.EvidenceHash}, true
+		}
 	}
 	return report.Recommendation{}, false
 }
