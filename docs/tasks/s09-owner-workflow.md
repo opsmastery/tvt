@@ -1,6 +1,6 @@
 # S9: owner workflow
 
-**Status:** Planned.
+**Status:** In progress (Nov 18). Item 1 done (`pkg/scan/owners.go`, schema 26 `signals.owner_source`/`owner_inferred`); lab seeds in tvt-lab #41.
 
 **Done when:** a lab drop goes from draft to ready only after a recorded confirmation, and changing its evidence reopens it.
 

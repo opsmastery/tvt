@@ -28,10 +28,17 @@ import (
 // A label signal takes its metric's owner, tier and name rules; a stream
 // signal's name rules run over its selector.
 func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.Reference, overlaps map[string][]string, owners []config.Owner, mentions map[string]string, missed map[string]string, since, until time.Time) error {
+	return classifyOwned(signals, consumers, refs, overlaps, owners, OwnerSources{}, nil, mentions, missed, since, until)
+}
+
+// classifyOwned is classify with the other owner sources (S9 item 1) and
+// each metric's jobs, which name its component.
+func classifyOwned(signals []graph.Signal, consumers []graph.Consumer, refs []graph.Reference, overlaps map[string][]string, owners []config.Owner, src OwnerSources, jobs map[string][]string, mentions map[string]string, missed map[string]string, since, until time.Time) error {
 	om, err := newOwnerMatcher(owners)
 	if err != nil {
 		return err
 	}
+	or := &ownerResolver{cfg: om, src: src, jobs: jobs}
 	byID := make(map[string]graph.Consumer, len(consumers))
 	for _, c := range consumers {
 		byID[c.ID] = c
@@ -97,10 +104,10 @@ func classify(signals []graph.Signal, consumers []graph.Consumer, refs []graph.R
 			f.Mentioned = mentions[f.Name]
 		}
 		f.Tier = -1
-		if o := om.match(*s); o != nil {
-			s.Owner = o.Name
-			f.Seasonal = missed[o.Name]
-			if o.Tier != nil {
+		if r := or.resolve(*s); r.name != "" {
+			s.Owner, s.OwnerSource, s.OwnerInferred = r.name, r.source, r.inferred
+			f.Seasonal = missed[r.name]
+			if o := r.cfg; o != nil && o.Tier != nil {
 				t := *o.Tier
 				s.Tier, f.Tier = &t, t
 			}

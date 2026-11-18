@@ -29,7 +29,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 25
+const SchemaVersion = 26
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -473,6 +473,17 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 26 {
+		for _, q := range []string{
+			`ALTER TABLE signals ADD COLUMN owner_source TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE signals ADD COLUMN owner_inferred INTEGER NOT NULL DEFAULT 0`,
+			`UPDATE meta SET value = '26' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -585,7 +596,7 @@ func (s *Store) FirstSeen(ctx context.Context) (map[string]time.Time, error) {
 // Signals returns the signals seen in scan scanID, ordered by ID.
 func (s *Store) Signals(ctx context.Context, scanID int64) ([]graph.Signal, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, kind, name, parent, source, first_seen, class, dormant, owner, tier, record FROM signals WHERE last_scan = ? ORDER BY id`, scanID)
+		`SELECT id, kind, name, parent, source, first_seen, class, dormant, owner, tier, record, owner_source, owner_inferred FROM signals WHERE last_scan = ? ORDER BY id`, scanID)
 	if err != nil {
 		return nil, err
 	}
@@ -596,7 +607,7 @@ func (s *Store) Signals(ctx context.Context, scanID int64) ([]graph.Signal, erro
 		var kind string
 		var first int64
 		var tier sql.NullInt64
-		if err := rows.Scan(&sg.ID, &kind, &sg.Name, &sg.Parent, &sg.Source, &first, &sg.Class, &sg.Dormant, &sg.Owner, &tier, &sg.Record); err != nil {
+		if err := rows.Scan(&sg.ID, &kind, &sg.Name, &sg.Parent, &sg.Source, &first, &sg.Class, &sg.Dormant, &sg.Owner, &tier, &sg.Record, &sg.OwnerSource, &sg.OwnerInferred); err != nil {
 			return nil, err
 		}
 		sg.Kind, sg.FirstSeen = graph.SignalKind(kind), fromMillis(first)
@@ -1060,12 +1071,13 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		dst **sql.Stmt
 		sql string
 	}{
-		{&sc.signal, `INSERT INTO signals (id, kind, name, parent, source, first_seen, last_scan, class, dormant, owner, tier, record)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		{&sc.signal, `INSERT INTO signals (id, kind, name, parent, source, first_seen, last_scan, class, dormant, owner, tier, record, owner_source, owner_inferred)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (id) DO UPDATE SET
 				kind = excluded.kind, name = excluded.name, parent = excluded.parent,
 				source = excluded.source, class = excluded.class, dormant = excluded.dormant,
 				owner = excluded.owner, tier = excluded.tier, record = excluded.record,
+				owner_source = excluded.owner_source, owner_inferred = excluded.owner_inferred,
 				first_seen = min(signals.first_seen, excluded.first_seen),
 				last_scan = excluded.last_scan`},
 		{&sc.cons, `INSERT INTO consumers (id, kind, name, expr, team, last_viewed, last_scan, evaluated_by, interval_ms, datasources, unparsed, client, for_ms, severity)
@@ -1171,7 +1183,7 @@ func (sc *Scan) PutSignal(ctx context.Context, s graph.Signal) error {
 		tier = sql.NullInt64{Int64: int64(*s.Tier), Valid: true}
 	}
 	_, err := sc.signal.ExecContext(ctx, s.ID, string(s.Kind), s.Name, s.Parent, s.Source, millis(first), sc.ID,
-		s.Class, s.Dormant, s.Owner, tier, s.Record)
+		s.Class, s.Dormant, s.Owner, tier, s.Record, s.OwnerSource, s.OwnerInferred)
 	return wrap("signal", s.ID, err)
 }
 
