@@ -114,6 +114,11 @@ type Pipeline struct {
 	// Version is the Collector version the pipeline runs (otelcol
 	// pipelines, "0.165.0"): it picks the OTTL form tvt writes (S7 item 7).
 	Version string `yaml:"version"`
+	// FeatureGates are the Collector's --feature-gates (otelcol), such as
+	// pkg.ottl.functions.enableExperimental: tvt validates the changed
+	// config with the same gates the Collector runs with, or a config
+	// that uses a gated function fails to load.
+	FeatureGates []string `yaml:"feature_gates"`
 	// Cold is the alias of the output that takes streams tvt reroutes to
 	// cold storage (fluentbit pipelines): one the config already defines.
 	Cold string `yaml:"cold"`

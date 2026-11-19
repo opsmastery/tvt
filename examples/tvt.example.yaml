@@ -155,6 +155,8 @@ pipelines:
   - name: otel-gateway
     kind: otelcol
     repo: gitlab.com/acme/platform-gitops
+    # The Collector's --feature-gates, so tvt validates with the same ones.
+    feature_gates: [pkg.ottl.functions.enableExperimental]
     branch: main
     # Config rendered from Helm: point at the values key, not the rendered file.
     helm_values:
