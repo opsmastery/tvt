@@ -144,3 +144,67 @@ func TestRuntimeCachePerPath(t *testing.T) {
 		t.Errorf("the real PATH reused another PATH's answer")
 	}
 }
+
+// TestFeatureGates: the Collector is validated with its feature gates, so
+// a config using a gated (experimental) OTTL function loads as it does in
+// the running Collector. A fake otelcol-contrib checks the flag; with
+// TVT_TEST_VALIDATORS the real 0.165.0 image runs the lab's statement.
+func TestFeatureGates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script")
+	}
+	bin := t.TempDir()
+	script := "#!/bin/sh\ncase \"$*\" in *--feature-gates=pkg.ottl.functions.enableExperimental*) echo ok;; *) echo 'function \"ToValidUTF8\" is experimental'; exit 1;; esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "otelcol-contrib"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	root := t.TempDir()
+	cfg := `receivers:
+  otlp:
+    protocols: {http: {}}
+processors:
+  transform/lint:
+    log_statements:
+      - context: log
+        statements:
+          - set(log.body, ToValidUTF8(log.body)) where IsString(log.body)
+exporters:
+  debug: {}
+service:
+  pipelines:
+    logs: {receivers: [otlp], processors: [transform/lint], exporters: [debug]}
+`
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if r := Run(ctx, "otelcol", root, "config.yaml", Options{}); r.OK {
+		t.Errorf("no gates, accepted: %+v", r)
+	}
+	gates := Options{FeatureGates: []string{"pkg.ottl.functions.enableExperimental"}}
+	if r := Run(ctx, "otelcol", root, "config.yaml", gates); !r.Ran || !r.OK {
+		t.Errorf("with gates: %+v", r)
+	}
+	if os.Getenv("TVT_TEST_VALIDATORS") == "" {
+		return
+	}
+	// The container sees only the user's folders (Podman's VM), not /tmp.
+	scratch, done, err := Scratch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer done()
+	root = scratch
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gates.NoNative = true
+	if r := Run(ctx, "otelcol", root, "config.yaml", gates); !r.Ran || !r.OK {
+		t.Errorf("real Collector with gates: %+v", r)
+	}
+	gates.FeatureGates = nil
+	if r := Run(ctx, "otelcol", root, "config.yaml", gates); !r.Ran || r.OK || !strings.Contains(r.Output, "experimental") {
+		t.Errorf("real Collector without gates: %+v", r)
+	}
+}
