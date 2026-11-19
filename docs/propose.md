@@ -110,6 +110,8 @@ Every other recommendation is printed as skipped with the reason: unmapped or cl
 
 A config that doesn't load never goes into a patch (S7 item 5). For each changed file, tvt copies the pipeline's checkout (without `.git`) to a scratch directory under your cache directory, writes its changes in, and runs the pipeline's own validator there, so references to other files resolve:
 
+A Collector started with `--feature-gates` (for an experimental OTTL function such as `ToValidUTF8`) needs the same gates in `pipelines[].feature_gates`: tvt passes them to `otelcol-contrib validate`, or every changed config fails to load. Found on the lab, whose Collector needs `pkg.ottl.functions.enableExperimental` since tvt-lab #40.
+
 | Kind | Validator | Image when it isn't on PATH |
 |---|---|---|
 | `prometheus` | `promtool check config <file>` | `prom/prometheus:v3.5.0` |
