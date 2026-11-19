@@ -66,6 +66,9 @@ type Options struct {
 	// Timeout bounds one validation (default 3m: a first run pulls the
 	// image).
 	Timeout time.Duration
+	// FeatureGates are passed to the Collector's validate as
+	// --feature-gates (otelcol only).
+	FeatureGates []string
 }
 
 // Result is one validation.
@@ -99,9 +102,13 @@ func Run(ctx context.Context, kind, root, file string, o Options) Result {
 			return Result{Skipped: err.Error()}
 		}
 	}
+	toolArgs := t.Args(file)
+	if kind == "otelcol" && len(o.FeatureGates) > 0 {
+		toolArgs = append(toolArgs, "--feature-gates="+strings.Join(o.FeatureGates, ","))
+	}
 	if !o.NoNative {
 		if path, err := exec.LookPath(t.Binary); err == nil {
-			return run(ctx, t.Binary, root, path, t.Args(file)...)
+			return run(ctx, t.Binary, root, path, toolArgs...)
 		}
 	}
 	rt := containerRuntime(o.Runtime)
@@ -121,7 +128,7 @@ func Run(ctx context.Context, kind, root, file string, o Options) Result {
 		args = append(args, "--entrypoint", t.Entrypoint)
 	}
 	args = append(args, image)
-	args = append(args, t.Args(file)...)
+	args = append(args, toolArgs...)
 	return run(ctx, rt+" "+image, root, rt, args...)
 }
 

@@ -1007,7 +1007,7 @@ func (v *validator) check(ctx context.Context, p config.Pipeline) checkFunc {
 		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(file)), out, 0o644); err != nil {
 			return fmt.Errorf("validation: %w", err)
 		}
-		res := validate.Run(ctx, kind, dir, file, validate.Options{Images: v.o.Images, Runtime: v.o.Runtime})
+		res := validate.Run(ctx, kind, dir, file, validate.Options{Images: v.o.Images, Runtime: v.o.Runtime, FeatureGates: p.FeatureGates})
 		switch {
 		case res.Ran && res.OK:
 			note := fmt.Sprintf("%s %s: valid (%s)", p.Repo, file, res.By)
