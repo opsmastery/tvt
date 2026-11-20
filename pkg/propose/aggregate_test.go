@@ -1,6 +1,7 @@
 package propose
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -89,6 +90,8 @@ func TestOtelcolBucket(t *testing.T) {
 		"processors: [transform/tvt_aggregate, interval/tvt, delta_to_cumulative, batch]",
 		`replace_pattern(datapoint.attributes["http_status_code"], "^([0-9])[0-9][0-9]$", "$${1}00") where (metric.name == "coding_agent_token_usage_total")`,
 		`replace_pattern(datapoint.attributes["http.status.code"], "^([0-9])[0-9][0-9]$", "$${1}00")`,
+		`replace_pattern(datapoint.attributes["http.status_code"], "^([0-9])[0-9][0-9]$", "$${1}00")`,
+		`set(datapoint.attributes["http.status_code"], String(datapoint.attributes["http.status_code"])) where IsInt(datapoint.attributes["http.status_code"]) and ((metric.name == "coding_agent_token_usage_total")`,
 		"# delete or bucket the labels",
 	} {
 		if !strings.Contains(s, want) {
@@ -113,5 +116,30 @@ func TestOtelcolBucket(t *testing.T) {
 		if _, err := OtelcolChanges(src, []string{"metrics"}, nil, &bad); err == nil {
 			t.Errorf("bucketed %s", l)
 		}
+	}
+}
+
+// TestAttributeSpellings: a bucket must name the attribute the Collector
+// actually has. http.response.status_code is stored as
+// http_response_status_code, so swapping every underscore for a dot
+// (http.response.status.code) misses it.
+func TestAttributeSpellings(t *testing.T) {
+	got, err := attributeSpellings("http_response_status_code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 8 || got[0] != "http_response_status_code" {
+		t.Errorf("spellings %v", got)
+	}
+	for _, want := range []string{"http.response.status_code", "http.response.status.code", "http_response.status_code"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("lacks %s: %v", want, got)
+		}
+	}
+	if got, _ := attributeSpellings("model"); len(got) != 1 || got[0] != "model" {
+		t.Errorf("model: %v", got)
+	}
+	if _, err := attributeSpellings("a_b_c_d_e_f"); err == nil {
+		t.Error("five separators wrote 32 statements")
 	}
 }
