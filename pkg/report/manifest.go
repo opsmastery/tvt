@@ -66,6 +66,9 @@ type Manifest struct {
 	UnselectedMonitors []string `json:"unselected_monitors,omitempty"`
 	// Read are the repo's unprotected signals that have readers.
 	Read []ReadSignal `json:"read"`
+	// ScrapeLimits are the longest scrape interval each job's readers
+	// allow (S10 item 5): check refuses an increase past one.
+	ScrapeLimits []ScrapeLimit `json:"scrape_limits,omitempty"`
 }
 
 // ManifestDetection is tvt.yaml detection: per-severity objectives and
