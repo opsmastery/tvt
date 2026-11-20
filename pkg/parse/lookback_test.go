@@ -44,3 +44,24 @@ func TestLookback(t *testing.T) {
 		t.Errorf("matcher variable: %s %v", got, err)
 	}
 }
+
+func TestQueryWindows(t *testing.T) {
+	for _, c := range []struct {
+		q    string
+		want Windows
+		err  bool
+	}{
+		{q: `up`, want: Windows{Instant: true}},
+		{q: `rate(x[5m])`, want: Windows{Shortest: 5 * time.Minute}},
+		{q: `sum(rate(x[10m])) / sum(rate(x[2m]))`, want: Windows{Shortest: 2 * time.Minute}},
+		{q: `rate(x[5m]) > on() group_left y`, want: Windows{Shortest: 5 * time.Minute, Instant: true}},
+		{q: `max_over_time(rate(x[3m])[1d:1m])`, want: Windows{Shortest: 3 * time.Minute}},
+		{q: `max_over_time(x[1h:])`, want: Windows{Instant: true}},
+		{q: `rate(x[$__rate_interval])`, err: true},
+	} {
+		got, err := QueryWindows(c.q)
+		if (err != nil) != c.err || !c.err && got != c.want {
+			t.Errorf("%s: %+v %v, want %+v", c.q, got, err, c.want)
+		}
+	}
+}
