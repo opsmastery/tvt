@@ -1,6 +1,6 @@
 # S10: reduce before drop
 
-**Status:** In progress (Nov 19). Item 1, part one: coarse label reads (`parse.Coarse`, `graph.LabelCoarse`) and `bucket` recommendations in the report (`report.bucketRows`). Part two (Nov 20): the OTel Collector writer, `replace_pattern` in the label-removal ordered pipeline so `interval/tvt` sums the merged series; other pipeline kinds skip with the reason. Next: the replay guard and the lab seed.
+**Status:** In progress (Nov 19). Item 1, part one: coarse label reads (`parse.Coarse`, `graph.LabelCoarse`) and `bucket` recommendations in the report (`report.bucketRows`). Part two (Nov 20): the OTel Collector writer, `replace_pattern` in the label-removal ordered pipeline so `interval/tvt` sums the merged series; other pipeline kinds skip with the reason. The lab seed is tvt-lab #42. Still open: the replay guard (a reader matching a value exactly blocks a bucket). Item 2, part one (Nov 20): retention tiers on dormant metrics' confirm rows (`report.RetentionTier`, `parse.Lookback`, `tiers.dormant_retention`), report only. Next for item 2: writers (VictoriaMetrics retention filters and downsampling, a short-retention Mimir tenant) and check's lookback guard.
 
 **Done when:** for each lab finding, `propose` picks the least-lossy action that `check` accepts.
 

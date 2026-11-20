@@ -17,7 +17,7 @@ func Reprice(in Input, card cost.PriceCard, tsdb *collect.Storage) (Input, error
 	if err := card.Validate(); err != nil {
 		return in, err
 	}
-	costs, _, err := cost.Reprice(card, in.Costs, tsdb)
+	costs, st, err := cost.Reprice(card, in.Costs, tsdb)
 	if err != nil {
 		return in, err
 	}
@@ -33,6 +33,10 @@ func Reprice(in Input, card cost.PriceCard, tsdb *collect.Storage) (Input, error
 	}
 	out := in
 	out.Costs, out.Scores = costs, scores
+	out.Retention = 0
+	if st != nil {
+		out.Retention = st.Retention
+	}
 	out.LineFindings = make([]graph.LineFinding, len(in.LineFindings))
 	for i, f := range in.LineFindings {
 		f.MonthlyCost = card.LogMonthly(f.BytesPerDay)
