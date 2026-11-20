@@ -37,7 +37,7 @@ OTTL is read with tvt's own extractor (ADR 0012) and evaluated three-valued over
 | `attribute_unset` | adds a condition that reads an attribute a later processor sets, or one an earlier statement deleted (item 7) |
 | `fail_closed` | adds a drop after a statement tvt can't model (an experimental function, a lambda, an unknown function), uses include/exclude matching, Lua or WASM, or a selector tvt can't read (item 8) |
 | `warn_logs` | drops lines whose selector doesn't rule out warn-and-above |
-| `scrape_interval` | changes a scrape interval so a range window holds fewer than four samples, a nonzero `for` is shorter than the interval, or an alert's worst-case detection delay passes its severity's objective (item 5) |
+| `scrape_interval` | changes a scrape interval so a range window holds fewer than four samples, a nonzero `for` is shorter than the interval, or an alert's worst-case detection delay passes its severity's objective (item 5); or raises a job's interval past the manifest's `scrape_limits` (S10 item 5: the longest every reader of the job allows, panels and instant readers included, or the current interval when a reader's window is unknown) |
 | `error_guard` | adds a log drop, sample or collapse that doesn't keep lines matching `(?i)error\|exception\|traceback\|critical\|fatal`, in case a stream's level label is wrong (item 2) |
 | `least_lossy` | drops a metric or stream that something reads ad hoc (a query-log reader other than a dashboard or rule) when a less lossy action from ADR 0010 would keep that reader working: a cold tier, a reroute, a label removal (item 3) |
 | `collapse_counts` | collapses repeated lines (`logdedup`) whose streams something reads, which changes every count over them (item 6) |

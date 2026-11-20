@@ -20,12 +20,25 @@ import (
 // Run compares them with Base's, so only a change that causes one is
 // refused.
 func scrapeEffects(m report.Manifest, ix *index, files Files, objectives map[string]time.Duration) []effect {
-	if len(m.Alerts) == 0 {
+	if len(m.Alerts) == 0 && len(m.ScrapeLimits) == 0 {
 		return nil
 	}
 	intervals, where := scrapeIntervals(m, files)
 	if len(intervals) == 0 {
 		return nil
+	}
+	var out []effect
+	// Every reader of the job, not only alerts (S10 item 5): a range that
+	// would hold fewer than four samples, a reader without a range past
+	// 2m, or an unreadable window, as the report worked them out.
+	for _, l := range m.ScrapeLimits {
+		iv, ok := intervals[l.Job]
+		if !ok || iv <= l.MaxSeconds {
+			continue
+		}
+		out = append(out, effect{rule: RuleScrape, pipeline: where[l.Job].pipeline, file: where[l.Job].file, component: "job " + l.Job,
+			signal: "job " + l.Job, at: where[l.Job].at,
+			reason: fmt.Sprintf("job %s scraped every %s, past the %s its readers allow: %s", l.Job, secs(iv), secs(l.MaxSeconds), l.Why)})
 	}
 	if objectives == nil {
 		objectives = map[string]time.Duration{}
@@ -34,7 +47,6 @@ func scrapeEffects(m report.Manifest, ix *index, files Files, objectives map[str
 		}
 	}
 	gw := time.Duration(m.Detection.GroupWaitSec * float64(time.Second))
-	var out []effect
 	for _, a := range m.Alerts {
 		if a.Logs {
 			continue
