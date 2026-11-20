@@ -778,6 +778,8 @@ func claim(rec Recommendation, s graph.Signal, refs []graph.Reference, meta Scan
 	switch rec.Action {
 	case ActionLabelRemoval:
 		do = "removing the label"
+	case ActionBucket:
+		do = "bucketing its values to their class"
 	case ActionReroute:
 		do = "moving it to cold storage"
 	default:

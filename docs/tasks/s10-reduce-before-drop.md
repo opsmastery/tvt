@@ -1,6 +1,6 @@
 # S10: reduce before drop
 
-**Status:** In progress (Nov 19). Item 1, part one: coarse label reads (`parse.Coarse`, `graph.LabelCoarse`) and `bucket` recommendations in the report (`report.bucketRows`). Next: the writers that sum merged series, the replay guard and the lab seeds.
+**Status:** In progress (Nov 19). Item 1, part one: coarse label reads (`parse.Coarse`, `graph.LabelCoarse`) and `bucket` recommendations in the report (`report.bucketRows`). Part two (Nov 20): the OTel Collector writer, `replace_pattern` in the label-removal ordered pipeline so `interval/tvt` sums the merged series; other pipeline kinds skip with the reason. Next: the replay guard and the lab seed.
 
 **Done when:** for each lab finding, `propose` picks the least-lossy action that `check` accepts.
 
