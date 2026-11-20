@@ -1,6 +1,6 @@
 # S10: reduce before drop
 
-**Status:** Planned.
+**Status:** In progress (Nov 19). Item 1, part one: coarse label reads (`parse.Coarse`, `graph.LabelCoarse`) and `bucket` recommendations in the report (`report.bucketRows`). Next: the writers that sum merged series, the replay guard and the lab seeds.
 
 **Done when:** for each lab finding, `propose` picks the least-lossy action that `check` accepts.
 

@@ -743,3 +743,24 @@ func TestGrafanaManagedRules(t *testing.T) {
 		}
 	}
 }
+
+// TestCoarseLabelUse: a status-class matcher is a coarse use (S10 item 1);
+// an exact value or a variable stays a match.
+func TestCoarseLabelUse(t *testing.T) {
+	for q, want := range map[string]graph.LabelUse{
+		`sum(rate(http_requests_total{code=~"5.."}[5m]))`: graph.LabelCoarse,
+		`sum(rate(http_requests_total{code!~"2.."}[5m]))`: graph.LabelCoarse,
+		`sum(rate(http_requests_total{code="500"}[5m]))`:  graph.LabelMatch,
+		`sum(rate(http_requests_total{code=~"50."}[5m]))`: graph.LabelMatch,
+		`sum(rate(http_requests_total{code=~"$c"}[5m]))`:  graph.LabelMatch,
+	} {
+		refs, err := parse.PromQL(q)
+		if err != nil || len(refs) != 1 {
+			t.Fatalf("%s: %v", q, err)
+		}
+		ls := promLabels(refs[0])
+		if len(ls) != 1 || ls[0].Use != want {
+			t.Errorf("%s: %v, want %s", q, ls, want)
+		}
+	}
+}

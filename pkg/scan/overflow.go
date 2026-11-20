@@ -55,7 +55,7 @@ func overflowFindings(in Inputs, refs []graph.Reference) ([]graph.OverflowFindin
 				continue
 			}
 			for _, l := range r.Labels {
-				if l.Use != graph.LabelMatch && l.Use != graph.LabelGroup && l.Use != graph.LabelFilter {
+				if l.Use != graph.LabelMatch && l.Use != graph.LabelCoarse && l.Use != graph.LabelGroup && l.Use != graph.LabelFilter {
 					continue
 				}
 				if on != "" && l.Name != on {

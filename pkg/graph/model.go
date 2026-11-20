@@ -137,6 +137,11 @@ const (
 	// LabelLegend is shown by a panel's legend ({{label}}): dropping it
 	// leaves the query working but changes what the viewer sees.
 	LabelLegend LabelUse = "legend"
+	// LabelCoarse is a regex matcher (or its negation) that only tells
+	// value classes apart, as in status_code=~"5.." (parse.Coarse): a
+	// match, but one that bucketing the values (500 to 5xx) keeps
+	// working (S10 item 1, ADR 0010).
+	LabelCoarse LabelUse = "coarse"
 )
 
 // LabelRef is one label a reference reads, and how.

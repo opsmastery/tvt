@@ -61,6 +61,14 @@ func expected(rec Recommendation, c graph.Cost, totalStreamBytes int64) Expected
 			"no rule, alert or panel changes its grouping or goes empty: nothing groups or filters on " + rec.Signal.Name,
 			"cost falls by about " + money + " a month",
 		}
+	case ActionBucket:
+		e.SeriesAfter = c.ActiveSeries - rec.Merges
+		e.Statements = []string{
+			fmt.Sprintf("new %s series carry %s bucketed to its class (503 to 500) within an hour of the deploy", rec.Signal.Parent, rec.Signal.Name),
+			fmt.Sprintf("%s has about %d active series after, from %d", rec.Signal.Parent, e.SeriesAfter, c.ActiveSeries),
+			"every reader of " + rec.Signal.Name + " returns the same result: each matches it only by class",
+			"cost falls by about " + money + " a month",
+		}
 	case ActionReroute:
 		e.HotBytesPerDayFall = c.BytesPerDay
 		share := ""
