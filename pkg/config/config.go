@@ -34,6 +34,8 @@ type Config struct {
 	Ownership         Ownership          `yaml:"ownership"`
 	// Queue caps what tvt puts in front of each owner (S9 item 6).
 	Queue Queue `yaml:"queue"`
+	// Tiers sets the reduce-before-drop tiers (S10).
+	Tiers Tiers `yaml:"tiers"`
 	// Detection sets detection objectives (S8 item 5).
 	Detection Detection `yaml:"detection"`
 	// Records are signals tvt never drops, samples or collapses (S7 item 2,
@@ -456,6 +458,11 @@ func (c *Config) validate() error {
 			return err
 		}
 	}
+	if d := c.Tiers.DormantRetention; d != "" {
+		if v, err := model.ParseDuration(d); err != nil || v <= 0 {
+			return fmt.Errorf("tiers.dormant_retention %q: want a positive duration such as 7d", d)
+		}
+	}
 	if c.Queue.PerOwner < 0 {
 		return fmt.Errorf("queue.per_owner %d: want 0 (the default) or more", c.Queue.PerOwner)
 	}
@@ -673,6 +680,12 @@ func StreamMatchers(sel string) ([]parse.Matcher, error) {
 // recommendations per run, highest savings per minute of checking first,
 // and the weekly digest lists the same. Zero: propose writes them all and
 // the digest lists report.DefaultQueue.
+// Tiers: dormant_retention is the history a dormant metric's retention
+// tier keeps (S10 item 2), a Prometheus duration; empty means a week.
+type Tiers struct {
+	DormantRetention string `yaml:"dormant_retention"`
+}
+
 type Queue struct {
 	PerOwner int `yaml:"per_owner"`
 }

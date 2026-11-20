@@ -92,6 +92,12 @@ ownership:
 queue:
   per_owner: 20
 
+# Reduce-before-drop tiers (S10). A dormant metric's confirm row offers a
+# shorter history instead of keep or drop: this much, or the longest window
+# a reader uses if that's longer. Self-hosted price cards only.
+tiers:
+  dormant_retention: 7d
+
 # SLO definitions (Sloth, Pyrra, OpenSLO): files or directories, relative to
 # this file. Everything an SLI reads is a hard keep; an SLI tvt can't read
 # (a Sloth plugin, a non-Prometheus OpenSLO source) is a recorded gap.
