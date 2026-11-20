@@ -55,6 +55,11 @@ func readOtel(src []byte) (*otelConfig, error) {
 
 func typeOf(id string) string { t, _, _ := strings.Cut(id, "/"); return t }
 
+// isLogDedup: the log deduplication processor, by its current name
+// (log_dedup) or the deprecated one (logdedup), which contrib v0.165
+// still accepts.
+func isLogDedup(typ string) bool { return typ == "log_dedup" || typ == "logdedup" }
+
 // ottlEnv is what tvt knows about one item: some paths' values. Paths are
 // compared without a span., log. or datapoint. context prefix, so a match
 // written span.attributes["x"] answers a statement's attributes["x"].
@@ -233,7 +238,10 @@ func otelcolEffects(p report.PipelineDef, path string, src []byte, ix *index, fi
 			typ := typeOf(id)
 			at := fmt.Sprintf("line %d", lineOf(cfg))
 			comp := "processor " + id + " in " + pl.name
-			if cfg == nil && typ != "batch" && typ != "memory_limiter" {
+			if cfg == nil && typ != "batch" && typ != "memory_limiter" && !isLogDedup(typ) {
+				// A log_dedup with every setting at its default is still a
+				// collapse (S10 item 4): only steps that do nothing without
+				// settings are skipped.
 				continue
 			}
 			var conds, stmts []stmt
@@ -273,7 +281,7 @@ func otelcolEffects(p report.PipelineDef, path string, src []byte, ix *index, fi
 						set["attributes[\""+a.key+"\"]"] = id
 					}
 				}
-			case "logdedup":
+			case "logdedup", "log_dedup":
 				// A collapse changes every count over the lines (S8 item 6).
 				// Records are never collapsed; read streams need their count
 				// queries rewritten to sum the count attribute, which check
