@@ -113,6 +113,9 @@ func Digests(r Report, perOwner int) []Digest {
 					break
 				}
 				fmt.Fprintf(&b, "- %s\n", c.Question)
+				if t := c.Retention; t != nil {
+					fmt.Fprintf(&b, "  - Or keep %d days of the %g now: saves up to %.2f a month.\n", t.KeepDays, t.CurrentDays, t.Monthly)
+				}
 			}
 		}
 		out = append(out, Digest{Owner: o, File: strings.Trim(unsafeName.ReplaceAllString(o, "_"), "_") + ".md", Markdown: b.String()})

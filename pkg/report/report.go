@@ -221,6 +221,11 @@ type Confirm struct {
 	// shown a reader; Acknowledged are the accepted ones, with reasons.
 	Gaps         []string `json:"gaps"`
 	Acknowledged []string `json:"acknowledged_gaps"`
+	// Retention is the shorter-history answer the owner can give instead
+	// of keep or drop (S10 item 2); RetentionHeld says why there's none,
+	// for a metric on a self-hosted backend.
+	Retention     *RetentionTier `json:"retention,omitempty"`
+	RetentionHeld string         `json:"retention_held,omitempty"`
 }
 
 // SignalRef names a signal.
@@ -358,6 +363,13 @@ type Input struct {
 	GroupWait  time.Duration
 	// Decisions are the pipeline repos' .tvt/decisions.yaml (S9).
 	Decisions []RepoDecisions
+	// Retention is the self-hosted metrics backend's retention (the
+	// scan's self-hosted model; zero for a vendor card), and
+	// DormantRetention tvt.yaml's tiers.dormant_retention (zero:
+	// DefaultDormantRetention). Together they give dormant metrics a
+	// retention tier (S10 item 2).
+	Retention        time.Duration
+	DormantRetention time.Duration
 }
 
 // LastReadOf is a signal's last read, as the store returns it.
@@ -477,6 +489,19 @@ func Build(in Input, limit int) Report {
 		return a.ID < b.ID
 	})
 	r.Confirm = confirmRows(in.Signals, costs, gs, listed, in.Scan, limit)
+	if in.Retention > 0 {
+		bySignal := map[string]graph.Signal{}
+		for _, s := range in.Signals {
+			bySignal[s.ID] = s
+		}
+		for i := range r.Confirm {
+			c := &r.Confirm[i]
+			if c.Signal.Kind != string(graph.KindMetric) {
+				continue
+			}
+			c.Retention, c.RetentionHeld = retentionTier(bySignal[c.Signal.ID], costs[c.Signal.ID], refs[c.Signal.ID], consumers, in.Retention, in.DormantRetention)
+		}
+	}
 	r.Pipelines = pipelineTargets(r.Recommendations, r.Confirm, in.PipelineTargets, in.StreamVolumes, gs)
 	r.Overflow = overflow(in.OverflowFindings, r.Recommendations, r.Confirm, gs)
 	r.Totals.Overflow = len(r.Overflow)

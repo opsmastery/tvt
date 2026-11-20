@@ -106,6 +106,9 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 		}
 		queue = cfg.Queue.PerOwner
 		in.Objectives, in.GroupWait = detectionOf(cfg)
+		if d, err := model.ParseDuration(cfg.Tiers.DormantRetention); err == nil && cfg.Tiers.DormantRetention != "" {
+			in.DormantRetention = time.Duration(d)
+		}
 		if in.Decisions, err = repoDecisions(cfg); err != nil {
 			return err
 		}
@@ -267,6 +270,9 @@ func readLatest(ctx context.Context, path string) (report.Input, store.ScanInfo,
 		ID: info.ID, StartedAt: info.StartedAt, WindowDays: info.WindowDays, LogCoverage: info.LogCoverage,
 		PriceCard: info.PriceCard, Currency: info.Currency, Approximate: info.PricePreset,
 	}}
+	if info.SelfHosted != nil {
+		in.Retention = info.SelfHosted.Retention
+	}
 	if in.Signals, err = st.Signals(ctx, info.ID); err != nil {
 		return in, info, err
 	}
