@@ -487,3 +487,51 @@ func TestCheckBucket(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckDedup: tvt check accepts tvt's own log_dedup on the lab's
+// Collector scoped to a service with records excluded (the coding
+// agent's api_request lines are unread, ground truth genai_agent.logs),
+// and refuses it when the record events aren't excluded.
+func TestCheckDedup(t *testing.T) {
+	m := labManifest(t)
+	m.GeneratedAt = time.Now()
+	_, dirs := loadBenchmark(t)
+	checkout := filepath.Join(dirs["writers-2"], "checkout")
+	src, err := os.ReadFile(filepath.Join(checkout, "otelcol/config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(service string, records []string) []check.Finding {
+		d := propose.Dedup{ID: "dedup:otelcol-agent", Scan: 9, Services: []string{service}, Records: records, Collector: "0.165.0"}
+		edited, err := propose.OtelcolDedup(src, []string{"logs"}, &d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		head := func(p string) ([]byte, error) {
+			if p == "otelcol/config.yaml" {
+				return edited, nil
+			}
+			return dirFiles(checkout)(p)
+		}
+		var out []check.Finding
+		for _, f := range check.Run(check.Input{Manifest: m, Base: dirFiles(checkout), Head: head, Now: time.Now(), SkipConfirmation: true}).Findings {
+			if f.Rule != check.RuleGap {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+	if got := run("coding-agent", m.RecordMatches.LogEvents); len(got) != 0 {
+		t.Errorf("records excluded: %v", got)
+	}
+	got := run("coding-agent", nil)
+	refused := false
+	for _, f := range got {
+		if f.Rule == check.RuleRecord {
+			refused = true
+		}
+	}
+	if !refused {
+		t.Errorf("records not excluded: %v", got)
+	}
+}

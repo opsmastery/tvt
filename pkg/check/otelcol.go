@@ -282,24 +282,16 @@ func otelcolEffects(p report.PipelineDef, path string, src []byte, ix *index, fi
 					}
 				}
 			case "logdedup", "log_dedup":
-				// A collapse changes every count over the lines (S8 item 6).
-				// Records are never collapsed; read streams need their count
-				// queries rewritten to sum the count attribute, which check
-				// can't see offline, so it refuses until an owner confirms.
+				// A collapse changes every count over the lines (S8 item 6,
+				// S10 item 4). Records are never collapsed. Read streams need
+				// their count queries rewritten to sum the count attribute,
+				// which check can't see offline, so it refuses them. With
+				// conditions, only logs one of them can match are collapsed:
+				// each read stream and record match is judged against them
+				// (three-valued, so a condition check can't decide refuses).
 				drops = true
 				add(effect{rule: ruleDropMarker, component: comp, reason: "collapses repeated log lines", at: at})
-				readStreams := len(ix.of(p.Name, "stream")) > 0
-				for _, s := range ix.read[p.Name] {
-					if s.Kind == "stream" {
-						readStreams = true
-					}
-				}
-				if len(ix.logEvents) > 0 && pl.signal == "logs" {
-					add(effect{rule: RuleRecord, component: comp, reason: "logdedup collapses log lines, and records (agent tool-call events) are never collapsed (ADR 0011)", at: at})
-				}
-				if readStreams {
-					add(effect{rule: RuleCollapse, component: comp, reason: "collapses repeated lines of streams something reads: every count_over_time, rate or bytes_over_time over them changes unless rewritten to sum the count attribute (S8 item 6)", at: at})
-				}
+				dedupEffects(add, ix, p, pl, comp, at, otelStatements(field(cfg, "conditions"), true))
 			}
 			// Steps tvt can't model run before anything after them.
 			for _, s := range append(append([]stmt{}, conds...), stmts...) {
@@ -929,3 +921,83 @@ func buildEffects(p report.PipelineDef, path string, c *otelConfig, files Files)
 	}
 	return out
 }
+
+// dedupEffects judges a log_dedup processor in a logs pipeline against
+// its conditions (none: every log).
+func dedupEffects(add func(effect), ix *index, p report.PipelineDef, pl otelPipeline, comp, at string, conds []stmt) {
+	if pl.signal != "logs" {
+		return
+	}
+	// may reports whether some condition can be true in env (no
+	// conditions: always), and the condition to quote.
+	may := func(env ottlEnv) (parse.Tri, string) {
+		if len(conds) == 0 {
+			return parse.True, ""
+		}
+		t := parse.False
+		text := ""
+		for _, c := range conds {
+			ct := parse.Unknown
+			if c.err == nil {
+				ct = canBeTrue(c.o, c.groups, env)
+			}
+			if ct != parse.False && text == "" {
+				text = c.text
+			}
+			t = orTri(t, ct)
+		}
+		return t, text
+	}
+	for _, m := range ix.logEvents {
+		if t, text := may(envOf(m.Equalities())); t != parse.False {
+			reason := "log_dedup collapses log lines, and records (agent tool-call events) are never collapsed (ADR 0011)"
+			if text != "" {
+				reason = fmt.Sprintf("log_dedup's condition %q %s true for record log events, which are never collapsed (ADR 0011)", shorten(text, 80), canWord(t))
+			}
+			add(effect{rule: RuleRecord, component: comp, reason: reason, at: at})
+			break
+		}
+	}
+	var streams []string
+	for _, s := range ix.of(p.Name, "stream") {
+		streams = append(streams, s.Name)
+	}
+	for _, s := range ix.read[p.Name] {
+		if s.Kind == "stream" {
+			streams = append(streams, s.Name)
+		}
+	}
+	for _, sel := range streams {
+		t, text := may(streamEnv(sel))
+		if t == parse.False {
+			continue
+		}
+		reason := "collapses repeated lines of streams something reads: every count_over_time, rate or bytes_over_time over them changes unless rewritten to sum the count attribute (S8 item 6)"
+		if text != "" {
+			reason = fmt.Sprintf("log_dedup's condition %q %s true for %s, which something reads: every count over it changes unless rewritten to sum the count attribute (S8 item 6)", shorten(text, 80), canWord(t), sel)
+		}
+		add(effect{rule: RuleCollapse, component: comp, signal: sel, reason: reason, at: at})
+		if len(conds) == 0 {
+			break // one finding says it all
+		}
+	}
+}
+
+// streamEnv is what a stream selector says about its logs in the
+// Collector: Loki's OTLP ingestion makes resource attributes into labels,
+// dots as underscores (service.name is service_name), so each equality
+// matcher sets the resource attribute under both spellings. Other
+// matchers set nothing, which leaves conditions on them unknown.
+func streamEnv(sel string) ottlEnv {
+	eqs := map[string]any{}
+	for _, m := range streamEqRe.FindAllStringSubmatch(sel, -1) {
+		k, v := m[1], m[2]
+		eqs[`resource.attributes["`+k+`"]`] = v
+		if d := strings.ReplaceAll(k, "_", "."); d != k {
+			eqs[`resource.attributes["`+d+`"]`] = v
+		}
+	}
+	return envOf(eqs)
+}
+
+var streamEqRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"((?:[^"\\]|\\.)*)"`)
