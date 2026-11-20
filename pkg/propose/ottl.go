@@ -105,7 +105,9 @@ func isIdent(c byte) bool {
 // OTTL functions only (S7 item 6), no experimental or lambda functions.
 var ottlFuncs = map[string]bool{"IsMatch": true, "delete_matching_keys": true,
 	// Pseudonymised IDs (S7 item 8).
-	"set": true, "Substring": true, "SHA256": true, "String": true}
+	"set": true, "Substring": true, "SHA256": true, "String": true,
+	// Bucketing (S10 item 1).
+	"replace_pattern": true}
 
 var ottlCall = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\(`)
 
