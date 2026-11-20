@@ -121,6 +121,21 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </table>
 </div>
 
+{{if .Intervals}}
+<h2>Scrape intervals</h2>
+<p class="muted">Jobs whose scrape interval can go up before anything is dropped: every range a reader uses keeps 4 samples, a reader without a range keeps 2 in the 5m lookback, and no alert passes its detection objective. Report only: tvt doesn't write these yet.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Job</th><th class="num">Now</th><th class="num">Proposed</th><th>Why not longer, or why held</th><th class="num">Saves / month</th></tr></thead>
+<tbody>{{$cur := .Scan.Currency}}
+{{range .Intervals}}<tr><td><code>{{.Job}}</code><br><span class="muted">{{.Metrics}} metrics, {{.Readers}} readers</span></td>
+<td class="num">{{.CurrentSec}}s</td><td class="num">{{if .ProposedSec}}{{.ProposedSec}}s{{else}}<span class="muted">held</span>{{end}}</td>
+<td>{{if .Held}}{{.Held}}{{else}}{{.Bound}}{{end}}</td><td class="num">{{money .Monthly $cur}}</td></tr>
+{{end}}</tbody>
+</table>
+</div>
+{{end}}
+
 <h2>Line-level findings</h2>
 <p class="muted">Line patterns inside a stream worth cutting, from Loki's pattern API over its last few hours. Savings are estimates (patterns count lines, not bytes). tvt never writes a line filter: <a href="{{zeroreads}}">zeroreads</a> proves which lines nothing reads and generates the cut.</p>
 <div class="table-wrap">

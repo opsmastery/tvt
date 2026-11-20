@@ -107,3 +107,45 @@ func inspect(node parser.Node, visit func(parser.Node) bool) {
 		inspect(c, visit)
 	}
 }
+
+// Windows is what a scrape interval change must respect in a PromQL
+// query (S10 item 5): Shortest is the shortest range over raw samples
+// (rate(x[2m]) needs at least four samples in 2m), zero when there's
+// none; Instant is true when a selector is read without a range, which
+// sees a series only within the server's lookback delta (5m by default)
+// of its last sample. A range or offset from a variable, an @ modifier or
+// a parse error is an error, as for Lookback.
+type Windows struct {
+	Shortest time.Duration
+	Instant  bool
+}
+
+// QueryWindows reads a query's Windows.
+func QueryWindows(query string) (Windows, error) {
+	var w Windows
+	if strings.TrimSpace(query) == "" {
+		return w, nil
+	}
+	if _, err := Lookback(query); err != nil {
+		return w, err
+	}
+	text, _ := substituteGrafanaVars(query)
+	p := parser.NewParser(parser.Options{EnableExperimentalFunctions: true})
+	expr, err := p.ParseExpr(text)
+	if err != nil {
+		return w, fmt.Errorf("promql: %w", err)
+	}
+	inspect(expr, func(n parser.Node) bool {
+		switch n := n.(type) {
+		case *parser.MatrixSelector:
+			if w.Shortest == 0 || n.Range < w.Shortest {
+				w.Shortest = n.Range
+			}
+			return false
+		case *parser.VectorSelector:
+			w.Instant = true
+		}
+		return true
+	})
+	return w, nil
+}
