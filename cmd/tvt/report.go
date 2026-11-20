@@ -369,6 +369,7 @@ func buildManifests(cfg *config.Config, in report.Input) map[string]report.Manif
 	}
 	var gaps []report.ManifestGap
 	var unselected []string
+	in.Objectives, in.GroupWait = obj, gw
 	full := report.Build(in, 0)
 	recsByPipeline := map[string][]report.Recommendation{}
 	for _, rec := range full.Recommendations {
@@ -402,6 +403,11 @@ func buildManifests(cfg *config.Config, in report.Input) map[string]report.Manif
 			recs = append(recs, recsByPipeline[p.Name]...)
 		}
 		m.Evidence = report.EvidenceOf(recs)
+		var names []string
+		for _, d := range m.PipelineDefs {
+			names = append(names, d.Name)
+		}
+		m.ScrapeLimits = report.ScrapeLimits(full.Intervals, names)
 		sort.Slice(m.PipelineDefs, func(i, j int) bool { return m.PipelineDefs[i].Name < m.PipelineDefs[j].Name })
 		m.RecordMatches = matches
 		if gaps != nil {

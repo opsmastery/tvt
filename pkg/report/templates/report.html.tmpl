@@ -123,7 +123,7 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 
 {{if .Intervals}}
 <h2>Scrape intervals</h2>
-<p class="muted">Jobs whose scrape interval can go up before anything is dropped: every range a reader uses keeps 4 samples, a reader without a range keeps 2 in the 5m lookback, and no alert passes its detection objective. Report only: tvt doesn't write these yet.</p>
+<p class="muted">Jobs whose scrape interval can go up before anything is dropped: every range a reader uses keeps 4 samples, a reader without a range keeps 2 in the 5m lookback, and no alert passes its detection objective. <code>tvt propose</code> writes them into Prometheus and Alloy scrape configs.</p>
 <div class="table-wrap">
 <table>
 <thead><tr><th>Job</th><th class="num">Now</th><th class="num">Proposed</th><th>Why not longer, or why held</th><th class="num">Saves / month</th></tr></thead>
