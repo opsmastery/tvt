@@ -65,6 +65,9 @@ type Report struct {
 	// incident-critical (by name, tier, or a runbook or postmortem naming
 	// them). Each is a question for the owner, never a drop candidate.
 	Confirm []Confirm `json:"confirm"`
+	// Intervals are scrape jobs whose interval can go up (S10 item 5),
+	// and held ones with the reason.
+	Intervals []IntervalChange `json:"intervals,omitempty"`
 	// Decisions are the owner decisions in the pipeline repos (S9), each
 	// with its state: current, or reopened, expired or orphaned with why.
 	Decisions []DecisionState `json:"decisions"`
@@ -502,6 +505,7 @@ func Build(in Input, limit int) Report {
 			c.Retention, c.RetentionHeld = retentionTier(bySignal[c.Signal.ID], costs[c.Signal.ID], refs[c.Signal.ID], consumers, in.Retention, in.DormantRetention)
 		}
 	}
+	r.Intervals = intervalRows(in, refs, consumers, costs)
 	r.Pipelines = pipelineTargets(r.Recommendations, r.Confirm, in.PipelineTargets, in.StreamVolumes, gs)
 	r.Overflow = overflow(in.OverflowFindings, r.Recommendations, r.Confirm, gs)
 	r.Totals.Overflow = len(r.Overflow)
