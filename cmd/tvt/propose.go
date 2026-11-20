@@ -184,7 +184,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		switch {
 		case !rec.Proposable:
 			skipped = append(skipped, proposal{Rec: rec, Note: "not proposable: " + cmp.Or(rec.PipelineNote, "no pipeline")})
-		case !(rec.Action == report.ActionDrop && rec.Signal.Kind == string(graph.KindMetric)) && !(rec.Action == report.ActionReroute && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionLabelRemoval && rec.Signal.Kind == string(graph.KindLabel)):
+		case !(rec.Action == report.ActionDrop && rec.Signal.Kind == string(graph.KindMetric)) && !(rec.Action == report.ActionReroute && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionLabelRemoval && rec.Signal.Kind == string(graph.KindLabel)) && !(rec.Action == report.ActionBucket && rec.Signal.Kind == string(graph.KindLabel)):
 			skipped = append(skipped, proposal{Rec: rec, Note: "no writer for " + rec.Action + " of a " + rec.Signal.Kind + " yet"})
 		default:
 			byPipeline[rec.Pipeline] = append(byPipeline[rec.Pipeline], rec)
@@ -537,6 +537,10 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 			skipped = append(skipped, proposal{Rec: rec, Note: rec.Signal.Name + " isn't a datapoint attribute: the Collector's Prometheus exporter adds it from the instrumentation scope, so a transform can't remove it"})
 			continue
 		}
+		if rec.Action == report.ActionBucket && p.Kind != "otelcol" {
+			skipped = append(skipped, proposal{Rec: rec, Note: fmt.Sprintf("bucketing %s merges about %d series, which a relabel rule can't sum; tvt writes it in an OTel Collector's ordered pipeline (stream aggregation comes later)", rec.Signal.Name, rec.Merges)})
+			continue
+		}
 		if rec.Action == report.ActionLabelRemoval && p.Kind != "otelcol" {
 			switch {
 			case p.Kind != "prometheus" && p.Kind != "alloy":
@@ -837,7 +841,7 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 	var ok []report.Recommendation
 	var labels []report.Recommendation
 	for _, rec := range recs {
-		if rec.Action == report.ActionLabelRemoval {
+		if rec.Action == report.ActionLabelRemoval || rec.Action == report.ActionBucket {
 			if p.Replicas > 1 && !p.LoadBalanced {
 				skipped = append(skipped, proposal{Rec: rec, Note: fmt.Sprintf("%d Collector replicas with no load-balancing exporter in front: summing over a label needs one Collector to see every session (tvt.yaml pipelines[].load_balanced)", p.Replicas)})
 				continue
@@ -864,15 +868,33 @@ func proposeOtelcol(p config.Pipeline, recs []report.Recommendation, root string
 		a := propose.Aggregate{ID: p.Name + "/labels", Scan: scan, Collector: p.Version, Labels: map[string][]string{}}
 		d := dropOf(a.ID, labels, scan)
 		a.Evidence = d.Evidence
-		var names []string
+		var names, bucketed []string
 		for _, rec := range labels {
+			if rec.Action == report.ActionBucket {
+				if a.Buckets == nil {
+					a.Buckets = map[string][]string{}
+				}
+				a.Buckets[rec.Signal.Parent] = append(a.Buckets[rec.Signal.Parent], rec.Signal.Name)
+				if !slices.Contains(bucketed, rec.Signal.Name) {
+					bucketed = append(bucketed, rec.Signal.Name)
+				}
+				continue
+			}
 			a.Labels[rec.Signal.Parent] = append(a.Labels[rec.Signal.Parent], rec.Signal.Name)
 			if !slices.Contains(names, rec.Signal.Name) {
 				names = append(names, rec.Signal.Name)
 			}
 		}
 		slices.Sort(names)
-		a.Reason = fmt.Sprintf("%s unread on %d %s", strings.Join(names, ", "), len(a.Labels), map[bool]string{true: "metric", false: "metrics"}[len(a.Labels) == 1])
+		slices.Sort(bucketed)
+		var why []string
+		if len(names) > 0 {
+			why = append(why, fmt.Sprintf("%s unread on %d %s", strings.Join(names, ", "), len(a.Labels), map[bool]string{true: "metric", false: "metrics"}[len(a.Labels) == 1]))
+		}
+		if len(bucketed) > 0 {
+			why = append(why, strings.Join(bucketed, ", ")+" read only by class: bucketed")
+		}
+		a.Reason = strings.Join(why, "; ")
 		agg = &a
 	}
 	var b strings.Builder

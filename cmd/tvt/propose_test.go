@@ -724,3 +724,70 @@ func TestCapQueue(t *testing.T) {
 		t.Error("0 capped")
 	}
 }
+
+// TestProposeBucket: a bucket recommendation (S10 item 1) on the coding
+// agent's metric becomes a replace_pattern in the Collector's ordered
+// pipeline; on the Alloy pipeline, which can't sum the merged series, it
+// is skipped with the reason. With TVT_TEST_VALIDATORS=1 the Collector
+// file goes through otelcol-contrib validate.
+func TestProposeBucket(t *testing.T) {
+	validation := "off"
+	if os.Getenv("TVT_TEST_VALIDATORS") != "" {
+		validation = "require"
+	}
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := readLatest(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := report.Build(in, 0)
+	bucket := func(pipeline, metric, l string) report.Recommendation {
+		return report.Recommendation{ID: "bucket:prom:label:" + metric + ":" + l, Action: report.ActionBucket,
+			Signal:   report.SignalRef{ID: "prom:label:" + metric + ":" + l, Kind: "label", Name: l, Parent: metric, Source: "prom"},
+			Pipeline: pipeline, Proposable: true, Merges: 40}
+	}
+	r.Recommendations = []report.Recommendation{
+		bucket("otelcol-agent", "coding_agent_token_usage_total", "http_status_code"),
+		bucket("alloy-apps", "shop_cart_operations_total", "status_code"),
+	}
+	dir := t.TempDir()
+	rj := filepath.Join(dir, "report.json")
+	b, _ := json.Marshal(r)
+	if err := os.WriteFile(rj, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	var out strings.Builder
+	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
+		Checkouts: checkoutFlag{repo: filepath.Join(dirs[st.Name], "checkout")}, Validate: validation}
+	if err := runPropose(context.Background(), o, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	patch, err := os.ReadFile(filepath.Join(dir, "p", report.ManifestDir(repo)+".patch"))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	for _, want := range []string{
+		"+  transform/tvt_aggregate:",
+		`replace_pattern(datapoint.attributes["http_status_code"], "^([0-9])[0-9][0-9]$", "$${1}00")`,
+		"+  interval/tvt:",
+		"processors: [transform/tvt_aggregate, interval/tvt, delta_to_cumulative, batch]",
+	} {
+		if !strings.Contains(string(patch), want) {
+			t.Errorf("patch lacks %q\n%s", want, patch)
+		}
+	}
+	if !strings.Contains(out.String(), "skipped bucket:prom:label:shop_cart_operations_total:status_code: bucketing") {
+		t.Errorf("the Alloy bucket wasn't skipped with the reason:\n%s", out.String())
+	}
+	if validation == "require" && (strings.Contains(out.String(), "NOT VALIDATED") || !strings.Contains(out.String(), "valid (")) {
+		t.Errorf("not validated:\n%s", out.String())
+	}
+}
