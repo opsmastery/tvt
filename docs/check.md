@@ -22,7 +22,7 @@ It evaluates configs, not intent:
 | Prometheus | each job's `metric_relabel_configs`, in Prometheus' semantics (anchored regex, `;` separator, rule order, renames), against every protected metric and label, scoped to the jobs the manifest records for it |
 | prometheus-operator | `ServiceMonitor` and `PodMonitor` `metricRelabelings` |
 | Alloy | `prometheus.relabel` rules (as Prometheus), `loki.relabel` drop rules and keeps in front of a `loki.write`, `loki.process` `stage.drop`, `stage.sampling` and `stage.match` with `action = "drop"`, and `otelcol.processor` samplers and filters (any of which may drop record spans) |
-| OTel Collector | every pipeline's processors in order: `filter` conditions, `transform` statements, `attributes` actions, `probabilistic_sampler`, `tail_sampling`, `logdedup`, and the `routing`, `count`, `sum` and `signal_to_metrics` connectors |
+| OTel Collector | every pipeline's processors in order: `filter` conditions, `transform` statements, `attributes` actions, `probabilistic_sampler`, `tail_sampling`, `log_dedup` (or its deprecated name `logdedup`, with or without settings), and the `routing`, `count`, `sum` and `signal_to_metrics` connectors |
 | Fluent Bit (YAML) | `grep` excludes and `rewrite_tag` against the pipeline's protected streams; `lua` and `wasm` fail closed |
 
 OTTL is read with tvt's own extractor (ADR 0012) and evaluated three-valued over what tvt knows about the item (a record span's `gen_ai.operation.name`, a metric's name in every spelling the condition uses): a condition that could be true is treated as true.
@@ -40,7 +40,7 @@ OTTL is read with tvt's own extractor (ADR 0012) and evaluated three-valued over
 | `scrape_interval` | changes a scrape interval so a range window holds fewer than four samples, a nonzero `for` is shorter than the interval, or an alert's worst-case detection delay passes its severity's objective (item 5); or raises a job's interval past the manifest's `scrape_limits` (S10 item 5: the longest every reader of the job allows, panels and instant readers included, or the current interval when a reader's window is unknown) |
 | `error_guard` | adds a log drop, sample or collapse that doesn't keep lines matching `(?i)error\|exception\|traceback\|critical\|fatal`, in case a stream's level label is wrong (item 2) |
 | `least_lossy` | drops a metric or stream that something reads ad hoc (a query-log reader other than a dashboard or rule) when a less lossy action from ADR 0010 would keep that reader working: a cold tier, a reroute, a label removal (item 3) |
-| `collapse_counts` | collapses repeated lines (`logdedup`) whose streams something reads, which changes every count over them (item 6) |
+| `collapse_counts` | collapses repeated lines (`log_dedup`/`logdedup`) whose streams something reads, which changes every count over them (item 6). The processor's `conditions` aren't evaluated yet: any read stream or record event in the pipeline refuses it |
 | `helm_overlay` | sets a values list (`metricRelabelings`, `cAdvisorMetricRelabelings`) that replaces the chart's default without the drops the default had, or changes a monitor Prometheus doesn't select (item 11) |
 | `delta_replicas` | removes a label from a delta counter in a pipeline the manifest records as more than one replica with no load-balancing gateway (`pipelines[].replicas`, `load_balanced` in `tvt.yaml`) (item 12) |
 | `build_component` | uses a processor or connector missing from the pipeline's ocb builder manifest |
