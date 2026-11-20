@@ -111,7 +111,7 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 <tbody>
 {{range .Confirm}}
 <tr class="confirm" id="{{.ID}}"><td><span class="tag">dormant: confirm</span><br><code>{{.Signal.ID}}</code></td>
-<td>{{.Question}}{{if .Gaps}}<div class="rowgap">Gaps: {{join .Gaps "; "}}</div>{{end}}<div class="muted" style="font-size:12px">Every reader: <code>{{why .Signal.ID}}</code></div></td>
+<td>{{.Question}}{{with .Retention}}<div style="font-size:13px">Or keep {{.KeepDays}} days of the {{.CurrentDays}} now{{if .Lookback}} ({{.Reader}} reads {{.Lookback}} back){{end}}: saves up to {{money .Monthly $.Scan.Currency}} a month. tvt doesn't write this yet: {{.Writer}}.</div>{{end}}{{if .Gaps}}<div class="rowgap">Gaps: {{join .Gaps "; "}}</div>{{end}}<div class="muted" style="font-size:12px">Every reader: <code>{{why .Signal.ID}}</code></div></td>
 <td class="num">{{if .CostFloor}}at least {{end}}{{money .Savings.Monthly .Savings.Currency}}</td>
 <td>{{if .Owner}}{{.Owner}}{{else}}<span class="muted">unknown</span>{{end}}{{if .Tier}}<br><span class="muted">tier {{.Tier}}</span>{{end}}</td></tr>
 {{else}}
