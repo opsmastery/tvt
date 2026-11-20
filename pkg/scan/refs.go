@@ -880,9 +880,14 @@ func (r *resolver) sorted() []graph.Reference {
 func promLabels(pr parse.Ref) []graph.LabelRef {
 	var ls []graph.LabelRef
 	for _, m := range pr.Matchers {
-		if m.Label != "__name__" {
-			ls = append(ls, graph.LabelRef{Name: m.Label, Use: graph.LabelMatch})
+		if m.Label == "__name__" {
+			continue
 		}
+		use := graph.LabelMatch
+		if (m.Op == parse.MatchRegexp || m.Op == parse.MatchNotRegex) && !m.Variable && parse.Coarse(m.Value) {
+			use = graph.LabelCoarse
+		}
+		ls = append(ls, graph.LabelRef{Name: m.Label, Use: use})
 	}
 	ls = appendUses(ls, pr.Grouping, graph.LabelGroup)
 	ls = appendUses(ls, pr.Without, graph.LabelWithout)
