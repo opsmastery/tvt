@@ -47,6 +47,10 @@ type Aggregate struct {
 	ID, Evidence, Reason string
 	Scan                 int64
 	Labels               map[string][]string
+	// Buckets maps each metric to labels whose values are bucketed to
+	// their class, the leading digit and 00 (S10 item 1): the merged
+	// series are summed by the same window.
+	Buckets map[string][]string
 	// Window is the summing window (default DefaultWindow).
 	Window string
 	// Collector is the target's version: the ordered pipeline needs
@@ -79,7 +83,10 @@ func (a Aggregate) statements() ([]string, error) {
 		labels = append(labels, l)
 	}
 	slices.Sort(labels)
-	var out []string
+	out, err := a.bucketStatements()
+	if err != nil {
+		return nil, err
+	}
 	for _, l := range labels {
 		ms := byLabel[l]
 		slices.Sort(ms)
@@ -98,6 +105,58 @@ func (a Aggregate) statements() ([]string, error) {
 
 var labelName = metricName
 
+// bucketValue is the class a value buckets to: its leading digit and 00.
+// "$$" is the Collector config's escape for "$", so OTTL sees ${1}.
+const bucketPattern, bucketReplacement = `^([0-9])[0-9][0-9]$`, `$${1}00`
+
+// bucketStatements rewrite each bucketed label to its class, where the
+// metric is one that carries it. The OTel attribute's key is the label's
+// name, or the same with dots (http_response_status_code may be
+// http.response.status_code): one statement each, a no-op where the key
+// is absent.
+func (a Aggregate) bucketStatements() ([]string, error) {
+	byLabel := map[string][]string{}
+	for m, ls := range a.Buckets {
+		if !metricName.MatchString(m) {
+			return nil, fmt.Errorf("propose: bucket %s: %q is not a metric name", a.ID, m)
+		}
+		if _, ok := OtelConditions(m); !ok {
+			return nil, fmt.Errorf("propose: bucket %s: %s may be one series of an OTel histogram", a.ID, m)
+		}
+		for _, l := range ls {
+			if !labelName.MatchString(l) || strings.HasPrefix(l, "__") || l == "job" || l == "instance" {
+				return nil, fmt.Errorf("propose: bucket %s: %q is not a label tvt buckets", a.ID, l)
+			}
+			byLabel[l] = append(byLabel[l], m)
+		}
+	}
+	labels := make([]string, 0, len(byLabel))
+	for l := range byLabel {
+		labels = append(labels, l)
+	}
+	slices.Sort(labels)
+	var out []string
+	for _, l := range labels {
+		ms := byLabel[l]
+		slices.Sort(ms)
+		var where []string
+		for _, m := range ms {
+			cs, _ := OtelConditions(m)
+			for _, c := range cs {
+				where = append(where, "("+c+")")
+			}
+		}
+		keys := []string{l}
+		if d := strings.ReplaceAll(l, "_", "."); d != l {
+			keys = append(keys, d)
+		}
+		for _, k := range keys {
+			out = append(out, fmt.Sprintf(`replace_pattern(datapoint.attributes["%s"], "%s", "%s") where %s`, k, bucketPattern, bucketReplacement, strings.Join(where, " or ")))
+		}
+	}
+	return out, nil
+}
+
 // otelAddAggregate writes the ordered pipeline into a config with no tvt
 // blocks: the two processors, then both listed just before
 // delta_to_cumulative in each named pipeline. A pipeline without
@@ -105,7 +164,7 @@ var labelName = metricName
 // and a cumulative counter can't have labels removed in the collector
 // this way.
 func otelAddAggregate(out []byte, pipelines []string, a Aggregate) ([]byte, error) {
-	if a.ID == "" || strings.ContainsAny(a.ID+a.Reason, "\n\r") || len(a.Labels) == 0 {
+	if a.ID == "" || strings.ContainsAny(a.ID+a.Reason, "\n\r") || len(a.Labels)+len(a.Buckets) == 0 {
 		return nil, fmt.Errorf("propose: aggregate needs a one-line ID and reason and at least one label")
 	}
 	if a.Window == "" {
@@ -154,7 +213,7 @@ func otelAddAggregate(out []byte, pipelines []string, a Aggregate) ([]byte, erro
 	if a.Reason != "" {
 		fmt.Fprintf(&b, "%s# %s\n", indent, a.Reason)
 	}
-	fmt.Fprintf(&b, "%s# delete the labels, sum over %s, then delta_to_cumulative (tvt S7 item 8)\n", indent, a.Window)
+	fmt.Fprintf(&b, "%s# delete or bucket the labels, sum over %s, then delta_to_cumulative (tvt S7 item 8, S10 item 1)\n", indent, a.Window)
 	fmt.Fprintf(&b, "%s%s:\n%s  error_mode: ignore\n%s  metric_statements:\n%s    - context: datapoint\n%s      statements:\n", indent, OtelcolAggregateProcessor, indent, indent, indent, indent)
 	for _, st := range stmts {
 		fmt.Fprintf(&b, "%s        - '%s'\n", indent, st)
