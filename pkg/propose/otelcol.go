@@ -249,6 +249,11 @@ func otelRoot(src []byte) (*yaml.Node, error) {
 // stripOtelRefs removes tvt's processor from flow-style processors lists
 // (block-list entries sit in marked blocks, which stripBlocks removed).
 func stripOtelRefs(src []byte) ([]byte, error) {
+	return stripOtelRefsOf(src, tvtProcessors)
+}
+
+// stripOtelRefsOf is stripOtelRefs for the named processors only.
+func stripOtelRefsOf(src []byte, names []string) ([]byte, error) {
 	root, err := otelRoot(src)
 	if err != nil {
 		return nil, err
@@ -270,7 +275,7 @@ func stripOtelRefs(src []byte) ([]byte, error) {
 			continue
 		}
 		for _, item := range pr.Content {
-			if !slices.Contains(tvtProcessors, item.Value) {
+			if !slices.Contains(names, item.Value) {
 				continue
 			}
 			// The entry and the ", " after it, as tvt wrote them.
