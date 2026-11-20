@@ -22,7 +22,7 @@ Only `candidate` signals with a score above zero confidence. Hard keeps, keep_hi
 | Signal | Action |
 | --- | --- |
 | Metric | `drop` |
-| Label | `label_removal` |
+| Label | `label_removal`; or `bucket` for a read label whose every reader matches it only by class (S10 item 1): `code=~"5.."`, `code!~"2.."`, `[45]..` are coarse reads (`graph.LabelCoarse`), while an exact value, a grouping, a legend, a reader of every label or an assumed reader blocks it. The row keeps the label and buckets values to their leading digit and 00 (503 to 500), which every coarse pattern still matches; `merges` estimates the series that collide, so it needs a writer that sums them (S10) and isn't proposed yet |
 | Log stream | `reroute`: to cold storage or shorter retention, never line-level (ADR 0006) |
 
 `downsample` and `finding` are reserved for S5 and S6.
