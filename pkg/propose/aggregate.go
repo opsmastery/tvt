@@ -146,13 +146,54 @@ func (a Aggregate) bucketStatements() ([]string, error) {
 				where = append(where, "("+c+")")
 			}
 		}
-		keys := []string{l}
-		if d := strings.ReplaceAll(l, "_", "."); d != l {
-			keys = append(keys, d)
+		keys, err := attributeSpellings(l)
+		if err != nil {
+			return nil, fmt.Errorf("propose: bucket %s: %w", a.ID, err)
 		}
+		conds := strings.Join(where, " or ")
 		for _, k := range keys {
-			out = append(out, fmt.Sprintf(`replace_pattern(datapoint.attributes["%s"], "%s", "%s") where %s`, k, bucketPattern, bucketReplacement, strings.Join(where, " or ")))
+			// Semantic conventions make status codes ints, which
+			// replace_pattern leaves alone (checked live on 0.165.0: an
+			// int 503 kept its own series). Prometheus renders an int
+			// and its string the same, so casting first changes no label.
+			attr := fmt.Sprintf(`datapoint.attributes["%s"]`, k)
+			out = append(out,
+				fmt.Sprintf(`set(%s, String(%s)) where IsInt(%s) and (%s)`, attr, attr, attr, conds),
+				fmt.Sprintf(`replace_pattern(%s, "%s", "%s") where %s`, attr, bucketPattern, bucketReplacement, conds))
 		}
+	}
+	return out, nil
+}
+
+// maxSpellingSeparators caps attributeSpellings at 16 keys.
+const maxSpellingSeparators = 4
+
+// attributeSpellings lists the OTel attribute keys that Prometheus's
+// translation turns into label l: each underscore may have been an
+// underscore or a dot (http.response.status_code is stored as
+// http_response_status_code). replace_pattern takes one exact key, so a
+// bucket writes a statement per spelling; label removal matches them all
+// with one delete_matching_keys regex instead. The label as stored comes
+// first, then the rest in order.
+func attributeSpellings(l string) ([]string, error) {
+	parts := strings.Split(l, "_")
+	n := len(parts) - 1
+	if n > maxSpellingSeparators {
+		return nil, fmt.Errorf("%q has %d separators; tvt writes a bucket for at most %d", l, n, maxSpellingSeparators)
+	}
+	out := make([]string, 0, 1<<n)
+	for mask := 0; mask < 1<<n; mask++ {
+		var b strings.Builder
+		b.WriteString(parts[0])
+		for i := 1; i <= n; i++ {
+			if mask&(1<<(i-1)) != 0 {
+				b.WriteByte('.')
+			} else {
+				b.WriteByte('_')
+			}
+			b.WriteString(parts[i])
+		}
+		out = append(out, b.String())
 	}
 	return out, nil
 }
