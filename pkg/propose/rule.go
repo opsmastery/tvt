@@ -109,26 +109,46 @@ var metricName = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
 // alone. prefix is the comment leader ("#" or "//"). An unterminated
 // block is an error: tvt never guesses where its own text ends.
 func stripBlocks(src []byte, prefix string) ([]byte, int, error) {
+	return stripBlocksIf(src, prefix, func(string) bool { return true })
+}
+
+// stripBlocksIf is stripBlocks for the blocks whose begin comment (the
+// text after tvt:begin) match accepts; the others are kept verbatim. The
+// scrape interval writers strip only their own blocks, so they compose
+// with the drop writers' (S10 item 5).
+func stripBlocksIf(src []byte, prefix string, match func(begin string) bool) ([]byte, int, error) {
 	lines := strings.SplitAfter(string(src), "\n")
 	var out strings.Builder
-	in, blocks := false, 0
+	in, keep, blocks := false, false, 0
 	for i, l := range lines {
 		t := strings.TrimSpace(l)
-		isBegin := strings.HasPrefix(t, prefix) && strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(t, prefix)), "tvt:begin")
-		isEnd := strings.HasPrefix(t, prefix) && strings.TrimSpace(strings.TrimPrefix(t, prefix)) == endMarker
+		comment := strings.TrimSpace(strings.TrimPrefix(t, prefix))
+		isComment := strings.HasPrefix(t, prefix)
+		isBegin := isComment && strings.HasPrefix(comment, "tvt:begin")
+		isEnd := isComment && comment == endMarker
 		switch {
 		case in && isEnd:
 			in = false
+			if keep {
+				out.WriteString(l)
+			}
 		case in && isBegin:
 			return nil, 0, fmt.Errorf("propose: line %d: tvt:begin inside an open tvt block", i+1)
-		case in && strings.HasPrefix(t, prefix) && strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(t, prefix)), originalMarker):
+		case in && keep:
+			out.WriteString(l)
+		case in && isComment && strings.HasPrefix(comment, originalMarker):
 			// A line tvt replaced, kept in the block: put it back.
 			indent := l[:len(l)-len(strings.TrimLeft(l, " \t"))]
-			out.WriteString(indent + strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(t, prefix)), originalMarker)) + "\n")
+			out.WriteString(indent + strings.TrimSpace(strings.TrimPrefix(comment, originalMarker)) + "\n")
 		case in:
 		case isBegin:
 			in = true
-			blocks++
+			keep = !match(strings.TrimSpace(strings.TrimPrefix(comment, "tvt:begin")))
+			if keep {
+				out.WriteString(l)
+			} else {
+				blocks++
+			}
 		case isEnd:
 			return nil, 0, fmt.Errorf("propose: line %d: tvt:end with no tvt:begin", i+1)
 		default:
