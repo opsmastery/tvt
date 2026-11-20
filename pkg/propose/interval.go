@@ -191,8 +191,8 @@ func checkPromInterval(src []byte, job string, iv Interval) error {
 }
 
 // AlloyIntervals sets scrape_interval on each job's prometheus.scrape
-// component (the job is job_name, else the component's label, as Alloy
-// defaults it). Like PrometheusIntervals, the component's own attribute
+// component (the job is job_name, else the component's full name,
+// prometheus.scrape.<label>, as Alloy defaults it and check reads it). Like PrometheusIntervals, the component's own attribute
 // line moves into the block as a tvt:original comment; without one the
 // block goes at the end of the component's body.
 func AlloyIntervals(src []byte, byJob map[string]Interval) ([]byte, error) {
@@ -215,7 +215,7 @@ func AlloyIntervals(src []byte, byJob map[string]Interval) ([]byte, error) {
 	scrapes := map[string]*ast.BlockStmt{}
 	for _, st := range f.Body {
 		if b, ok := st.(*ast.BlockStmt); ok && strings.Join(b.Name, ".") == "prometheus.scrape" {
-			job := b.Label
+			job := "prometheus.scrape." + b.Label
 			if v, ok := literalString(attr(b.Body, "job_name")); ok {
 				job = v
 			}
@@ -285,7 +285,7 @@ func AlloyIntervals(src []byte, byJob map[string]Interval) ([]byte, error) {
 		if !ok || strings.Join(b.Name, ".") != "prometheus.scrape" {
 			continue
 		}
-		job := b.Label
+		job := "prometheus.scrape." + b.Label
 		if v, ok := literalString(attr(b.Body, "job_name")); ok {
 			job = v
 		}

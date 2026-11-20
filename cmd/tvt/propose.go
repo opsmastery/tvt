@@ -16,6 +16,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
@@ -24,6 +25,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/validate"
 	"github.com/Opsmastery-Summit/tvt/pkg/vcs"
+	"github.com/prometheus/common/model"
 )
 
 type proposeOptions struct {
@@ -190,16 +192,29 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 			byPipeline[rec.Pipeline] = append(byPipeline[rec.Pipeline], rec)
 		}
 	}
+	// Longer scrape intervals (S10 item 5), by pipeline.
+	ivsByPipeline := map[string][]report.IntervalChange{}
+	for _, iv := range r.Intervals {
+		switch {
+		case iv.Held != "" || iv.ProposedSec == 0:
+		case iv.Pipeline == "":
+			skipped = append(skipped, proposal{Rec: intervalRec(iv, r.Scan.Currency), Note: "the job's metrics come through no single pipeline"})
+		default:
+			ivsByPipeline[iv.Pipeline] = append(ivsByPipeline[iv.Pipeline], iv)
+		}
+	}
 	v := &validator{o: o}
 	defer v.cleanup()
 	patches := map[string]*strings.Builder{} // by repo
 	var written []proposal
 	for _, p := range cfg.Pipelines {
 		recs := byPipeline[p.Name]
-		if len(recs) == 0 {
+		ivs := ivsByPipeline[p.Name]
+		delete(ivsByPipeline, p.Name)
+		if len(recs) == 0 && len(ivs) == 0 {
 			continue
 		}
-		done, skip, diff := proposePipeline(p, recs, jobs, o.Checkouts, r.Scan.ID, v.check(ctx, p), func(n string) { v.build = append(v.build, p.Repo+" "+n) })
+		done, skip, diff := proposePipeline(p, recs, ivs, r.Scan.Currency, jobs, o.Checkouts, r.Scan.ID, v.check(ctx, p), func(n string) { v.build = append(v.build, p.Repo+" "+n) })
 		for i := range done {
 			done[i].Repo = p.Repo
 		}
@@ -216,6 +231,11 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 	for name, recs := range byPipeline {
 		for _, rec := range recs {
 			skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + name + " isn't in " + o.Config})
+		}
+	}
+	for name, ivs := range ivsByPipeline {
+		for _, iv := range ivs {
+			skipped = append(skipped, proposal{Rec: intervalRec(iv, r.Scan.Currency), Note: "pipeline " + name + " isn't in " + o.Config})
 		}
 	}
 	// What each repo's patch proposes, for check's confirmations (S9).
@@ -369,7 +389,9 @@ func ownerHandle(owner string, githubOf map[string]string) string {
 func proposalDiff(checkout string, scan int64, repo string, written []proposal) (string, error) {
 	p := report.Proposal{Scan: scan, Pipelines: map[string][]report.ProposedChange{}}
 	for _, w := range written {
-		if w.Repo != repo || w.Rec.Pipeline == "" {
+		if w.Repo != repo || w.Rec.Pipeline == "" || strings.HasPrefix(w.Rec.ID, propose.IntervalPrefix) {
+			// A scrape interval change drops nothing, so it needs no owner
+			// confirmation: check guards it with the scrape limits.
 			continue
 		}
 		p.Pipelines[w.Rec.Pipeline] = append(p.Pipelines[w.Rec.Pipeline], report.ProposedChange{Recommendation: w.Rec.ID, Signal: w.Rec.Signal.ID,
@@ -469,12 +491,21 @@ func prBody(repo string, scan int64, written []proposal, validation, build []str
 // written only when every job its metric carries has a scrape config in
 // p's files: a drop in some jobs would leave the rest of the series, and
 // the savings, in place.
-func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[string][]string, checkouts checkoutFlag, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
+func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []report.IntervalChange, currency string, jobs map[string][]string, checkouts checkoutFlag, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
 	skipAll := func(note string) ([]proposal, []proposal, string) {
 		for _, rec := range recs {
 			skipped = append(skipped, proposal{Rec: rec, Note: note})
 		}
+		for _, iv := range ivs {
+			skipped = append(skipped, proposal{Rec: intervalRec(iv, currency), Note: note})
+		}
 		return nil, skipped, ""
+	}
+	if len(ivs) > 0 && p.Kind != "prometheus" && p.Kind != "alloy" {
+		for _, iv := range ivs {
+			skipped = append(skipped, proposal{Rec: intervalRec(iv, currency), Note: "no scrape interval writer for " + p.Kind + " pipelines"})
+		}
+		ivs = nil
 	}
 	if p.Kind == "prometheus-operator" {
 		root, ok := checkouts[p.Repo]
@@ -553,7 +584,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		}
 		drops = append(drops, rec)
 	}
-	if recs = drops; len(recs) == 0 && len(reroutes) == 0 {
+	if recs = drops; len(recs) == 0 && len(reroutes) == 0 && len(ivs) == 0 {
 		return nil, skipped, ""
 	}
 	var routes []propose.Route
@@ -566,7 +597,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 		d := dropOf(rec.ID, []report.Recommendation{rec}, scan)
 		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold})
 	}
-	if len(recs) == 0 {
+	if len(recs) == 0 && len(ivs) == 0 {
 		return proposeAlloyRoutesOnly(p, reroutes, routes, checkouts, scan, check, skipped)
 	}
 	var listJobs func([]byte) ([]string, error)
@@ -640,23 +671,48 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 			plan[f][j] = append(plan[f][j], rec)
 		}
 	}
+	// file -> job -> interval, for jobs with a scrape config in p's files.
+	ivPlan := map[string]map[string]propose.Interval{}
+	ivRecs := map[string]report.Recommendation{} // by job
+	for _, iv := range ivs {
+		rec := intervalRec(iv, currency)
+		f, ok := fileOf[iv.Job]
+		if !ok {
+			skipped = append(skipped, proposal{Rec: rec, Note: fmt.Sprintf("job %s has no scrape config in %s", iv.Job, strings.Join(p.Files, ", "))})
+			continue
+		}
+		if ivPlan[f] == nil {
+			ivPlan[f] = map[string]propose.Interval{}
+		}
+		ivPlan[f][iv.Job] = propose.Interval{ID: rec.ID, Scan: scan, Reason: rec.Claim, Every: time.Duration(iv.ProposedSec * float64(time.Second))}
+		ivRecs[iv.Job] = rec
+	}
 	var b strings.Builder
 	routed := false
 	failed := map[string]string{} // rec ID -> why its file couldn't be written
+	var ivWritten []proposal
 	for _, f := range p.Files {
 		byJob := plan[f]
-		if len(byJob) == 0 {
+		if len(byJob) == 0 && len(ivPlan[f]) == 0 {
 			continue
 		}
-		var out []byte
+		out := srcs[f]
 		var err error
-		if p.Kind == "prometheus" {
+		switch {
+		case len(byJob) == 0:
+			// Intervals only; an Alloy file still takes the reroutes.
+			if p.Kind == "alloy" && len(routes) > 0 && !routed {
+				if next, rerr := propose.AlloyRoutesKeep(out, routes); rerr == nil {
+					out, routed = next, true
+				}
+			}
+		case p.Kind == "prometheus":
 			drops := map[string]propose.Drop{}
 			for j, rs := range byJob {
 				drops[j] = dropOf(p.Name+"/"+j, rs, scan)
 			}
 			out, err = propose.PrometheusDrops(srcs[f], drops)
-		} else {
+		default:
 			// One block per relabel component: every job's metrics, since
 			// jobs can share a component and a drop is of the whole metric.
 			var all []report.Recommendation
@@ -675,6 +731,15 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 				}
 			}
 		}
+		// After the drops: the drop writers strip every tvt block, the
+		// interval writers only their own.
+		if err == nil && len(ivPlan[f]) > 0 {
+			if p.Kind == "prometheus" {
+				out, err = propose.PrometheusIntervals(out, ivPlan[f])
+			} else {
+				out, err = propose.AlloyIntervals(out, ivPlan[f])
+			}
+		}
 		if err == nil {
 			err = check(root, f, out)
 		}
@@ -684,10 +749,18 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, jobs map[s
 					failed[rec.ID] = f + ": " + err.Error()
 				}
 			}
+			for j := range ivPlan[f] {
+				skipped = append(skipped, proposal{Rec: ivRecs[j], Note: f + ": " + err.Error()})
+			}
 			continue
+		}
+		for j := range ivPlan[f] {
+			ivWritten = append(ivWritten, proposal{Rec: ivRecs[j]})
 		}
 		b.WriteString(propose.Diff(f, srcs[f], out))
 	}
+	sort.Slice(ivWritten, func(i, j int) bool { return ivWritten[i].Rec.ID < ivWritten[j].Rec.ID })
+	written = append(written, ivWritten...)
 	for _, rec := range recs {
 		if note, ok := failed[rec.ID]; ok {
 			skipped = append(skipped, proposal{Rec: rec, Note: note})
@@ -1536,4 +1609,22 @@ func proposeFluentBitHelm(p config.Pipeline, recs []report.Recommendation, root 
 		written = append(written, proposal{Rec: rec})
 	}
 	return written, skipped, propose.Diff(hv.File, src, out)
+}
+
+// intervalRec shows a scrape interval change (S10 item 5) in propose's
+// output and the PR body as a row like a recommendation's. It isn't one:
+// nothing is dropped, so check asks for no owner confirmation, and its
+// guard is the manifest's scrape limits.
+func intervalRec(iv report.IntervalChange, currency string) report.Recommendation {
+	every := model.Duration(time.Duration(iv.ProposedSec * float64(time.Second))).String()
+	now := model.Duration(time.Duration(iv.CurrentSec * float64(time.Second))).String()
+	why := fmt.Sprintf("job %s every %s instead of %s (%d metrics, %d readers)", iv.Job, every, now, iv.Metrics, iv.Readers)
+	if iv.Bound != "" {
+		why += "; not longer: " + iv.Bound
+	}
+	return report.Recommendation{ID: propose.IntervalPrefix + iv.Job, Action: report.ActionDownsample,
+		Signal:   report.SignalRef{ID: "job:" + iv.Job, Kind: "job", Name: iv.Job},
+		Pipeline: iv.Pipeline, Proposable: true, Claim: why,
+		Savings:  report.Savings{Monthly: iv.Monthly, Currency: currency},
+		Expected: report.Expected{Statements: []string{fmt.Sprintf("job %s is scraped every %s; every reader's range still holds four samples", iv.Job, every)}, SeriesAfter: -1}}
 }

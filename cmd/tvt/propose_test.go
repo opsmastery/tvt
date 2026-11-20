@@ -791,3 +791,81 @@ func TestProposeBucket(t *testing.T) {
 		t.Errorf("not validated:\n%s", out.String())
 	}
 }
+
+// TestProposeIntervals: the report's longer scrape intervals (S10 item 5)
+// go into the scrape configs of the pipeline that carries the job, after
+// the drops, and the manifest's scrape limits let check refuse more.
+func TestProposeIntervals(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := readLatest(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := report.Build(in, 0)
+	var loki report.IntervalChange
+	for _, iv := range r.Intervals {
+		if iv.Job == "loki" {
+			loki = iv
+		}
+	}
+	if loki.ProposedSec != 120 || loki.Pipeline == "" {
+		t.Fatalf("loki interval: %+v", loki)
+	}
+	r.Recommendations = nil
+	r.Intervals = []report.IntervalChange{loki,
+		{Job: "nope", Pipeline: loki.Pipeline, CurrentSec: 10, ProposedSec: 60, Readers: 1},
+		{Job: "elsewhere", CurrentSec: 10, ProposedSec: 60, Readers: 1}}
+	dir := t.TempDir()
+	rj := filepath.Join(dir, "report.json")
+	b, _ := json.Marshal(r)
+	if err := os.WriteFile(rj, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	var out strings.Builder
+	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
+		Checkouts: checkoutFlag{repo: filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}
+	if err := runPropose(context.Background(), o, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	patch, err := os.ReadFile(filepath.Join(dir, "p", report.ManifestDir(repo)+".patch"))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	for _, want := range []string{"+    # tvt:begin interval:loki scan=", "+    scrape_interval: 2m"} {
+		if !strings.Contains(string(patch), want) {
+			t.Errorf("patch lacks %q:\n%s", want, patch)
+		}
+	}
+	if strings.Contains(string(patch), "interval:loki\"") || strings.Contains(string(patch), `"recommendation": "interval:`) {
+		t.Error("the interval is in .tvt/proposal.json, which lists what needs an owner's confirmation")
+	}
+	for _, want := range []string{"skipped interval:nope: job nope has no scrape config", "skipped interval:elsewhere: the job's metrics come through no single pipeline"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+	// The manifest carries the limits check enforces: the proposal for a
+	// proposed job, the current interval for a held one.
+	cfg, err := config.Load(filepath.Join(dirs[st.Name], "tvt-lab.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := map[string]report.ScrapeLimit{}
+	for _, l := range buildManifests(cfg, in)[repo].ScrapeLimits {
+		limits[l.Job] = l
+	}
+	if l := limits["loki"]; l.MaxSeconds != 120 {
+		t.Errorf("loki limit %+v", l)
+	}
+	if l := limits["node"]; l.MaxSeconds != 10 || !strings.Contains(l.Why, "$__rate_interval") {
+		t.Errorf("node limit %+v", l)
+	}
+}

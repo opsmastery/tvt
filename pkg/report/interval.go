@@ -32,7 +32,11 @@ const (
 // before retention and drops). Held says why it can't, for a job with
 // readers.
 type IntervalChange struct {
-	Job         string  `json:"job"`
+	Job string `json:"job"`
+	// Pipeline is the pipeline whose scrape config sets the interval
+	// (the pipeline targets of the job's metrics); empty when they name
+	// none or more than one, which tvt propose skips.
+	Pipeline    string  `json:"pipeline,omitempty"`
 	CurrentSec  float64 `json:"current_seconds"`
 	ProposedSec float64 `json:"proposed_seconds,omitempty"`
 	Metrics     int     `json:"metrics"`
@@ -58,11 +62,15 @@ type IntervalChange struct {
 // source's scrape interval setting, which tvt doesn't change.
 func intervalRows(in Input, refs map[string][]graph.Reference, consumers map[string]graph.Consumer, costs map[string]graph.Cost) []IntervalChange {
 	jobMetrics := map[string][]string{}
+	jobPipelines := map[string][]string{}
 	for _, pt := range in.PipelineTargets {
 		if !strings.Contains(pt.Subject, ":metric:") {
 			continue
 		}
 		for _, j := range pt.Jobs {
+			if pt.Pipeline != "" && !slices.Contains(jobPipelines[j], pt.Pipeline) {
+				jobPipelines[j] = append(jobPipelines[j], pt.Pipeline)
+			}
 			if !slices.Contains(jobMetrics[j], pt.Subject) {
 				jobMetrics[j] = append(jobMetrics[j], pt.Subject)
 			}
@@ -87,6 +95,9 @@ func intervalRows(in Input, refs map[string][]graph.Reference, consumers map[str
 	for _, job := range jobs {
 		ms := jobMetrics[job]
 		row := IntervalChange{Job: job, Metrics: len(ms)}
+		if ps := jobPipelines[job]; len(ps) == 1 {
+			row.Pipeline = ps[0]
+		}
 		var current time.Duration
 		for _, m := range ms {
 			if c := costs[m]; c.IntervalAssumed == "" {
@@ -201,4 +212,30 @@ func pastObjective(alerts []AlertTiming, scrape, gw time.Duration, objectives ma
 		}
 	}
 	return "", ""
+}
+
+// ScrapeLimit is the longest scrape interval a job can have before a
+// reader breaks (S10 item 5): a proposed row's proposal, or a held row's
+// current interval. check refuses a change past it.
+type ScrapeLimit struct {
+	Job        string  `json:"job"`
+	MaxSeconds float64 `json:"max_seconds"`
+	Why        string  `json:"why"`
+}
+
+// ScrapeLimits are the limits for rows in pipelines, sorted by job.
+func ScrapeLimits(rows []IntervalChange, pipelines []string) []ScrapeLimit {
+	var out []ScrapeLimit
+	for _, r := range rows {
+		if r.CurrentSec <= 0 || r.Pipeline == "" || !slices.Contains(pipelines, r.Pipeline) {
+			continue
+		}
+		l := ScrapeLimit{Job: r.Job, MaxSeconds: r.ProposedSec, Why: r.Bound}
+		if r.Held != "" || r.ProposedSec == 0 {
+			l.MaxSeconds, l.Why = r.CurrentSec, r.Held
+		}
+		out = append(out, l)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Job < out[j].Job })
+	return out
 }
