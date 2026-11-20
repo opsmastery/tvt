@@ -14,6 +14,7 @@ import (
 
 	"github.com/Opsmastery-Summit/tvt/pkg/check"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
+	"github.com/Opsmastery-Summit/tvt/pkg/propose"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"go.yaml.in/yaml/v3"
 )
@@ -453,5 +454,36 @@ func TestConfirmSeasonal(t *testing.T) {
 	}
 	if err := runConfirm(confirmOptions{Report: rp, Dir: dir, Owner: "finance", Seasonal: "dec", Keep: "x", Now: now}, []string{"year_end_total"}, &out); err == nil {
 		t.Error("--seasonal with --keep was accepted")
+	}
+}
+
+// TestCheckBucket: tvt check accepts tvt's own bucket on the Collector
+// (S10 item 1) and reads it as a value rewrite, not a drop.
+func TestCheckBucket(t *testing.T) {
+	m := labManifest(t)
+	m.GeneratedAt = time.Now()
+	_, dirs := loadBenchmark(t)
+	checkout := filepath.Join(dirs["writers-2"], "checkout")
+	src, err := os.ReadFile(filepath.Join(checkout, "otelcol/config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := propose.Aggregate{ID: "otelcol-agent/labels", Scan: 9, Collector: "0.165.0", Reason: "http_status_code read only by class: bucketed",
+		Buckets: map[string][]string{"coding_agent_token_usage_total": {"http_status_code"}}}
+	edited, err := propose.OtelcolChanges(src, []string{"metrics"}, nil, &a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := func(p string) ([]byte, error) {
+		if p == "otelcol/config.yaml" {
+			return edited, nil
+		}
+		return dirFiles(checkout)(p)
+	}
+	r := check.Run(check.Input{Manifest: m, Base: dirFiles(checkout), Head: head, Now: time.Now(), SkipConfirmation: true})
+	for _, f := range r.Findings {
+		if f.Rule != check.RuleGap {
+			t.Errorf("tvt's bucket refused: %s", f)
+		}
 	}
 }
