@@ -462,6 +462,12 @@ func Build(in Input, limit int) Report {
 		rec.Expected = expected(rec, costs[rec.Signal.ID], totalStreamBytes)
 		r.Recommendations = append(r.Recommendations, rec)
 	}
+	// Bucketing (S10 item 1) keeps labels whose readers only tell classes
+	// apart: these are read labels, so never a label removal too.
+	for _, rec := range bucketRows(in.Signals, refs, consumers, costs, gs, listed, in.Scan) {
+		rec.Expected = expected(rec, costs[rec.Signal.ID], totalStreamBytes)
+		r.Recommendations = append(r.Recommendations, rec)
+	}
 	r.Services = services(in.Signals, r.Recommendations, refs, costs)
 	sort.SliceStable(r.Recommendations, func(i, j int) bool {
 		a, b := r.Recommendations[i], r.Recommendations[j]
