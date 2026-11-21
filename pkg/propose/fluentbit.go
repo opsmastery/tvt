@@ -24,6 +24,28 @@ type Route struct {
 	// config already defines (tvt.yaml pipelines[].cold). tvt doesn't
 	// invent a storage destination.
 	Cold string
+	// BelowWarn makes the route a level tier (S10 item 3): only the
+	// stream's lines that name a level below warn move, by
+	// LevelLinePattern; every other line stays hot.
+	BelowWarn bool
+}
+
+// LevelLinePattern matches a line that names its level below warn as a
+// key: logfmt level=debug, JSON "level":"info", lvl or severity too, any
+// case. A line that names no level this way stays hot, so a level tier
+// in a line-based pipeline moves no more than the line says (Loki's
+// detected_level also guesses from bare words, so it may measure more).
+// It doesn't parse quotes: a level key inside a quoted message counts.
+const LevelLinePattern = `(?i)(?:^|[\s{,])"?(?:level|lvl|severity)"?\s*[=:]\s*"?(?:trace|debug|info)\b`
+
+// fluentRegex is the rewrite_tag rule's regex: no line naming an error
+// moves (S8 item 2), and a level tier moves only lines naming a level
+// below warn. Onigmo, written without spaces (the rule is space-split).
+func (r Route) fluentRegex() string {
+	if r.BelowWarn {
+		return `^(?!.*(?i:error|exception|traceback|critical|fatal))(?=.*(?i:` + strings.TrimPrefix(LevelLinePattern, "(?i)") + `)).*$`
+	}
+	return `^(?!.*(?i:error|exception|traceback|critical|fatal)).*$`
 }
 
 func (r Route) begin() string {
@@ -145,7 +167,7 @@ func fluentRoute(out []byte, r Route) ([]byte, error) {
 		}
 		fmt.Fprintf(&b, "%s- name: rewrite_tag\n", indent)
 		fmt.Fprintf(&b, "%s  match: %s\n", indent, tag)
-		fmt.Fprintf(&b, "%s  rule: $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ %s false\n", indent, newTag)
+		fmt.Fprintf(&b, "%s  rule: $log %s %s false\n", indent, r.fluentRegex(), newTag)
 		fmt.Fprintf(&b, "%s  emitter_name: %s\n", indent, emitter)
 		fmt.Fprintf(&b, "%s# %s\n", indent, endMarker)
 		return b.String()
@@ -164,7 +186,7 @@ func fluentRoute(out []byte, r Route) ([]byte, error) {
 	default:
 		out = insertAfterLine(out, pastBlockEnd(out, lastLine(filters)), item(strings.Repeat(" ", filters.Content[0].Column-3)))
 	}
-	if err := checkFluentRoute(out, tag, newTag); err != nil {
+	if err := checkFluentRoute(out, tag, newTag, r.fluentRegex()); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -227,7 +249,7 @@ func fluentRegexMatch(pattern, tag string) bool {
 
 // checkFluentRoute re-reads the config: exactly one tvt rewrite_tag for
 // tag, retagging to newTag without keeping a copy.
-func checkFluentRoute(src []byte, tag, newTag string) error {
+func checkFluentRoute(src []byte, tag, newTag, regex string) error {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(src, &doc); err != nil {
 		return fmt.Errorf("propose: the edited config doesn't parse: %w", err)
@@ -236,7 +258,7 @@ func checkFluentRoute(src []byte, tag, newTag string) error {
 	n := 0
 	if filters != nil {
 		for _, f := range filters.Content {
-			if str(f, "name") == "rewrite_tag" && str(f, "match") == tag && str(f, "rule") == "$log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ "+newTag+" false" {
+			if str(f, "name") == "rewrite_tag" && str(f, "match") == tag && str(f, "rule") == "$log "+regex+" "+newTag+" false" {
 				n++
 			}
 		}

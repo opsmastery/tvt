@@ -141,7 +141,7 @@ func FluentBitHelmRoutes(values, defaults []byte, root string, routes []Route) (
 	}
 	for _, r := range routes {
 		tag, _ := classicRouteTag(joined, r)
-		if !strings.Contains(n.Value, "Rule         $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ "+ColdTagPrefix+tag+" false") {
+		if !strings.Contains(n.Value, "Rule         $log "+r.fluentRegex()+" "+ColdTagPrefix+tag+" false") {
 			return nil, fmt.Errorf("propose: config.filters lost the reroute of %s", tag)
 		}
 	}
