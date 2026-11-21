@@ -89,6 +89,8 @@ func TestStreamVolumesShardsAndLimits(t *testing.T) {
 			}
 			b.WriteString(`]}}`)
 			fmt.Fprint(w, b.String())
+		default:
+			http.NotFound(w, r) // no series API: the first pass stands
 		}
 	})
 	got, err := New(srv.URL, "").StreamVolumes(context.Background(), time.Hour)
@@ -135,5 +137,50 @@ func TestExactStreamSelector(t *testing.T) {
 	}
 	if got := ExactStreamSelector(labels, nil); got != StreamSelector(labels) {
 		t.Errorf("no other names: %s, want %s", got, StreamSelector(labels))
+	}
+}
+
+// TestStreamVolumesLabelSets: the lab on Nov 21. The coding agent's OTLP
+// stream carries only service_name, and Loki leaves it out of a request
+// grouped by every label name; the series API names its label set, and a
+// request for exactly that set (the other names pinned to "") finds it.
+func TestStreamVolumesLabelSets(t *testing.T) {
+	var queries []string
+	srv := server(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch r.URL.Path {
+		case "/loki/api/v1/labels":
+			fmt.Fprint(w, `{"status":"success","data":["app","service_name"]}`)
+		case "/loki/api/v1/series":
+			if strings.Join(q["match[]"], " ") != `{app=~".+"} {service_name=~".+"}` {
+				t.Errorf("series match %v", q["match[]"])
+			}
+			fmt.Fprint(w, `{"status":"success","data":[{"app":"shop","service_name":"shop"},{"service_name":"coding-agent","__stream_shard__":"0"},{"app":"shop","service_name":"shop2"}]}`)
+		case volumePath:
+			queries = append(queries, q.Get("query")+" by "+q.Get("targetLabels"))
+			switch q.Get("targetLabels") {
+			case "app,service_name": // Loki drops the agent's stream here
+				fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"app":"shop","service_name":"shop"},"value":[1,"1000"]}]}}`)
+			case "service_name":
+				if q.Get("query") != `{app="", service_name=~".+"}` {
+					t.Errorf("set query %q", q.Get("query"))
+				}
+				fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"service_name":"coding-agent"},"value":[1,"30"]}]}}`)
+			default:
+				t.Errorf("targetLabels %q", q.Get("targetLabels"))
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	got, err := New(srv.URL, "").StreamVolumes(context.Background(), 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || StreamSelector(got[1].Labels) != `{service_name="coding-agent"}` || got[1].Bytes != 30 {
+		t.Fatalf("streams %+v (queries %q): want shop and the agent's stream", got, queries)
+	}
+	if len(queries) != 3 {
+		t.Errorf("queries %q: two by every name, one for the agent's set", queries)
 	}
 }
