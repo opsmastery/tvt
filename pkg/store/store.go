@@ -30,7 +30,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 27
+const SchemaVersion = 28
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -498,6 +498,16 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 28 {
+		for _, q := range []string{
+			`ALTER TABLE costs ADD COLUMN classes INTEGER NOT NULL DEFAULT 0`,
+			`UPDATE meta SET value = '28' WHERE key = 'schema_version'`,
+		} {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -769,7 +779,7 @@ func (s *Store) LastReads(ctx context.Context) ([]SignalRead, error) {
 func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost,
-		        interval_ms, interval_assumed, buckets, exemplars, disk_bytes, merges, summable
+		        interval_ms, interval_assumed, buckets, exemplars, disk_bytes, merges, summable, classes
 		 FROM costs WHERE scan_id = ? ORDER BY signal_id`, scanID)
 	if err != nil {
 		return nil, err
@@ -780,7 +790,7 @@ func (s *Store) Costs(ctx context.Context, scanID int64) ([]graph.Cost, error) {
 		var c graph.Cost
 		var observed, interval int64
 		if err := rows.Scan(&c.SignalID, &c.ScanID, &observed, &c.ActiveSeries, &c.DistinctValues, &c.BytesPerDay, &c.SpansPerDay, &c.MonthlyCost,
-			&interval, &c.IntervalAssumed, &c.Buckets, &c.Exemplars, &c.DiskBytes, &c.Merges, &c.Summable); err != nil {
+			&interval, &c.IntervalAssumed, &c.Buckets, &c.Exemplars, &c.DiskBytes, &c.Merges, &c.Summable, &c.Classes); err != nil {
 			return nil, err
 		}
 		if c.MergesKnown = c.Merges >= 0; !c.MergesKnown {
@@ -1144,8 +1154,8 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 					ELSE max(refs.last_seen, excluded.last_seen) END,
 				last_scan = excluded.last_scan`},
 		{&sc.cost, `INSERT INTO costs (signal_id, scan_id, observed_at, active_series, distinct_values, bytes_per_day, spans_per_day, monthly_cost,
-				interval_ms, interval_assumed, buckets, exemplars, disk_bytes, merges, summable)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				interval_ms, interval_assumed, buckets, exemplars, disk_bytes, merges, summable, classes)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (signal_id, scan_id) DO UPDATE SET
 				observed_at = excluded.observed_at, active_series = excluded.active_series,
 				distinct_values = excluded.distinct_values,
@@ -1153,7 +1163,7 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 				monthly_cost = excluded.monthly_cost, interval_ms = excluded.interval_ms,
 				interval_assumed = excluded.interval_assumed, buckets = excluded.buckets,
 				exemplars = excluded.exemplars, disk_bytes = excluded.disk_bytes,
-				merges = excluded.merges, summable = excluded.summable`},
+				merges = excluded.merges, summable = excluded.summable, classes = excluded.classes`},
 		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start, gap)
 			VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.volume, `INSERT INTO stream_volumes (scan_id, selector, bytes_per_day, levels) VALUES (?, ?, ?, ?)`},
@@ -1273,7 +1283,7 @@ func (sc *Scan) PutCost(ctx context.Context, c graph.Cost) error {
 	}
 	_, err := sc.cost.ExecContext(ctx, c.SignalID, sc.ID, millis(observed),
 		c.ActiveSeries, c.DistinctValues, c.BytesPerDay, c.SpansPerDay, c.MonthlyCost,
-		c.Interval.Milliseconds(), c.IntervalAssumed, c.Buckets, c.Exemplars, c.DiskBytes, merges, c.Summable)
+		c.Interval.Milliseconds(), c.IntervalAssumed, c.Buckets, c.Exemplars, c.DiskBytes, merges, c.Summable, c.Classes)
 	return wrap("cost", c.SignalID, err)
 }
 
