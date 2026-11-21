@@ -79,6 +79,9 @@ type Report struct {
 	// items 3-4, version 5): reported with an estimated saving and handed
 	// to zeroreads, never acted on (ADR 0006).
 	LineFindings []LineFinding `json:"line_findings"`
+	// Ledger is what merged tvt changes saved (S11); absent when nothing
+	// has merged.
+	Ledger *Ledger `json:"ledger,omitempty"`
 	// Rules are every rule's measured cost and findings (S6 item 1,
 	// version 6), rules with findings first. Report only: tvt never edits
 	// rules.
@@ -338,6 +341,10 @@ type Input struct {
 	Scores     []graph.Score
 	// LineFindings are the scan's line findings (store.LineFindings).
 	LineFindings []graph.LineFinding
+	// Merges are the merged tvt changes so far, and History the stored
+	// scans' costs the ledger measures them with (S11).
+	Merges  []graph.Merge
+	History map[int64]ScanCosts
 	// RuleCosts and RuleFindings are the scan's rules (store.RuleCosts,
 	// store.RuleFindings).
 	RuleCosts    []graph.RuleCost
@@ -556,6 +563,7 @@ func Build(in Input, limit int) Report {
 		r.Recommendations = r.Recommendations[:limit]
 	}
 	r.LineFindings = lineFindings(in.LineFindings, in.Scan.Currency)
+	r.Ledger = buildLedger(in.Merges, in.History, in.Scan.ID, in.Scan.Currency)
 	r.Rules, r.Totals.RuleFindings = rules(consumers, in.RuleCosts, in.RuleFindings)
 	r.Totals.RuleFindings += detection(in, r.Rules)
 	r.QueryLoad = queryLoad(consumers, in.QueryCosts)

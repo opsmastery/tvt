@@ -1,6 +1,6 @@
 # S11: savings ledger
 
-**Status:** Planned.
+**Status:** In progress (Nov 21). Items 1 to 3, part one: `tvt scan` reads each pipeline repo checkout's `.tvt/proposal.json` (only a merged tvt PR puts it on the checkout's branch) and records each recommendation with the file's commit time (schema 29 `merges`, kept across scans, the first scan that sees one recording it). `tvt report` builds `ledger` from them: each change measured from the scan before its merge (the proposal's own scan when the database has it) to the first scan after it, as series, bytes, money and disk before and after; `pending` until a scan after the merge, `unmeasured` with no scan before it. `growth` splits the bill's change since the earliest measured baseline into the savings, new signals and growth on signals already there (metrics and streams; labels are shares of their metrics). Self-hosted, `disk_freed_bytes` and `retention_days_gained` (the freed disk at the current scan's bytes a day of retention). Next: item 4 (the Collector's own exporter telemetry), and the done-when rehearsal on the lab, which needs a tvt PR merged into tvt-lab and the lab running its config (Jason's go-ahead to restart the pipeline component). The quiet-period drop staging from S10 item 6 builds on `merges` too.
 
 **Done when:** the MVP gate is rehearsed on the lab: merge a tvt PR, and the next scan records measured savings.
 

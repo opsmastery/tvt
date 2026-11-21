@@ -449,3 +449,17 @@ type SourceCoverage struct {
 	// then 0). Empty when there is no gap or the source isn't configured.
 	Gap string
 }
+
+// Merge is one recommendation of a tvt PR that merged (S11 item 1): the
+// pipeline repo's checkout holds the PR's .tvt/proposal.json, committed
+// at MergedAt. FirstScan is the scan that first saw it; ProposalScan the
+// scan the proposal came from. Expected is the monthly saving it claimed.
+type Merge struct {
+	Repo           string
+	ProposalScan   int64
+	Recommendation string
+	SignalID       string
+	MergedAt       time.Time
+	FirstScan      int64
+	Expected       float64
+}

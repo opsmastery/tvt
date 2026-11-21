@@ -100,6 +100,9 @@ type Inputs struct {
 	// couldn't be read.
 	Rewrites    map[string][]propose.Rewrite
 	RewriteErrs []string
+	// Merged are the merged tvt changes the pipeline checkouts hold (S11
+	// item 1), passed through to the store.
+	Merged []graph.Merge
 	// SelectorMetrics maps a label-only selector (SelectorKey) to the
 	// metric names the backend says carry those labels. A selector that
 	// names no metric resolves to these instead of every collected metric.
@@ -184,6 +187,8 @@ const (
 
 // Output is one scan's graph rows.
 type Output struct {
+	// Merged are the merged tvt changes (S11 item 1), as in Inputs.
+	Merged    []graph.Merge
 	Signals   []graph.Signal
 	Consumers []graph.Consumer
 	// References link signals to the consumers whose queries read them,
@@ -240,6 +245,7 @@ func Build(in Inputs) (Output, error) {
 		return Output{}, fmt.Errorf("scan: metrics source %q, want prom or mimir", in.MetricsSource)
 	}
 	var out Output
+	out.Merged = in.Merged
 	since := in.Start.Add(-in.Window)
 
 	// Signals and their costs.
