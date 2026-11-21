@@ -20,8 +20,10 @@ const (
 	// ordered pipeline for delta counters (S7 item 8).
 	TransformProcessorModule = "github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor"
 	IntervalProcessorModule  = "github.com/open-telemetry/opentelemetry-collector-contrib/processor/intervalprocessor"
-	contribPrefix            = "github.com/open-telemetry/opentelemetry-collector-contrib/"
-	corePrefix               = "go.opentelemetry.io/collector/"
+	// LogDedupProcessorModule is log_dedup's module (S10 item 4).
+	LogDedupProcessorModule = "github.com/open-telemetry/opentelemetry-collector-contrib/processor/logdedupprocessor"
+	contribPrefix           = "github.com/open-telemetry/opentelemetry-collector-contrib/"
+	corePrefix              = "go.opentelemetry.io/collector/"
 )
 
 // IsBuilderManifest reports whether src looks like an ocb manifest: a dist

@@ -503,6 +503,8 @@ func Build(in Input, limit int) Report {
 		})
 		r.Recommendations = append(r.Recommendations, tiers...)
 	}
+	// Collapses (S10 item 4): identical lines of streams nothing reads.
+	r.Recommendations = append(r.Recommendations, collapseRecs(in, signals, refs, consumers, gs, listed)...)
 	r.Services = services(in.Signals, r.Recommendations, refs, costs)
 	sort.SliceStable(r.Recommendations, func(i, j int) bool {
 		a, b := r.Recommendations[i], r.Recommendations[j]
@@ -548,7 +550,7 @@ func Build(in Input, limit int) Report {
 	}
 	for _, rec := range r.Recommendations {
 		r.Totals.Recommendations++
-		if rec.Action == ActionReroute || rec.Action == ActionLevelTier {
+		if rec.Action == ActionReroute || rec.Action == ActionLevelTier || rec.Action == ActionCollapse {
 			r.Totals.StreamSavings += rec.Savings.Monthly
 		} else {
 			r.Totals.MetricSavings += rec.Savings.Monthly
