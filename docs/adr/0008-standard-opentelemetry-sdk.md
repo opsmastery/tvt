@@ -33,3 +33,12 @@ Configuration follows the OpenTelemetry spec: the `OTEL_*` environment variables
 - This is an accepted exception to ADR 0004. The binary grows, mostly from gRPC and protobuf. Measure the size and build time when it lands and record them here. If the size is a problem, drop the gRPC exporter and keep OTLP/HTTP before dropping the SDK.
 - Instrumentation conventions live in `internal/telemetry`: tracer and meter names, span names (`tvt.scan`, `tvt.collect.<backend>.<call>`, `tvt.parse`, `tvt.score`, `tvt.store.write`, `tvt.propose.<pipeline>`, `tvt.check`), attribute keys, and the rule against per-signal metric labels.
 - Tests use the SDK's in-memory span and metric exporters. The golden scan asserts the trace's shape and checks that no token, auth header or (by default) query text appears in any span, log or metric.
+
+## Landed (Nov 21, 2026)
+
+`internal/telemetry` (S12 item 6, Sprint 2 item 9), instrumenting `tvt scan`; see `docs/telemetry.md`. What changed from the plan:
+
+- **OTLP over HTTP only.** No gRPC exporter, which the size note above allowed, plus the `stdout` trace exporter. The binary grew from 21.9 MB to 27.4 MB (darwin/amd64, `-s -w -trimpath`); build time moved within noise on a loaded laptop.
+- **No `otelhttp`.** A small `RoundTripper` in `internal/httpx`'s default client makes the collect spans and metrics, so routes can be normalized (`/api/v1/label/{}/values`) and no path, query or error text is recorded at the default detail level.
+- **No slog bridge yet.** tvt prints its progress to stdout and errors to stderr; the bridge comes with `tvt serve`.
+- **Detail level** `TVT_TELEMETRY_DETAIL=basic|names`, the spec's detail level, rather than a `telemetry:` block in `tvt.yaml`, so it's configured where the rest of OTel is.
