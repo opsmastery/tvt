@@ -63,7 +63,7 @@ func TestProposePR(t *testing.T) {
 
 	var mu sync.Mutex
 	var reqs []string
-	open := false
+	open := map[string]bool{} // by head branch
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -73,13 +73,13 @@ func TestProposePR(t *testing.T) {
 		reqs = append(reqs, r.Method+" "+r.URL.Path+" "+string(b))
 		switch {
 		case r.Method == "GET":
-			if open {
+			if open[strings.TrimPrefix(r.URL.Query().Get("head"), "Opsmastery-Summit:")] {
 				w.Write([]byte(`[{"number":1,"html_url":"https://github.com/Opsmastery-Summit/tvt-lab/pull/1"}]`))
 				return
 			}
 			w.Write([]byte(`[]`))
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/pulls"):
-			open = true
+			open[body["head"].(string)] = true
 			w.WriteHeader(201)
 			w.Write([]byte(`{"number":1,"html_url":"https://github.com/Opsmastery-Summit/tvt-lab/pull/1"}`))
 		default:
@@ -115,13 +115,21 @@ func TestProposePR(t *testing.T) {
 		t.Errorf("no PR opened:\n%s", out)
 	}
 	all := strings.Join(reqs, "\n")
-	for _, want := range []string{"POST /repos/Opsmastery-Summit/tvt-lab/pulls", `"draft":true`, `"head":"tvt/propose"`, `"base":"main"`, "tvt:begin", "stays a draft"} {
+	for _, want := range []string{"POST /repos/Opsmastery-Summit/tvt-lab/pulls", `"draft":true`, `"head":"tvt/propose"`, `"base":"main"`, "tvt:begin", "stays a draft",
+		// The revert PR (S10 item 6), based on the change's branch.
+		`"head":"tvt/propose-revert"`, `"base":"tvt/propose"`, "Undoes tvt's telemetry changes"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("no %q in the API requests:\n%s", want, all)
 		}
 	}
+	if !strings.Contains(out, "revert PR opened for "+repo) {
+		t.Errorf("no revert PR opened:\n%s", out)
+	}
+	if got := git(origin, "show", revertBranch+":prometheus/scrape/lab.yml"); strings.Contains(got, "tvt:begin") {
+		t.Errorf("the revert branch still has tvt's block:\n%s", got)
+	}
 	out = run()
-	if !strings.Contains(out, "draft PR updated for "+repo) || strings.Count(strings.Join(reqs, "\n"), "POST /repos/Opsmastery-Summit/tvt-lab/pulls ") != 1 {
+	if !strings.Contains(out, "draft PR updated for "+repo) || !strings.Contains(out, "revert PR updated for "+repo) || strings.Count(strings.Join(reqs, "\n"), "POST /repos/Opsmastery-Summit/tvt-lab/pulls ") != 2 {
 		t.Errorf("rerun didn't update the PR:\n%s\n%s", out, strings.Join(reqs, "\n"))
 	}
 	if n := git(origin, "rev-list", "--count", "main.."+prBranch); n != "1" {

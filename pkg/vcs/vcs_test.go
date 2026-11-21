@@ -88,6 +88,19 @@ func TestPush(t *testing.T) {
 	if _, err := Push(ctx, Branch{Checkout: clone, Name: "tvt/propose", Patch: "--- a/nope\n+++ b/nope\n@@ -1 +1 @@\n-x\n+y\n", Message: "m"}); err == nil {
 		t.Error("a patch that doesn't apply was pushed")
 	}
+	// With a revert branch: it sits on the change and undoes it.
+	if _, err := Push(ctx, Branch{Checkout: clone, Name: "tvt/propose", Revert: "tvt/propose-revert", Patch: patch, Message: "tvt propose: changes from scan 5"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, origin, "git", "show", "tvt/propose-revert:cfg/a.yml"); got != "a: 1" {
+		t.Errorf("revert branch file %q, want the base's", got)
+	}
+	if got := run(t, origin, "git", "rev-parse", "tvt/propose-revert~1"); got != run(t, origin, "git", "rev-parse", "tvt/propose") {
+		t.Error("the revert branch isn't one commit on top of the change")
+	}
+	if _, err := Push(ctx, Branch{Checkout: clone, Name: "tvt/propose", Revert: "tvt/propose", Patch: patch, Message: "m"}); err == nil {
+		t.Error("a revert branch named like the change was accepted")
+	}
 }
 
 // fakeGitHub records requests and answers like the pulls API.
