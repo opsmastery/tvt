@@ -3,7 +3,9 @@ package loki
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -72,11 +74,105 @@ func (c *Client) StreamVolumes(ctx context.Context, window time.Duration) ([]col
 			out = append(out, s)
 		}
 	}
+	// Loki leaves a stream out of a grouped request when it lacks one of
+	// the target labels: the lab's OTLP stream, {service_name=...} alone,
+	// was missing until Nov 21. The series API (metadata, not usage) gives
+	// every stream's label names; each other set of names gets its own
+	// request, the other names pinned to "" so nothing larger joins in. A
+	// Loki without the series API keeps the first pass.
+	sets, err := c.labelSets(ctx, rangeQ(), names)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	for _, set := range sets {
+		if slices.Equal(set, names) {
+			continue
+		}
+		q := rangeQ()
+		q["query"] = []string{setSelector(set, names)}
+		q["aggregateBy"] = []string{"series"}
+		q["targetLabels"] = []string{strings.Join(set, ",")}
+		q["limit"] = []string{strconv.Itoa(VolumeLimit)}
+		series, err := c.volume(ctx, q, window)
+		if err != nil {
+			return nil, err
+		}
+		if len(series) >= VolumeLimit {
+			truncated = true
+		}
+		for _, s := range series {
+			key := streamKey(s.Labels)
+			if i, ok := seen[key]; ok {
+				out[i].Bytes = max(out[i].Bytes, s.Bytes)
+				continue
+			}
+			seen[key] = len(out)
+			out = append(out, s)
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return streamKey(out[i].Labels) < streamKey(out[j].Labels) })
 	if truncated {
 		return out, fmt.Errorf("loki: index volume: %d series per request: %w", VolumeLimit, collect.ErrTruncated)
 	}
 	return out, nil
+}
+
+// labelSets are the distinct sets of label names the streams carry over
+// the range (the series API), each sorted, Loki's own "__" labels left out.
+func (c *Client) labelSets(ctx context.Context, q map[string][]string, names []string) ([][]string, error) {
+	for _, n := range names {
+		q["match[]"] = append(q["match[]"], "{"+n+`=~".+"}`)
+	}
+	body, err := c.get(ctx, "/loki/api/v1/series", q, "application/json")
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	var resp struct {
+		Status string              `json:"status"`
+		Data   []map[string]string `json:"data"`
+	}
+	if err := json.NewDecoder(body).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("loki: /loki/api/v1/series: %w", err)
+	}
+	seen := map[string]bool{}
+	var out [][]string
+	for _, ls := range resp.Data {
+		var set []string
+		for k, v := range ls {
+			if v != "" && !strings.HasPrefix(k, "__") {
+				set = append(set, k)
+			}
+		}
+		if len(set) == 0 {
+			continue
+		}
+		sort.Strings(set)
+		if key := strings.Join(set, ","); !seen[key] {
+			seen[key] = true
+			out = append(out, set)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.Join(out[i], ",") < strings.Join(out[j], ",") })
+	return out, nil
+}
+
+// setSelector selects exactly the streams carrying the names in set and
+// none of the others: {a=~".+", b=~".+", c=""}.
+func setSelector(set, names []string) string {
+	in := map[string]bool{}
+	for _, n := range set {
+		in[n] = true
+	}
+	parts := make([]string, 0, len(names))
+	for _, n := range names {
+		if in[n] {
+			parts = append(parts, n+`=~".+"`)
+		} else {
+			parts = append(parts, n+`=""`)
+		}
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 func (c *Client) labelNames(ctx context.Context, q map[string][]string) ([]string, error) {

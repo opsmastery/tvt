@@ -14,6 +14,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -29,7 +30,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 26
+const SchemaVersion = 27
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -484,6 +485,19 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			}
 		}
 	}
+	if from < 27 {
+		qs := []string{`UPDATE meta SET value = '27' WHERE key = 'schema_version'`}
+		if from >= 10 {
+			// Before 10 there was no stream_volumes: migrate's CREATE TABLE
+			// IF NOT EXISTS made it with levels already.
+			qs = append([]string{`ALTER TABLE stream_volumes ADD COLUMN levels TEXT NOT NULL DEFAULT ''`}, qs...)
+		}
+		for _, q := range qs {
+			if _, err := tx.ExecContext(ctx, q); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 
@@ -830,7 +844,7 @@ func (s *Store) Loads(ctx context.Context, scanID int64) ([]graph.DashboardLoad,
 // by selector.
 func (s *Store) StreamVolumes(ctx context.Context, scanID int64) ([]graph.StreamVolume, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT selector, bytes_per_day FROM stream_volumes WHERE scan_id = ? ORDER BY selector`, scanID)
+		`SELECT selector, bytes_per_day, levels FROM stream_volumes WHERE scan_id = ? ORDER BY selector`, scanID)
 	if err != nil {
 		return nil, err
 	}
@@ -838,8 +852,14 @@ func (s *Store) StreamVolumes(ctx context.Context, scanID int64) ([]graph.Stream
 	var out []graph.StreamVolume
 	for rows.Next() {
 		var v graph.StreamVolume
-		if err := rows.Scan(&v.Selector, &v.BytesPerDay); err != nil {
+		var levels string
+		if err := rows.Scan(&v.Selector, &v.BytesPerDay, &levels); err != nil {
 			return nil, err
+		}
+		if levels != "" {
+			if err := json.Unmarshal([]byte(levels), &v.Levels); err != nil {
+				return nil, fmt.Errorf("store: stream %s levels: %w", v.Selector, err)
+			}
 		}
 		out = append(out, v)
 	}
@@ -1136,7 +1156,7 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 				merges = excluded.merges, summable = excluded.summable`},
 		{&sc.source, `INSERT INTO scan_sources (scan_id, source, configured, coverage, window_start, gap)
 			VALUES (?, ?, ?, ?, ?, ?)`},
-		{&sc.volume, `INSERT INTO stream_volumes (scan_id, selector, bytes_per_day) VALUES (?, ?, ?)`},
+		{&sc.volume, `INSERT INTO stream_volumes (scan_id, selector, bytes_per_day, levels) VALUES (?, ?, ?, ?)`},
 		{&sc.line, `INSERT INTO line_findings (scan_id, stream, pattern, kind, lines, window_ms, share, bytes_per_day, monthly_cost)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.ruleCost, `INSERT INTO rule_costs (scan_id, consumer_id, evals_per_day, samples_per_eval, bytes_per_eval, evaluations, unknown)
@@ -1293,7 +1313,15 @@ func (sc *Scan) PutStreamVolume(ctx context.Context, v graph.StreamVolume) error
 	if v.Selector == "" || v.BytesPerDay < 0 {
 		return fmt.Errorf("store: stream volume %q: Selector is required and bytes can't be negative", v.Selector)
 	}
-	_, err := sc.volume.ExecContext(ctx, sc.ID, v.Selector, v.BytesPerDay)
+	levels := ""
+	if v.Levels != nil {
+		b, err := json.Marshal(v.Levels)
+		if err != nil {
+			return wrap("stream volume", v.Selector, err)
+		}
+		levels = string(b)
+	}
+	_, err := sc.volume.ExecContext(ctx, sc.ID, v.Selector, v.BytesPerDay, levels)
 	return wrap("stream volume", v.Selector, err)
 }
 

@@ -281,6 +281,12 @@ type Score struct {
 type StreamVolume struct {
 	Selector    string
 	BytesPerDay int64
+	// Levels are bytes per day per line level (Loki's detected_level, lower
+	// case; "unknown" for lines it gave none), for a stream whose level
+	// isn't a label and that the scan measured (S10 item 3, schema 27).
+	// They are line bytes scaled to BytesPerDay's total, so they sum to
+	// it. nil when not measured.
+	Levels map[string]int64
 }
 
 // Line finding kinds (S5 items 3-4). tvt reports both with an estimated

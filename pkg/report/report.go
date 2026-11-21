@@ -68,6 +68,9 @@ type Report struct {
 	// Intervals are scrape jobs whose interval can go up (S10 item 5),
 	// and held ones with the reason.
 	Intervals []IntervalChange `json:"intervals,omitempty"`
+	// LevelTiers are streams whose lines below warn can go to the cheapest
+	// tier (S10 item 3), and held ones with the reason.
+	LevelTiers []LevelTier `json:"level_tiers,omitempty"`
 	// Decisions are the owner decisions in the pipeline repos (S9), each
 	// with its state: current, or reopened, expired or orphaned with why.
 	Decisions []DecisionState `json:"decisions"`
@@ -353,6 +356,9 @@ type Input struct {
 	// uses them to find readers of a stream signal's streams through an
 	// overlapping selector.
 	StreamVolumes []graph.StreamVolume
+	// RecordLogEvents are the record conditions over log records (built in
+	// and tvt.yaml records.log_events): level tiers leave them hot.
+	RecordLogEvents []string
 	// LastReads are every signal's most recent logged read across all
 	// scans (store.LastReads).
 	LastReads []LastReadOf
@@ -506,6 +512,7 @@ func Build(in Input, limit int) Report {
 		}
 	}
 	r.Intervals = intervalRows(in, refs, consumers, costs)
+	r.LevelTiers = levelTierRows(in, in.Signals, refs, consumers, costs)
 	r.Pipelines = pipelineTargets(r.Recommendations, r.Confirm, in.PipelineTargets, in.StreamVolumes, gs)
 	r.Overflow = overflow(in.OverflowFindings, r.Recommendations, r.Confirm, gs)
 	r.Totals.Overflow = len(r.Overflow)

@@ -98,6 +98,7 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 		return err
 	}
 	in.LabelDrops = o.LabelDrops
+	in.RecordLogEvents = append([]string{}, report.BuiltinRecordMatches.LogEvents...)
 	queue := 0
 	if o.Config != "" {
 		cfg, err := config.Load(o.Config)
@@ -105,6 +106,7 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 			return err
 		}
 		queue = cfg.Queue.PerOwner
+		in.RecordLogEvents = append(in.RecordLogEvents, cfg.Records.LogEvents...)
 		in.Objectives, in.GroupWait = detectionOf(cfg)
 		if d, err := model.ParseDuration(cfg.Tiers.DormantRetention); err == nil && cfg.Tiers.DormantRetention != "" {
 			in.DormantRetention = time.Duration(d)

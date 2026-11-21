@@ -85,7 +85,7 @@ Memory stays flat with series because nothing holds a series: TSDB status gives 
 
 ## Design rules
 
-- Read-only against every backend. Changes only happen through reviewed PRs. The only query tvt sends to a backend that logs queries is the query-log probe: a marker that selects no series or stream (PromQL for Prometheus and Mimir, LogQL for Loki), tagged `Source=tvt-probe`, which proves the log is written and is never counted as usage.
+- Read-only against every backend. Changes only happen through reviewed PRs. The only query tvt sends to a backend that logs queries is the query-log probe: a marker that selects no series or stream (PromQL for Prometheus and Mimir, LogQL for Loki), tagged `Source=tvt-probe`, which proves the log is written and is never counted as usage. The one other query is per-level bytes (S10 item 3): for the largest few streams whose level isn't a stream label, `sum by (detected_level) (bytes_over_time(<stream>[1h]))`, tagged `Source=tvt-levels` and likewise never counted as usage, because Loki's volume API can't split a stream by structured metadata.
 - Credentials come from the environment and are never logged.
 - Collectors are tested against recorded responses, so no live stack is needed.
 - The JSON report is the internal API.
