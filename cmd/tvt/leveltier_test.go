@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 )
 
@@ -194,5 +195,59 @@ func TestProposeTenantTier(t *testing.T) {
 		if !strings.Contains(patch, want) {
 			t.Errorf("patch lacks %q\n%s\n%s", want, patch, out)
 		}
+	}
+}
+
+// TestProposeSkipsReadDrops: a drop of a metric something reads ad hoc
+// isn't written, since check refuses it (least_lossy, ADR 0010); the S10
+// done-when run found propose writing them.
+func TestProposeSkipsReadDrops(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers-2" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := readLatest(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(filepath.Join(dirs[st.Name], "tvt-lab.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoOf := map[string]string{}
+	for _, p := range cfg.Pipelines {
+		repoOf[p.Name] = p.Repo
+	}
+	var read report.ReadSignal
+	for _, m := range report.Manifests(in, repoOf) {
+		for _, rs := range m.Read {
+			if rs.Kind == "metric" {
+				read = rs
+			}
+		}
+	}
+	if read.ID == "" {
+		t.Skip("the capture has no metric read ad hoc")
+	}
+	r := report.Build(in, 0)
+	r.Recommendations = []report.Recommendation{{ID: "drop:" + read.ID, Action: report.ActionDrop,
+		Signal:   report.SignalRef{ID: read.ID, Kind: "metric", Name: read.Name, Source: "prom"},
+		Pipeline: read.Pipeline, Proposable: true, EvidenceHash: "abc"}}
+	dir := t.TempDir()
+	rj := filepath.Join(dir, "report.json")
+	b, _ := json.Marshal(r)
+	os.WriteFile(rj, b, 0o644)
+	var out strings.Builder
+	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
+		Checkouts: checkoutFlag{"github.com/Opsmastery-Summit/tvt-lab": filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}
+	if err := runPropose(context.Background(), o, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "skipped drop:"+read.ID+": read ad hoc by") {
+		t.Errorf("the read metric's drop wasn't skipped with the reason:\n%s", out.String())
 	}
 }
