@@ -433,7 +433,10 @@ func laterSets(c *otelConfig, pl otelPipeline) map[string]string {
 		case "transform":
 			key := map[string]string{"traces": "trace_statements", "metrics": "metric_statements", "logs": "log_statements"}[pl.signal]
 			for _, s := range otelStatements(field(cfg, key), false) {
-				if s.err == nil && s.o.Editor == "set" && s.o.Target != "" {
+				// Only attributes can be missing until a step sets them: a
+				// set of an intrinsic field (body, severity_number, name)
+				// rewrites what every item already has.
+				if s.err == nil && s.o.Editor == "set" && strings.Contains(s.o.Target, "attributes[") {
 					k := normPath(s.o.Target)
 					if _, ok := out[k]; !ok {
 						out[k] = id

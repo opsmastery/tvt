@@ -83,6 +83,29 @@ func TestLevelTier(t *testing.T) {
 			}
 		}
 	}
+	// A transform after the tier that rewrites the body (the lab's
+	// transform/lint) doesn't make the body "unset" when the tier reads it:
+	// only attributes can be missing (the live S10 run's false finding).
+	lint := strings.Replace(base, "processors:\n  batch: {}\n", "processors:\n  batch: {}\n  transform/lint:\n    log_statements:\n      - 'set(log.body, \"x\") where IsString(log.body)'\n      - 'set(log.attributes[\"late\"], \"y\")'\n", 1)
+	lint = strings.Replace(lint, "      processors: [batch]\n", "      processors: [transform/lint, batch]\n", 1)
+	lintTier, err := propose.OtelcolTier([]byte(lint), "logs", &tier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lr := Run(Input{Manifest: manifest(nil, nil), Base: files(lint), Head: files(string(lintTier)), Now: now, SkipConfirmation: true})
+	for _, f := range lr.Findings {
+		if f.Rule == RuleAttrUnset {
+			t.Errorf("a body rewritten later counted as unset: %v", f)
+		}
+	}
+	late := strings.Replace(string(lintTier), `not IsMatch(log.body`, `log.attributes["late"] == "y" and not IsMatch(log.body`, 1)
+	found := false
+	for _, f := range Run(Input{Manifest: manifest(nil, nil), Base: files(lint), Head: files(late), Now: now, SkipConfirmation: true}).Findings {
+		found = found || f.Rule == RuleAttrUnset
+	}
+	if !found {
+		t.Error("an attribute set later went unflagged")
+	}
 	// Unconfirmed, the tier is a drop that needs an owner's confirmation.
 	r := Run(Input{Manifest: manifest(nil, nil), Base: files(base), Head: files(tiered), Now: now})
 	if len(r.Findings) != 1 || r.Findings[0].Rule != RuleUnconfirmed {
