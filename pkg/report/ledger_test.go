@@ -110,3 +110,37 @@ func TestCollectorRates(t *testing.T) {
 		t.Error("rates with nothing merged")
 	}
 }
+
+// TestLedgerSettling: a scan 40 minutes after the merge still sees the old
+// volume (the S11 rehearsal); it shows as settling and isn't counted, and
+// the first scan past the window measures the change.
+func TestLedgerSettling(t *testing.T) {
+	merged := time.Date(2026, 11, 21, 22, 44, 0, 0, time.UTC)
+	cost := func(m float64) map[string]graph.Cost {
+		return map[string]graph.Cost{"prom:metric:a": {MonthlyCost: m}, "loki:stream:{a=\"b\"}": {MonthlyCost: m}}
+	}
+	scans := map[int64]ScanCosts{
+		3: {StartedAt: merged.Add(-7 * time.Minute), Costs: cost(10)},
+		4: {StartedAt: merged.Add(40 * time.Minute), Costs: cost(10)},
+	}
+	merges := []graph.Merge{
+		{Repo: "r", ProposalScan: 3, Recommendation: "drop:prom:metric:a", SignalID: "prom:metric:a", MergedAt: merged, Expected: 10},
+		{Repo: "r", ProposalScan: 3, Recommendation: "reroute:loki:stream:{a=\"b\"}", SignalID: "loki:stream:{a=\"b\"}", MergedAt: merged, Expected: 10},
+	}
+	l := buildLedger(merges, scans, 4, "USD")
+	if l.Settling != 2 || l.Saved != 0 || l.Expected != 0 || l.Rows[0].Status != LedgerSettling || !l.Rows[0].SettlesAt.Equal(merged.Add(3*time.Hour)) {
+		t.Fatalf("40 minutes after: %+v", l)
+	}
+	scans[5] = ScanCosts{StartedAt: merged.Add(3*time.Hour + time.Minute), Costs: cost(0)}
+	l = buildLedger(merges, scans, 5, "USD")
+	if l.Rows[0].Status != LedgerMeasured || l.Rows[0].AfterScan != 5 || l.Rows[0].Saved != 10 {
+		t.Errorf("metric after 3h: %+v", l.Rows[0])
+	}
+	if l.Rows[1].Status != LedgerSettling || l.Settling != 1 {
+		t.Errorf("stream after 3h is still settling: %+v", l.Rows[1])
+	}
+	scans[6] = ScanCosts{StartedAt: merged.Add(25 * time.Hour), Costs: cost(0)}
+	if l = buildLedger(merges, scans, 6, "USD"); l.Rows[1].Status != LedgerMeasured || l.Saved != 20 || l.Settling != 0 {
+		t.Errorf("after 24h: %+v", l)
+	}
+}
