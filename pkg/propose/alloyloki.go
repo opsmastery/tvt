@@ -45,11 +45,11 @@ func AlloyRoutes(src []byte, routes []Route) ([]byte, error) {
 	}
 	cold := routes[0].Cold
 	for _, r := range routes {
-		if r.ID == "" || strings.ContainsAny(r.ID+r.Reason, "\n\r") || len(r.Stream) == 0 || r.Cold == "" {
-			return nil, fmt.Errorf("propose: route needs a one-line ID and reason, a stream and a cold component")
+		if r.ID == "" || strings.ContainsAny(r.ID+r.Reason, "\n\r") || len(r.Stream) == 0 || (r.Cold == "") == (r.SampleOneIn < 2) {
+			return nil, fmt.Errorf("propose: route needs a one-line ID and reason, a stream, and a cold component or a sample rate of 1 in 2 or more")
 		}
 		if r.Cold != cold {
-			return nil, fmt.Errorf("propose: routes name different cold components (%s, %s)", cold, r.Cold)
+			return nil, fmt.Errorf("propose: routes name different cold components (%q, %q), or mix reroutes and samples", cold, r.Cold)
 		}
 	}
 	out, _, err := stripBlocks(src, "//")
@@ -101,7 +101,13 @@ func AlloyRoutesKeep(out []byte, routes []Route) ([]byte, error) {
 	case len(shippers) > 1:
 		return nil, fmt.Errorf("propose: more than one loki.process forwards to a loki.write; tvt won't guess which carries the stream")
 	}
-	if _, ok := ids[cold]; !ok {
+	sample := cold == ""
+	for _, r := range routes {
+		if (r.Cold == "") != sample {
+			return nil, fmt.Errorf("propose: routes mix reroutes and samples")
+		}
+	}
+	if _, ok := ids[cold]; !ok && !sample {
 		return nil, fmt.Errorf("propose: no component %s for cold streams", cold)
 	}
 	ship := shippers[0]
@@ -128,8 +134,12 @@ func AlloyRoutesKeep(out []byte, routes []Route) ([]byte, error) {
 	begin := routes[0].begin()
 	// 1. The shipper's forward_to, replaced inside a block that keeps the
 	// original line.
-	replaced := fmt.Sprintf("%s// %s\n%s// %s%s\n%sforward_to = [loki.process.%s.receiver, loki.relabel.%s.receiver]\n%s// %s\n",
-		indent, begin, indent, originalMarker, strings.TrimSpace(orig), indent, alloyHot, alloyCold, indent, endMarker)
+	newFwd := fmt.Sprintf("loki.process.%s.receiver, loki.relabel.%s.receiver", alloyHot, alloyCold)
+	if sample {
+		newFwd = fmt.Sprintf("loki.process.%s.receiver", alloyHot)
+	}
+	replaced := fmt.Sprintf("%s// %s\n%s// %s%s\n%sforward_to = [%s]\n%s// %s\n",
+		indent, begin, indent, originalMarker, strings.TrimSpace(orig), indent, newFwd, indent, endMarker)
 	lines[line-1] = replaced
 	out = []byte(strings.Join(lines, ""))
 	// 2. The two relabel components, at the end of the file.
@@ -151,9 +161,25 @@ func AlloyRoutesKeep(out []byte, routes []Route) ([]byte, error) {
 			// warn leave the hot side.
 			sel += " |~ " + strconv.Quote(LevelLinePattern)
 		}
+		if r.SampleOneIn > 1 {
+			// S10 item 4: keep one line in N, and every error-pattern line
+			// (the selector's !~ leaves them outside the match).
+			fmt.Fprintf(&b, "  stage.match {\n    selector = %s\n    stage.sampling {\n      rate = %s\n    }\n  }\n",
+				strconv.Quote(sel), strconv.FormatFloat(1/float64(r.SampleOneIn), 'g', 6, 64))
+			continue
+		}
 		fmt.Fprintf(&b, "  stage.match {\n    selector = %s\n    action   = \"drop\"\n  }\n", strconv.Quote(sel))
 	}
-	fmt.Fprintf(&b, "  forward_to = [%s]\n}\n\n", strings.Join(receivers(targets), ", "))
+	fmt.Fprintf(&b, "  forward_to = [%s]\n}\n", strings.Join(receivers(targets), ", "))
+	if sample {
+		fmt.Fprintf(&b, "// %s\n", endMarker)
+		out = append(out, []byte(b.String())...)
+		if _, err := parser.ParseFile("config.alloy", out); err != nil {
+			return nil, fmt.Errorf("propose: the edited config doesn't parse: %w", err)
+		}
+		return out, nil
+	}
+	b.WriteString("\n")
 	fmt.Fprintf(&b, "loki.relabel %q {\n", alloyCold)
 	// keep rules AND together, so one keep per stream would keep nothing
 	// when there are several: the cold side keeps any of the streams with

@@ -41,3 +41,43 @@ func TestAlloyRoutes(t *testing.T) {
 		t.Errorf("missing cold: %v", err)
 	}
 }
+
+// TestAlloySample: with no cold tier, a route with SampleOneIn keeps one
+// line in N inside a stage.match that leaves error-pattern lines out
+// (S10 item 4), and forwards everything to the original targets.
+func TestAlloySample(t *testing.T) {
+	src := read(t, "config.alloy")
+	r := Route{ID: "reroute:shop-info", Scan: 4, Reason: "never queried", Stream: map[string]string{"app": "shop", "component": "api", "level": "info"}, SampleOneIn: 10}
+	out, err := AlloyRoutes(src, []Route{r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"  forward_to = [loki.process.tvt_hot.receiver]\n",
+		"  stage.match {\n    selector = \"{app=\\\"shop\\\", component=\\\"api\\\", level=\\\"info\\\"} !~ \\\"(?i)error|exception|traceback|critical|fatal\\\"\"\n    stage.sampling {\n      rate = 0.1\n    }\n  }\n  forward_to = [loki.write.loki.receiver, loki.process.cloud.receiver]\n}\n// tvt:end\n",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("lacks %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "tvt_cold") || strings.Contains(s, `action   = "drop"`) {
+		t.Errorf("a sample routes nothing cold and drops nothing whole:\n%s", s)
+	}
+	if again, err := AlloyRoutes(out, []Route{r}); err != nil || string(again) != s {
+		t.Errorf("rerun changed the file (err %v)", err)
+	}
+	stripped, _, err := stripBlocks(out, "//")
+	if err != nil || strings.TrimRight(string(stripped), "\n") != strings.TrimRight(string(src), "\n") {
+		t.Errorf("stripping gives back the original? %v\n%s", err, stripped)
+	}
+	cold := r
+	cold.ID, cold.SampleOneIn, cold.Cold = "reroute:other", 0, "loki.write.loki"
+	if _, err := AlloyRoutes(src, []Route{r, cold}); err == nil {
+		t.Error("a sample and a reroute in one file were accepted")
+	}
+	r.SampleOneIn = 1
+	if _, err := AlloyRoutes(src, []Route{r}); err == nil {
+		t.Error("1 in 1 with no cold tier was accepted")
+	}
+}
