@@ -8,7 +8,10 @@ import (
 // coarseAlt is one alternative of a coarse matcher: a leading digit (or a
 // class of digits) and then only "any digit" positions, as in 5.., 5\d\d,
 // [45][0-9][0-9] or 5xx written as 5[0-9]{2}.
-var coarseAlt = regexp.MustCompile(`^(?:[0-9]|\[[0-9-]+\])(?:\.|\\d|\[0-9\]|\{\d\}|\.\{\d\}|\\d\{\d\}|\[0-9\]\{\d\})+$`)
+// A quantifier counts only after a wildcard: 5{3} is the value 555, not a
+// class (a bare {n} once let it through, and bucketing 555 to 500 changed
+// what it matched).
+var coarseAlt = regexp.MustCompile(`^(?:[0-9]|\[[0-9-]+\])(?:\.|\\d|\[0-9\]|\.\{\d\}|\\d\{\d\}|\[0-9\]\{\d\})+$`)
 
 // Coarse reports whether a regex matcher value only tells classes of
 // values apart by their leading digit, as status-code readers do
