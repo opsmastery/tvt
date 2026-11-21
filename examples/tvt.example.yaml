@@ -97,6 +97,10 @@ queue:
 # a reader uses if that's longer. Self-hosted price cards only.
 tiers:
   dormant_retention: 7d
+  # An unread stream on an Alloy pipeline with no cold component: keep one
+  # line in N (and every error line) instead of skipping it. Off by default;
+  # rerouting to a cold tier always comes first.
+  # sample_one_in: 10
 
 # SLO definitions (Sloth, Pyrra, OpenSLO): files or directories, relative to
 # this file. Everything an SLI reads is a hard keep; an SLI tvt can't read
