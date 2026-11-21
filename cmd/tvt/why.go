@@ -97,7 +97,11 @@ func printWhy(out io.Writer, w report.Why) error {
 		what = "label " + s.Name + " of " + s.Parent
 	}
 	fmt.Fprintf(out, "%s\n  %s, in %s; scan %d (%s, %d-day window)\n", s.ID, what, s.Source, w.Scan.ID, day(w.Scan.StartedAt), w.Scan.WindowDays)
-	line := "  class " + w.Class
+	class := w.Class
+	if class == "" {
+		class = "unknown (the scan predates classes; rescan)"
+	}
+	line := "  class " + class
 	if w.Dormant != "" {
 		line += " (" + w.Dormant + ")"
 	}
