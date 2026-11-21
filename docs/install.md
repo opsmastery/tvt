@@ -55,7 +55,7 @@ xattr -d com.apple.quarantine tvt
 
 On Windows, unzip `tvt_${VERSION}_windows_amd64.zip` and run `tvt.exe version`. Verify with `cosign` the same way, and `Get-FileHash -Algorithm SHA256` for the archive.
 
-From source, with Go 1.26 or later: `go install github.com/Opsmastery-Summit/tvt/cmd/tvt@latest` (the version shows as `dev`).
+From source, with Go 1.27 or later: `go install github.com/Opsmastery-Summit/tvt/cmd/tvt@latest` (the version shows as `dev`).
 
 ## 4. First run
 
