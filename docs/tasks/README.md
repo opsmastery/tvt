@@ -5,7 +5,7 @@ From Sprint 3 on, sprints are two working days, each with one theme. They're ord
 | Sprint | File | Theme | Done when | Status |
 | --- | --- | --- | --- | --- |
 | S1 | [s01](s01-collectors-store-scan.md) | Collectors, store, `tvt scan`, test groundwork | Each item merged with CI green; `tvt scan` runs on the live lab | Done Nov 10 (`v0.0.1-rc.1`) |
-| S2 | [s02](s02-references-query-logs-hard-keeps.md) | References, query logs, hard keeps, SLOs and runbooks | Every seeded dependency resolves and no hard keep is misclassified | Done Nov 16; open: items 8–10 (more Grafana evidence, self-observability, `tvt init` and `SECURITY.md`, due by S12), 13, and item 11's Adaptive Metrics usage counts |
+| S2 | [s02](s02-references-query-logs-hard-keeps.md) | References, query logs, hard keeps, SLOs and runbooks | Every seeded dependency resolves and no hard keep is misclassified | Done Nov 16; open: item 8 (more Grafana evidence), 13, and item 11's Adaptive Metrics usage counts. Items 9 and 10 landed with S12 |
 | S3 | [s03](s03-cost-and-scoring.md) | Cost and scoring core | Every lab signal has a monthly cost on two price cards; the simulated agent sweep keeps nothing on its own | Done Nov 14 |
 | S4 | [s04](s04-report-v1.md) | Report v1 | First report in under 30 minutes on the lab | Done Nov 14 |
 | S5 | [s05](s05-benchmark-and-log-findings.md) | Benchmark and log findings | Benchmark baseline recorded; a deliberately broken parser change fails CI | Done Nov 15 |
@@ -13,9 +13,9 @@ From Sprint 3 on, sprints are two working days, each with one theme. They're ord
 | S7 | [s07](s07-writers.md) | Writers | `propose` opens a draft PR against the lab pipelines repo for each writer kind | Done (PRs #93–#134): the done-when passed on the live lab Nov 18 (M7) |
 | S8 | [s08](s08-check-safety-gate.md) | `check`, the safety gate | Every unsafe case in ground truth is refused, with the reason in the `check` output | Must haves done Nov 18 (PRs #135–#138); should haves open (gated lab suite, SnowOps) |
 | S9 | [s09](s09-owner-workflow.md) | Owner workflow | A lab drop goes from draft to ready only after a recorded confirmation, and changing its evidence reopens it | Planned |
-| S10 | [s10](s10-reduce-before-drop.md) | Reduce before drop | For each lab finding, `propose` picks the least-lossy action that `check` accepts | Planned |
-| S11 | [s11](s11-savings-ledger.md) | Savings ledger | The MVP gate is rehearsed on the lab: merge a tvt PR, and the next scan records measured savings | Planned |
-| S12 | [s12](s12-release-candidate.md) | Release candidate | `v0.1.0-rc1` is tagged, and the install guide works on a clean machine | Planned |
+| S10 | [s10](s10-reduce-before-drop.md) | Reduce before drop | For each lab finding, `propose` picks the least-lossy action that `check` accepts | In progress: items 1, 2 (Prometheus writer), 3, 5 and 6 done; open: sampling (item 4), attribute measurement (item 7), the Alloy and Collector tenant writers |
+| S11 | [s11](s11-savings-ledger.md) | Savings ledger | The MVP gate is rehearsed on the lab: merge a tvt PR, and the next scan records measured savings | In progress: the ledger and Collector rates done; the lab rehearsal waits for Jason |
+| S12 | [s12](s12-release-candidate.md) | Release candidate | `v0.1.0-rc1` is tagged, and the install guide works on a clean machine | In progress: items 1–6 done |
 | S13 | [s13](s13-alert-noise-1.md) | Alert noise I | Lab alert findings match ground truth | Planned |
 | S14 | [s14](s14-alert-noise-2.md) | Alert noise II | Each seeded noisy alert lands in the right class | Planned |
 | S15 | [s15](s15-agents-and-history.md) | Agents and history | `--as-of` shows each lab state with no leakage, and MCP and CLI answers match | Planned |
