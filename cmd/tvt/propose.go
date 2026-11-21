@@ -186,7 +186,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		switch {
 		case !rec.Proposable:
 			skipped = append(skipped, proposal{Rec: rec, Note: "not proposable: " + cmp.Or(rec.PipelineNote, "no pipeline")})
-		case !(rec.Action == report.ActionDrop && rec.Signal.Kind == string(graph.KindMetric)) && !(rec.Action == report.ActionReroute && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionLabelRemoval && rec.Signal.Kind == string(graph.KindLabel)) && !(rec.Action == report.ActionBucket && rec.Signal.Kind == string(graph.KindLabel)) && !(rec.Action == report.ActionLevelTier && rec.Signal.Kind == string(graph.KindStream)):
+		case !(rec.Action == report.ActionDrop && rec.Signal.Kind == string(graph.KindMetric)) && !(rec.Action == report.ActionReroute && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionLabelRemoval && rec.Signal.Kind == string(graph.KindLabel)) && !(rec.Action == report.ActionBucket && rec.Signal.Kind == string(graph.KindLabel)) && !(rec.Action == report.ActionLevelTier && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionCollapse && rec.Signal.Kind == string(graph.KindStream)):
 			skipped = append(skipped, proposal{Rec: rec, Note: "no writer for " + rec.Action + " of a " + rec.Signal.Kind + " yet"})
 		default:
 			byPipeline[rec.Pipeline] = append(byPipeline[rec.Pipeline], rec)
@@ -494,9 +494,9 @@ func prBody(repo string, scan int64, written []proposal, validation, build []str
 // p's files: a drop in some jobs would leave the rest of the series, and
 // the savings, in place.
 func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []report.IntervalChange, records []string, currency string, jobs map[string][]string, checkouts checkoutFlag, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
-	var tiers []report.Recommendation
+	var tiers, collapses []report.Recommendation
 	skipAll := func(note string) ([]proposal, []proposal, string) {
-		for _, rec := range append(slices.Clone(recs), tiers...) {
+		for _, rec := range append(append(slices.Clone(recs), tiers...), collapses...) {
 			skipped = append(skipped, proposal{Rec: rec, Note: note})
 		}
 		for _, iv := range ivs {
@@ -507,6 +507,15 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 	// Level tiers (S10 item 3): an OTel Collector's go to its own writer;
 	// Fluent Bit and Alloy write them as reroutes of the lines below warn.
 	recs = slices.DeleteFunc(slices.Clone(recs), func(rec report.Recommendation) bool {
+		if rec.Action == report.ActionCollapse {
+			// Collapses (S10 item 4): log_dedup, an OTel Collector processor.
+			if p.Kind != "otelcol" {
+				skipped = append(skipped, proposal{Rec: rec, Note: "a collapse is the OTel Collector's log_dedup; no collapse writer for " + p.Kind + " pipelines"})
+			} else {
+				collapses = append(collapses, rec)
+			}
+			return true
+		}
 		if rec.Action != report.ActionLevelTier || p.Kind == "fluentbit" || p.Kind == "alloy" {
 			return false
 		}
@@ -520,7 +529,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 		}
 		return true
 	})
-	if len(recs) == 0 && len(ivs) == 0 && len(tiers) == 0 {
+	if len(recs) == 0 && len(ivs) == 0 && len(tiers) == 0 && len(collapses) == 0 {
 		return nil, skipped, ""
 	}
 	if len(ivs) > 0 && p.Kind != "prometheus" && p.Kind != "alloy" {
@@ -606,7 +615,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 		}
 		drops = append(drops, rec)
 	}
-	if recs = drops; len(recs) == 0 && len(reroutes) == 0 && len(ivs) == 0 && len(tiers) == 0 {
+	if recs = drops; len(recs) == 0 && len(reroutes) == 0 && len(ivs) == 0 && len(tiers) == 0 && len(collapses) == 0 {
 		return nil, skipped, ""
 	}
 	var routes []propose.Route
@@ -619,7 +628,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 		d := dropOf(rec.ID, []report.Recommendation{rec}, scan)
 		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold, BelowWarn: rec.Action == report.ActionLevelTier})
 	}
-	if len(recs) == 0 && len(ivs) == 0 && len(tiers) == 0 {
+	if len(recs) == 0 && len(ivs) == 0 && len(tiers) == 0 && len(collapses) == 0 {
 		return proposeAlloyRoutesOnly(p, reroutes, routes, checkouts, scan, check, skipped)
 	}
 	var listJobs func([]byte) ([]string, error)
@@ -637,7 +646,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 			return skipAll("no --checkout for " + p.Repo)
 		}
 		// Keep what the loop above skipped (job, instance, scope labels).
-		w, s, diff := proposeOtelcol(p, recs, tiers, records, root, scan, check, note)
+		w, s, diff := proposeOtelcol(p, recs, tiers, collapses, records, root, scan, check, note)
 		return w, append(skipped, s...), diff
 	default:
 		return skipAll("no writer for " + p.Kind + " pipelines yet")
@@ -813,7 +822,7 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 	h := sha256.New()
 	fmt.Fprintf(h, "scan %d\n", scan)
 	d := propose.Drop{ID: id, Scan: scan}
-	streams, tiers := 0, 0
+	streams, tiers, collapses := 0, 0, 0
 	var monthly float64
 	currency := ""
 	for _, rec := range recs {
@@ -830,7 +839,9 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 			currency = cmp.Or(currency, rec.Savings.Currency)
 			continue
 		}
-		if rec.Action == report.ActionLevelTier {
+		if rec.Action == report.ActionCollapse {
+			collapses++ // repeated lines: nothing for the metric list
+		} else if rec.Action == report.ActionLevelTier {
 			tiers++ // a stream's lower levels: nothing for the metric list
 		} else if rec.Action == report.ActionReroute {
 			streams++ // a stream's route: nothing for the Drop's metric list
@@ -850,6 +861,9 @@ func dropOf(id string, recs []report.Recommendation, scan int64) propose.Drop {
 	}
 	if streams > 0 {
 		parts = append(parts, plural(streams, "unread stream", "unread streams"))
+	}
+	if collapses > 0 {
+		parts = append(parts, plural(collapses, "unread stream of repeated lines", "unread streams of repeated lines"))
 	}
 	if tiers > 0 {
 		parts = append(parts, plural(tiers, "stream whose lines below warn nothing reads", "streams whose lines below warn nothing reads"))
@@ -930,10 +944,10 @@ func writeProposals(o proposeOptions, scan int64, patches map[string]*strings.Bu
 // recommended name (propose.OtelConditions, S7 item 9). A name that may
 // be one series of an OTel histogram is skipped: the collector sees the
 // whole histogram.
-func proposeOtelcol(p config.Pipeline, recs, tierRecs []report.Recommendation, records []string, root string, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
+func proposeOtelcol(p config.Pipeline, recs, tierRecs, collapseRecs []report.Recommendation, records []string, root string, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
 	form, err := propose.OTTLFormFor(p.Version)
 	if err != nil {
-		for _, rec := range append(slices.Clone(recs), tierRecs...) {
+		for _, rec := range append(append(slices.Clone(recs), tierRecs...), collapseRecs...) {
 			skipped = append(skipped, proposal{Rec: rec, Note: err.Error()})
 		}
 		return nil, skipped, ""
@@ -978,7 +992,26 @@ func proposeOtelcol(p config.Pipeline, recs, tierRecs []report.Recommendation, r
 		d := dropOf(tier.ID, tiered, scan)
 		tier.Evidence, tier.Reason = d.Evidence, d.Reason
 	}
-	if len(ok) == 0 && len(labels) == 0 && tier == nil {
+	// The collapse: one log_dedup per pipeline, by service.name.
+	var dedup *propose.Dedup
+	var collapsed []report.Recommendation
+	for _, rec := range collapseRecs {
+		l, err := selectorLabels(rec.Signal.Name)
+		if err != nil || len(l) != 1 || l["service_name"] == "" {
+			skipped = append(skipped, proposal{Rec: rec, Note: "a Collector collapse picks lines by service.name: tvt writes one only for a stream whose one label is service_name"})
+			continue
+		}
+		if dedup == nil {
+			dedup = &propose.Dedup{ID: propose.DedupPrefix + p.Name, Scan: scan, Records: records, Collector: p.Version}
+		}
+		dedup.Services = append(dedup.Services, l["service_name"])
+		collapsed = append(collapsed, rec)
+	}
+	if dedup != nil {
+		d := dropOf(dedup.ID, collapsed, scan)
+		dedup.Evidence, dedup.Reason = d.Evidence, d.Reason
+	}
+	if len(ok) == 0 && len(labels) == 0 && tier == nil && dedup == nil {
 		return nil, skipped, ""
 	}
 	// Label removals: the ordered pipeline for delta counters (S7 item 8).
@@ -1017,8 +1050,8 @@ func proposeOtelcol(p config.Pipeline, recs, tierRecs []report.Recommendation, r
 		agg = &a
 	}
 	var b strings.Builder
-	var failure, tierFailure string
-	metricsDone, tierDone := false, false
+	var failure, tierFailure, dedupFailure string
+	metricsDone, tierDone, dedupDone := false, false, false
 	metricRecs := len(ok)+len(labels) > 0
 	for _, f := range p.Files {
 		src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
@@ -1046,6 +1079,18 @@ func proposeOtelcol(p config.Pipeline, recs, tierRecs []report.Recommendation, r
 			}
 			metricsDone = metricsDone || metricRecs
 		}
+		if dedup != nil && !dedupDone {
+			lp, err := propose.OtelcolLogsShipper(out, p.Cold)
+			if err == nil && lp != "" {
+				var dout []byte
+				if dout, err = propose.OtelcolDedup(out, []string{lp}, dedup); err == nil {
+					out, dedupDone = dout, true
+				}
+			}
+			if err != nil {
+				dedupFailure = f + ": " + err.Error()
+			}
+		}
 		if tier != nil && !tierDone {
 			lp, err := propose.OtelcolLogsShipper(out, p.Cold)
 			if err == nil && lp != "" {
@@ -1070,6 +1115,9 @@ func proposeOtelcol(p config.Pipeline, recs, tierRecs []report.Recommendation, r
 	if failure == "" && metricRecs && !metricsDone {
 		failure = "no metrics pipeline in " + strings.Join(p.Files, ", ")
 	}
+	if dedup != nil && !dedupDone && dedupFailure == "" {
+		dedupFailure = "no logs pipeline ships to an exporter in " + strings.Join(p.Files, ", ")
+	}
 	if tier != nil && !tierDone && tierFailure == "" {
 		tierFailure = "no logs pipeline ships to an exporter in " + strings.Join(p.Files, ", ")
 	}
@@ -1088,6 +1136,9 @@ func proposeOtelcol(p config.Pipeline, recs, tierRecs []report.Recommendation, r
 		if tierDone && len(ok) == 0 {
 			modules = append(modules, propose.FilterProcessorModule)
 		}
+		if dedupDone {
+			modules = append(modules, propose.LogDedupProcessorModule)
+		}
 		mdiff, err := ensureFilterBuild(p, root, d, modules, note)
 		if err != nil {
 			failure = "the Collector build can't take filter/tvt: " + err.Error()
@@ -1098,6 +1149,16 @@ func proposeOtelcol(p config.Pipeline, recs, tierRecs []report.Recommendation, r
 		if failure != "" {
 			skipped = append(skipped, proposal{Rec: rec, Note: failure})
 		} else {
+			written = append(written, proposal{Rec: rec})
+		}
+	}
+	for _, rec := range collapsed {
+		switch {
+		case failure != "":
+			skipped = append(skipped, proposal{Rec: rec, Note: failure})
+		case dedupFailure != "":
+			skipped = append(skipped, proposal{Rec: rec, Note: dedupFailure})
+		default:
 			written = append(written, proposal{Rec: rec})
 		}
 	}
