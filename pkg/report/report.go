@@ -345,6 +345,10 @@ type Input struct {
 	// scans' costs the ledger measures them with (S11).
 	Merges  []graph.Merge
 	History map[int64]ScanCosts
+	// Collector is every scan's Collector exporter counters and ScanTimes
+	// every scan's start, for the ledger's rates (S11 item 4).
+	Collector map[int64][]graph.CollectorSent
+	ScanTimes map[int64]time.Time
 	// RuleCosts and RuleFindings are the scan's rules (store.RuleCosts,
 	// store.RuleFindings).
 	RuleCosts    []graph.RuleCost
@@ -564,6 +568,9 @@ func Build(in Input, limit int) Report {
 	}
 	r.LineFindings = lineFindings(in.LineFindings, in.Scan.Currency)
 	r.Ledger = buildLedger(in.Merges, in.History, in.Scan.ID, in.Scan.Currency)
+	if r.Ledger != nil {
+		r.Ledger.Collector = collectorRates(in.Merges, in.Collector, in.ScanTimes)
+	}
 	r.Rules, r.Totals.RuleFindings = rules(consumers, in.RuleCosts, in.RuleFindings)
 	r.Totals.RuleFindings += detection(in, r.Rules)
 	r.QueryLoad = queryLoad(consumers, in.QueryCosts)

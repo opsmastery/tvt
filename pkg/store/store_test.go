@@ -814,10 +814,15 @@ var v24Drops = append(append([]string{}, v25Drops...),
 	`ALTER TABLE pipeline_targets DROP COLUMN jobs`,
 )
 
-// v29Drops turns a current database's tables back into version 28's.
-var v29Drops = []string{
-	`DROP TABLE merges`,
+// v30Drops turns a current database's tables back into version 29's.
+var v30Drops = []string{
+	`DROP TABLE collector_sent`,
 }
+
+// v29Drops turns a current database's tables back into version 28's.
+var v29Drops = append(append([]string{}, v30Drops...),
+	`DROP TABLE merges`,
+)
 
 // v28Drops turns a current database's tables back into version 27's.
 var v28Drops = append(append([]string{}, v29Drops...),
@@ -1622,12 +1627,18 @@ func TestMerges(t *testing.T) {
 		must(t, err)
 		if i == 0 {
 			first = sc.ID
+			must(t, sc.PutCollectorSent(ctx, graph.CollectorSent{Pipeline: "agent", Exporter: "otlp_http/loki", Signal: "logs", Sent: 42}))
 		}
 		must(t, sc.PutMerge(ctx, m))
 		must(t, sc.Finish(ctx, 1))
 	}
 	got, err := s.Merges(ctx)
 	must(t, err)
+	sent, err := s.CollectorSent(ctx)
+	must(t, err)
+	if len(sent) != 1 || len(sent[first]) != 1 || sent[first][0].Sent != 42 || sent[first][0].Exporter != "otlp_http/loki" {
+		t.Errorf("collector sent %v", sent)
+	}
 	if len(got) != 1 || got[0].FirstScan != first || !got[0].MergedAt.Equal(at) || got[0].Expected != 1.5 || got[0].SignalID != "prom:metric:x" {
 		t.Fatalf("merges %+v (first scan %d)", got, first)
 	}
