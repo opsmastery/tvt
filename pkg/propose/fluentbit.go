@@ -28,6 +28,11 @@ type Route struct {
 	// stream's lines that name a level below warn move, by
 	// LevelLinePattern; every other line stays hot.
 	BelowWarn bool
+	// SampleOneIn makes the route a sample instead (S10 item 4, Alloy
+	// only): with no cold tier to reroute to, the stream keeps one line in
+	// SampleOneIn, and every line matching the error pattern. Cold is
+	// empty then. tvt.yaml tiers.sample_one_in turns it on.
+	SampleOneIn int
 }
 
 // LevelLinePattern matches a line that names its level below warn as a

@@ -244,7 +244,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		if len(recs) == 0 && len(ivs) == 0 {
 			continue
 		}
-		done, skip, diff := proposePipeline(p, recs, ivs, records, cfg.Tiers.DormantTenant, r.Scan.Currency, jobs, o.Checkouts, r.Scan.ID, v.check(ctx, p), func(n string) { v.build = append(v.build, p.Repo+" "+n) })
+		done, skip, diff := proposePipeline(p, recs, ivs, records, cfg.Tiers.DormantTenant, cfg.Tiers.SampleOneIn, r.Scan.Currency, jobs, o.Checkouts, r.Scan.ID, v.check(ctx, p), func(n string) { v.build = append(v.build, p.Repo+" "+n) })
 		for i := range done {
 			done[i].Repo = p.Repo
 		}
@@ -543,7 +543,7 @@ func prBody(repo string, scan int64, written []proposal, validation, build []str
 // written only when every job its metric carries has a scrape config in
 // p's files: a drop in some jobs would leave the rest of the series, and
 // the savings, in place.
-func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []report.IntervalChange, records []string, tenant, currency string, jobs map[string][]string, checkouts checkoutFlag, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
+func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []report.IntervalChange, records []string, tenant string, sampleOneIn int, currency string, jobs map[string][]string, checkouts checkoutFlag, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
 	var tiers, collapses, tenantRecs []report.Recommendation
 	skipAll := func(note string) ([]proposal, []proposal, string) {
 		for _, rec := range append(append(append(slices.Clone(recs), tiers...), collapses...), tenantRecs...) {
@@ -640,8 +640,12 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 			switch {
 			case p.Kind != "alloy":
 				skipped = append(skipped, proposal{Rec: rec, Note: "no writer for stream reroutes in " + p.Kind + " pipelines yet"})
+			case p.Cold == "" && rec.Action == report.ActionReroute && sampleOneIn > 1:
+				// S10 item 4 (Jason, Nov 21: reroute stays the default):
+				// with no cold tier, tiers.sample_one_in samples the stream.
+				reroutes = append(reroutes, sampledRec(rec, sampleOneIn))
 			case p.Cold == "":
-				skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + p.Name + " names no cold component (tvt.yaml pipelines[].cold, such as loki.write.cold)"})
+				skipped = append(skipped, proposal{Rec: rec, Note: "pipeline " + p.Name + " names no cold component (tvt.yaml pipelines[].cold, such as loki.write.cold), and tiers.sample_one_in is off"})
 			default:
 				reroutes = append(reroutes, rec)
 			}
@@ -686,7 +690,12 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 			continue
 		}
 		d := dropOf(rec.ID, []report.Recommendation{rec}, scan)
-		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold, BelowWarn: rec.Action == report.ActionLevelTier})
+		rt := propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold, BelowWarn: rec.Action == report.ActionLevelTier}
+		if p.Cold == "" {
+			rt.SampleOneIn = sampleOneIn
+			rt.Reason += fmt.Sprintf("; sampled 1 in %d: the pipeline has no cold tier", sampleOneIn)
+		}
+		routes = append(routes, rt)
 	}
 	if len(recs) == 0 && len(ivs) == 0 && len(tiers) == 0 && len(collapses) == 0 && len(tenantRecs) == 0 {
 		return proposeAlloyRoutesOnly(p, reroutes, routes, checkouts, scan, check, skipped)
@@ -1865,4 +1874,22 @@ func intervalRec(iv report.IntervalChange, currency string) report.Recommendatio
 		Pipeline: iv.Pipeline, Proposable: true, Claim: why,
 		Savings:  report.Savings{Monthly: iv.Monthly, Currency: currency},
 		Expected: report.Expected{Statements: []string{fmt.Sprintf("job %s is scraped every %s; every reader's range still holds four samples", iv.Job, every)}, SeriesAfter: -1}}
+}
+
+// sampledRec is a stream reroute rewritten as a 1-in-n sample (S10 item
+// 4): the claimed saving and the hot bytes that leave scale by 1 - 1/n,
+// and the expectation says so.
+func sampledRec(rec report.Recommendation, n int) report.Recommendation {
+	keep := 1 - 1/float64(n)
+	rec.Savings.Monthly *= keep
+	rec.Expected.MonthlySaving *= keep
+	rec.Expected.HotBytesPerDayFall = int64(float64(rec.Expected.HotBytesPerDayFall) * keep)
+	rec.Expected.SharePct *= keep
+	rec.Expected.Statements = []string{
+		fmt.Sprintf("%s keeps about 1 line in %d within an hour of the deploy; the rest are dropped, since the pipeline has no cold tier", rec.Signal.Name, n),
+		fmt.Sprintf("its bytes in Loki fall by about %.0f%%", 100*keep),
+		"no query, alert or panel goes empty: nothing reads the stream",
+		"lines naming an error, exception, traceback, critical or fatal are all kept",
+	}
+	return rec
 }
