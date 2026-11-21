@@ -161,7 +161,7 @@ func fluentClassicRoute(src []byte, r Route) ([]byte, error) {
 	}
 	n := 0
 	for _, s := range secs {
-		if s.kind == "FILTER" && strings.EqualFold(s.get("name"), "rewrite_tag") && s.get("match") == tag && s.get("rule") == "$log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ "+newTag+" false" {
+		if s.kind == "FILTER" && strings.EqualFold(s.get("name"), "rewrite_tag") && s.get("match") == tag && s.get("rule") == "$log "+r.fluentRegex()+" "+newTag+" false" {
 			n++
 		}
 	}
@@ -180,8 +180,8 @@ func classicFilter(r Route, tag, indent string) string {
 	if r.Reason != "" {
 		fmt.Fprintf(&b, "# %s\n", r.Reason)
 	}
-	fmt.Fprintf(&b, "[FILTER]\n%sName         rewrite_tag\n%sMatch        %s\n%sRule         $log ^(?!.*(?i:error|exception|traceback|critical|fatal)).*$ %s false\n%sEmitter_Name %s\n\n# %s\n",
-		indent, indent, tag, indent, newTag, indent, emitter, endMarker)
+	fmt.Fprintf(&b, "[FILTER]\n%sName         rewrite_tag\n%sMatch        %s\n%sRule         $log %s %s false\n%sEmitter_Name %s\n\n# %s\n",
+		indent, indent, tag, indent, r.fluentRegex(), newTag, indent, emitter, endMarker)
 	return b.String()
 }
 

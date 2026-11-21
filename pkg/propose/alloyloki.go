@@ -145,7 +145,13 @@ func AlloyRoutesKeep(out []byte, routes []Route) ([]byte, error) {
 	}
 	fmt.Fprintf(&b, "loki.process %q {\n", alloyHot)
 	for _, r := range routes {
-		fmt.Fprintf(&b, "  stage.match {\n    selector = %s\n    action   = \"drop\"\n  }\n", strconv.Quote(streamSelector(r.Stream)+" !~ "+strconv.Quote(ErrorPattern)))
+		sel := streamSelector(r.Stream) + " !~ " + strconv.Quote(ErrorPattern)
+		if r.BelowWarn {
+			// A level tier (S10 item 3): only lines naming a level below
+			// warn leave the hot side.
+			sel += " |~ " + strconv.Quote(LevelLinePattern)
+		}
+		fmt.Fprintf(&b, "  stage.match {\n    selector = %s\n    action   = \"drop\"\n  }\n", strconv.Quote(sel))
 	}
 	fmt.Fprintf(&b, "  forward_to = [%s]\n}\n\n", strings.Join(receivers(targets), ", "))
 	fmt.Fprintf(&b, "loki.relabel %q {\n", alloyCold)
