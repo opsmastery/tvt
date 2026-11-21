@@ -15,7 +15,12 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
+
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 )
+
+// maxTelemetryBytes caps the /metrics page read.
+const maxTelemetryBytes = 16 << 20
 
 // Sent is one exporter's sent counter for one signal.
 type Sent struct {
@@ -43,10 +48,16 @@ func Telemetry(ctx context.Context, client *http.Client, url string) ([]Sent, er
 	if err != nil {
 		return nil, err
 	}
-	if client == nil {
-		client = http.DefaultClient
+	c := httpx.DefaultClient()
+	if client != nil {
+		c = client
 	}
-	resp, err := client.Do(req)
+	if c.CheckRedirect == nil {
+		cp := *c
+		cp.CheckRedirect = httpx.CheckRedirect
+		c = &cp
+	}
+	resp, err := c.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("otelcol: %w", err)
 	}
@@ -55,7 +66,9 @@ func Telemetry(ctx context.Context, client *http.Client, url string) ([]Sent, er
 		return nil, fmt.Errorf("otelcol: %s: %s", url, resp.Status)
 	}
 	parser := expfmt.NewTextParser(model.UTF8Validation)
-	fams, err := parser.TextToMetricFamilies(resp.Body)
+	// A Collector's own metrics are a few kilobytes; a URL pointing at
+	// something else mustn't stream unbounded into the parser.
+	fams, err := parser.TextToMetricFamilies(httpx.Limit(resp.Body, maxTelemetryBytes))
 	if err != nil {
 		return nil, fmt.Errorf("otelcol: %s: %w", url, err)
 	}
