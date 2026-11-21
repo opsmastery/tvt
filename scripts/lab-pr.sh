@@ -31,6 +31,12 @@
 # unproven). TVT_LAB_LOKI_EXCLUDE, a grep -E pattern, leaves matching Loki
 # query lines out (ad hoc queries that would count as reads).
 #
+# TVT_LAB_ONLY names a file of recommendation IDs, one per line: propose
+# writes only those (the report is filtered before propose reads it), so a
+# rehearsal can merge a few changes instead of all of them (S11, Jason's
+# pick on Nov 21: one or two per writer). IDs the report no longer has
+# (applied, or mistyped) are named and skipped.
+#
 # TVT_LABEL_TOP (default 2000) is the scan's --label-top: the lab has about
 # 1,550 metrics, and S10's bucket and label findings need per-label
 # cardinality on small metrics such as coding_agent_api_requests_total,
@@ -118,7 +124,24 @@ run() {
     --loki-query-log "$logs/loki.log" ${probes[@]+"${probes[@]}"} \
     --label-top "${TVT_LABEL_TOP:-2000}"
   ./bin/tvt report --db "$OUT/tvt.db" --config "$CONFIG" --label-drops --top 0 --json "$OUT/report.json" --html "$OUT/report.html"
-  GITHUB_TOKEN="$gh" ./bin/tvt propose --db "$OUT/tvt.db" --config "$CONFIG" --report "$OUT/report.json" \
+  local reviewed="$OUT/report.json"
+  if [[ -n "${TVT_LAB_ONLY:-}" ]]; then
+    reviewed="$OUT/report-only.json"
+    python3 - "$OUT/report.json" "$TVT_LAB_ONLY" "$reviewed" <<'PY'
+import json, sys
+report, ids, out = sys.argv[1:]
+want = {l.strip() for l in open(ids) if l.strip()}
+r = json.load(open(report))
+r["recommendations"] = [x for x in r["recommendations"] if x["id"] in want]
+missing = want - {x["id"] for x in r["recommendations"]}
+if missing:
+    # Already applied (a merged change leaves the report), or a typo.
+    print("TVT_LAB_ONLY: not in the report, skipped: " + ", ".join(sorted(missing)), file=sys.stderr)
+json.dump(r, open(out, "w"))
+print(f"proposing only {len(r['recommendations'])} recommendations (TVT_LAB_ONLY)")
+PY
+  fi
+  GITHUB_TOKEN="$gh" ./bin/tvt propose --db "$OUT/tvt.db" --config "$CONFIG" --report "$reviewed" \
     --checkout "$REPO=$LAB" --validate require --output "$MODE" --dir "$OUT/proposals"
   echo "scan, report and $MODE in $OUT"
 }
