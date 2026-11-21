@@ -1462,7 +1462,10 @@ func readMerges(ctx context.Context, ps []config.Pipeline) ([]graph.Merge, []str
 			errs = append(errs, fmt.Sprintf("%s: %s: %v", p.Repo, report.ProposalPath, err))
 			continue
 		}
-		cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%ct", ref, "--", report.ProposalPath)
+		// --first-parent: when the PR was a merge commit, the time it
+		// merged, not when the PR's branch committed the proposal (the S11
+		// rehearsal's tvt-lab #44 found it).
+		cmd := exec.CommandContext(ctx, "git", "log", "-1", "--first-parent", "--format=%ct", ref, "--", report.ProposalPath)
 		cmd.Dir = p.Checkout
 		ts, err := cmd.Output()
 		secs, perr := strconv.ParseInt(strings.TrimSpace(string(ts)), 10, 64)
