@@ -318,3 +318,19 @@ CREATE TABLE IF NOT EXISTS dashboard_loads (
     last_at       INTEGER NOT NULL,
     PRIMARY KEY (scan_id, org_id, dashboard_uid, login, browser)
 );
+
+-- Merged tvt changes (graph.Merge, S11 item 1): each recommendation a
+-- merged tvt PR carried, from the pipeline repo checkout's
+-- .tvt/proposal.json; merged_at is when that file was committed. Kept
+-- across scans (first_scan saw it first): the ledger measures each one
+-- from the scan before merged_at to the first scan after it.
+CREATE TABLE IF NOT EXISTS merges (
+    repo           TEXT NOT NULL,
+    proposal_scan  INTEGER NOT NULL,
+    recommendation TEXT NOT NULL,
+    signal_id      TEXT NOT NULL,
+    merged_at      INTEGER NOT NULL,
+    first_scan     INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    expected       REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (repo, proposal_scan, recommendation)
+);

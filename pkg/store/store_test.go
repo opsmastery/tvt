@@ -814,10 +814,15 @@ var v24Drops = append(append([]string{}, v25Drops...),
 	`ALTER TABLE pipeline_targets DROP COLUMN jobs`,
 )
 
-// v28Drops turns a current database's tables back into version 27's.
-var v28Drops = []string{
-	`ALTER TABLE costs DROP COLUMN classes`,
+// v29Drops turns a current database's tables back into version 28's.
+var v29Drops = []string{
+	`DROP TABLE merges`,
 }
+
+// v28Drops turns a current database's tables back into version 27's.
+var v28Drops = append(append([]string{}, v29Drops...),
+	`ALTER TABLE costs DROP COLUMN classes`,
+)
 
 // v27Drops turns a current database's tables back into version 26's.
 var v27Drops = append(append([]string{}, v28Drops...),
@@ -1598,5 +1603,32 @@ func TestStreamLevels(t *testing.T) {
 	defer s2.Close()
 	if vs, err = s2.StreamVolumes(ctx, id); err != nil || len(vs) != 2 || vs[1].Levels != nil {
 		t.Fatalf("upgraded volumes %+v, %v: want both, no levels", vs, err)
+	}
+}
+
+// TestMerges: a merged tvt change is recorded by the first scan that sees
+// it; later scans' copies are ignored (S11 item 1).
+func TestMerges(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "tvt.db")
+	s, err := Open(ctx, path)
+	must(t, err)
+	defer s.Close()
+	at := time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC)
+	m := graph.Merge{Repo: "github.com/o/p", ProposalScan: 3, Recommendation: "drop:prom:metric:x", SignalID: "prom:metric:x", MergedAt: at, Expected: 1.5}
+	var first int64
+	for i := 0; i < 2; i++ {
+		sc, err := s.BeginScan(ctx, at.Add(time.Duration(i+1)*time.Hour), 30)
+		must(t, err)
+		if i == 0 {
+			first = sc.ID
+		}
+		must(t, sc.PutMerge(ctx, m))
+		must(t, sc.Finish(ctx, 1))
+	}
+	got, err := s.Merges(ctx)
+	must(t, err)
+	if len(got) != 1 || got[0].FirstScan != first || !got[0].MergedAt.Equal(at) || got[0].Expected != 1.5 || got[0].SignalID != "prom:metric:x" {
+		t.Fatalf("merges %+v (first scan %d)", got, first)
 	}
 }
