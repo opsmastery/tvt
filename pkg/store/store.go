@@ -30,7 +30,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 29
+const SchemaVersion = 30
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -512,6 +512,12 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 		// The merges table comes from the schema's CREATE TABLE IF NOT
 		// EXISTS, run before these steps.
 		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = '29' WHERE key = 'schema_version'`); err != nil {
+			return err
+		}
+	}
+	if from < 30 {
+		// collector_sent, likewise.
+		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = '30' WHERE key = 'schema_version'`); err != nil {
 			return err
 		}
 	}
@@ -1075,6 +1081,7 @@ type Scan struct {
 	pipeline    *sql.Stmt
 	overflow    *sql.Stmt
 	merge       *sql.Stmt
+	sent        *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -1183,6 +1190,7 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		{&sc.queryCost, `INSERT INTO query_costs (scan_id, consumer_id, queries, samples, bytes) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.sloFinding, `INSERT INTO slo_findings (scan_id, kind, subject, name, detail, fix) VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.pipeline, `INSERT INTO pipeline_targets (scan_id, subject, pipeline, note, jobs) VALUES (?, ?, ?, ?, ?)`},
+		{&sc.sent, `INSERT INTO collector_sent (scan_id, pipeline, exporter, signal, sent) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.merge, `INSERT OR IGNORE INTO merges (repo, proposal_scan, recommendation, signal_id, merged_at, first_scan, expected)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.overflow, `INSERT INTO overflow_findings (scan_id, signal, series, capped, readers) VALUES (?, ?, ?, ?, ?)`},
@@ -1408,6 +1416,38 @@ func (sc *Scan) PutMerge(ctx context.Context, m graph.Merge) error {
 	}
 	_, err := sc.merge.ExecContext(ctx, m.Repo, m.ProposalScan, m.Recommendation, m.SignalID, millis(m.MergedAt), sc.ID, m.Expected)
 	return wrap("merge", m.Recommendation, err)
+}
+
+// PutCollectorSent records one Collector exporter's sent counter (S11 item
+// 4).
+func (sc *Scan) PutCollectorSent(ctx context.Context, c graph.CollectorSent) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if c.Pipeline == "" || c.Exporter == "" || c.Signal == "" {
+		return errors.New("store: collector sent: Pipeline, Exporter and Signal are required")
+	}
+	_, err := sc.sent.ExecContext(ctx, sc.ID, c.Pipeline, c.Exporter, c.Signal, c.Sent)
+	return wrap("collector sent", c.Exporter, err)
+}
+
+// CollectorSent returns every scan's Collector sent counters, by scan.
+func (s *Store) CollectorSent(ctx context.Context) (map[int64][]graph.CollectorSent, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT scan_id, pipeline, exporter, signal, sent FROM collector_sent ORDER BY scan_id, pipeline, exporter, signal`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64][]graph.CollectorSent{}
+	for rows.Next() {
+		var id int64
+		var c graph.CollectorSent
+		if err := rows.Scan(&id, &c.Pipeline, &c.Exporter, &c.Signal, &c.Sent); err != nil {
+			return nil, err
+		}
+		out[id] = append(out[id], c)
+	}
+	return out, rows.Err()
 }
 
 // Merges returns every merged tvt change recorded so far, oldest first.

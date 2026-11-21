@@ -29,6 +29,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/kube"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/loki"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/mimir"
+	"github.com/Opsmastery-Summit/tvt/pkg/collect/otelcol"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/prometheus"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/runbook"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/slo"
@@ -178,6 +179,20 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		var mergeErrs []string
 		in.Merged, mergeErrs = readMerges(ctx, cfg.Pipelines)
 		in.RewriteErrs = append(in.RewriteErrs, mergeErrs...)
+		for _, p := range cfg.Pipelines {
+			if p.Kind != "otelcol" || p.Telemetry == "" {
+				continue
+			}
+			sent, err := otelcol.Telemetry(ctx, &http.Client{Timeout: 10 * time.Second}, p.Telemetry)
+			if err != nil {
+				fmt.Fprintf(out, "%-12s %s: %v\n", "collector", p.Name, err)
+				continue
+			}
+			for _, s := range sent {
+				in.CollectorSent = append(in.CollectorSent, graph.CollectorSent{Pipeline: p.Name, Exporter: s.Exporter, Signal: s.Signal, Sent: s.Sent})
+			}
+			fmt.Fprintf(out, "%-12s %s: %d exporter counters\n", "collector", p.Name, len(sent))
+		}
 		in.MinWindowDays = cfg.WindowDays
 		in.Seasons = cfg.Seasons
 		// Validated when the config was read.
@@ -932,6 +947,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 	}
 	for _, t := range g.PipelineTargets {
 		if err := sc.PutPipelineTarget(ctx, t); err != nil {
+			return err
+		}
+	}
+	for _, c := range g.CollectorSent {
+		if err := sc.PutCollectorSent(ctx, c); err != nil {
 			return err
 		}
 	}

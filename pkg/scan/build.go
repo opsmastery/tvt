@@ -103,6 +103,9 @@ type Inputs struct {
 	// Merged are the merged tvt changes the pipeline checkouts hold (S11
 	// item 1), passed through to the store.
 	Merged []graph.Merge
+	// CollectorSent are the otelcol pipelines' exporter counters (S11
+	// item 4), passed through.
+	CollectorSent []graph.CollectorSent
 	// SelectorMetrics maps a label-only selector (SelectorKey) to the
 	// metric names the backend says carry those labels. A selector that
 	// names no metric resolves to these instead of every collected metric.
@@ -187,10 +190,12 @@ const (
 
 // Output is one scan's graph rows.
 type Output struct {
-	// Merged are the merged tvt changes (S11 item 1), as in Inputs.
-	Merged    []graph.Merge
-	Signals   []graph.Signal
-	Consumers []graph.Consumer
+	// Merged are the merged tvt changes (S11 item 1), and CollectorSent the
+	// Collector exporters' counters (item 4), as in Inputs.
+	Merged        []graph.Merge
+	CollectorSent []graph.CollectorSent
+	Signals       []graph.Signal
+	Consumers     []graph.Consumer
 	// References link signals to the consumers whose queries read them,
 	// ordered by signal, consumer and via; each key appears once.
 	References []graph.Reference
@@ -246,6 +251,7 @@ func Build(in Inputs) (Output, error) {
 	}
 	var out Output
 	out.Merged = in.Merged
+	out.CollectorSent = in.CollectorSent
 	since := in.Start.Add(-in.Window)
 
 	// Signals and their costs.

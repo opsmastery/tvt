@@ -149,6 +149,15 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 {{end}}</tbody>
 </table>
 </div>
+{{if .Collector}}<p class="muted">What each OTel Collector exporter sent per second, from the Collector's own counters: before the first merge and since the last one ("—" where a restart reset the counter or there aren't two scans yet).</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Exporter</th><th>Signal</th><th class="num">Before / s</th><th class="num">After / s</th></tr></thead>
+<tbody>{{range .Collector}}<tr><td><code>{{.Exporter}}</code><br><span class="muted">{{.Pipeline}}</span></td><td>{{.Signal}}</td>
+<td class="num">{{if .BeforeKnown}}{{printf "%.2f" .Before}}{{else}}—{{end}}</td><td class="num">{{if .AfterKnown}}{{printf "%.2f" .After}}{{else}}—{{end}}</td></tr>
+{{end}}</tbody>
+</table>
+</div>{{end}}
 {{end}}
 
 {{if .LevelTiers}}

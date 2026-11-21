@@ -121,6 +121,12 @@ type Pipeline struct {
 	// config with the same gates the Collector runs with, or a config
 	// that uses a gated function fails to load.
 	FeatureGates []string `yaml:"feature_gates"`
+	// Telemetry is the OTel Collector's own metrics endpoint (otelcol
+	// pipelines; service.telemetry.metrics, such as
+	// http://otelcol:8888/metrics): tvt scan reads each exporter's sent
+	// counters with a GET, and the ledger turns them into rates before and
+	// after a merge (S11 item 4).
+	Telemetry string `yaml:"telemetry"`
 	// Cold is where tvt sends streams and level tiers it moves to cold
 	// storage: the alias of an output (fluentbit pipelines), a component
 	// (alloy, such as loki.write.cold) or an exporter ID (otelcol, such as
