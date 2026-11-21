@@ -6,43 +6,35 @@
 - **Price it.** Attaches ingest and storage cost to every series and stream, using your own price card.
 - **Act on it.** Generates OTel Collector or Prometheus relabel config as a PR. `tvt check` blocks any change that would break an alert, SLO or viewed dashboard.
 
-> Status: pre-alpha. `tvt scan`, `tvt report` and `tvt why` work on the lab and on Grafana Cloud. `tvt propose` writes Prometheus and Alloy drops as patches; the other writers, pull requests and `tvt check` are next. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/tasks/README.md](docs/tasks/README.md).
+Every signal tvt marks unread had no reader in your evidence window, and every gap is listed. If you find a reader we missed, that's a bug, and the benchmark gets a new case.
+
+> Status: release candidate (`v0.1.0-rc1`). Works on Prometheus, Mimir, Loki and Grafana (OSS and Cloud), and writes changes for Prometheus, Alloy, the OpenTelemetry Collector and Fluent Bit. See [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Install
+
+Download a release, verify its cosign signature, and put `tvt` on your PATH: [docs/install.md](docs/install.md). Or, with Go 1.26+, `go install github.com/Opsmastery-Summit/tvt/cmd/tvt@latest`.
 
 ## Commands
 
-```
-tvt scan --grafana <url> --prom <url> --loki <url>   # build the usage graph (read-only)
-tvt report                                            # ranked savings report, HTML + JSON
-tvt why shop_cart_operations_total                    # every reader of one signal, and the evidence
-tvt propose --config tvt.yaml --checkout <repo>=<dir> # drop rules as a patch per pipeline repo
-tvt check                                             # CI gate on config PRs
-tvt version
-```
-
-Credentials come from the environment (`TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `TVT_LOKI_TOKEN`, `GITHUB_TOKEN`) and are never passed as flags.
-
-### tvt scan
+| Command | What it does | Docs |
+| --- | --- | --- |
+| `tvt scan` | Builds the usage graph from your backends and logs. Read-only | [scan.md](docs/scan.md) |
+| `tvt report` | The ranked savings report, HTML and JSON, with every gap listed | [report.md](docs/report.md) |
+| `tvt why <signal>` | Every reader of one signal, and the evidence | [why.md](docs/why.md) |
+| `tvt propose` | Config changes as a patch per pipeline repo, or a draft PR | [propose.md](docs/propose.md) |
+| `tvt check` | The CI gate: refuses a change that breaks an alert, SLO, viewed dashboard or record | [check.md](docs/check.md) |
+| `tvt confirm` | Records an owner's confirm, dismiss or keep on the PR | [confirm.md](docs/confirm.md) |
+| `tvt version` | The version, commit and build date | |
 
 ```sh
-export TVT_GRAFANA_TOKEN=glsa_...   # Grafana service account, Viewer role (plus datasources:read)
-tvt scan --grafana https://grafana.example.com --prom https://prometheus.example.com \
-  --loki https://loki.example.com \
-  --grafana-log '/var/lib/grafana/logs/grafana.log*' \
-  --prom-query-log /prometheus/query.log
+tvt scan --grafana https://grafana.example.com --prom https://prometheus.example.com --loki https://loki.example.com
+tvt report                                              # report.html and report.json
+tvt why shop_cart_operations_total
+tvt propose --config tvt.yaml --checkout github.com/acme/pipes=../pipes
+tvt check --base origin/main                            # in the pipeline repo's CI
 ```
 
-| Flag | Default | What |
-| --- | --- | --- |
-| `--grafana` | (required) | Grafana base URL |
-| `--prom` / `--mimir` | (one required) | Metrics backend. `--mimir` reads Mimir's cardinality API, which needs `limits.cardinality_analysis_enabled: true`; `/prometheus` is appended if missing |
-| `--loki` | | Loki base URL. Its alert and recording rules become consumers and protect the streams they select. Stream volume comes in Sprint 3 |
-| `--grafana-log` | | Grafana log with `GF_SERVER_ROUTER_LOGGING=true`; repeatable, globs and `.gz` allowed. Without it no dashboard counts as viewed |
-| `--prom-query-log` | | Prometheus query log; repeatable. Recorded for coverage now, matched against signals from Sprint 2 |
-| `--label-top` | 50 | Per-label cardinality for this many of the largest metrics |
-| `--window` | 30 | Observation window in days |
-| `--db` | `tvt.db` | Usage graph database; each run adds one scan |
-
-Each run is one transaction: a failed or interrupted scan writes nothing. Exit codes: 0 success, 1 scan failed, 2 bad flags. tvt's own dashboard fetches are excluded from views by its login.
+Credentials come from the environment (`TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `TVT_LOKI_TOKEN`, `GITHUB_TOKEN`), never from flags, and only go over https or to a loopback host. tvt never writes to a backend: its only writes are Git branches and draft PRs in the repos you map. See [SECURITY.md](SECURITY.md).
 
 ## Develop
 
@@ -53,13 +45,13 @@ make            # lint, test, build -> bin/tvt
 make race       # tests with the race detector
 ```
 
-Collector tests run against recorded API responses in `testdata/lab/` through `internal/testutil`, which fails any test that sends a write or a query. The golden tests in `cmd/tvt` check scan output against tvt-lab's `ground-truth.yaml`. CI also runs `goreleaser check`, govulncheck and gitleaks.
+Collector tests run against recorded API responses in `testdata/lab/` through `internal/testutil`, which fails any test that sends a write or a query. The golden tests in `cmd/tvt` check scan output against tvt-lab's `ground-truth.yaml`. CI also checks that builds are reproducible, runs `goreleaser check`, govulncheck and gitleaks, and Dependabot proposes updates weekly.
 
 To scan Mimir instead, start the lab with `make up-mimir` and pass `--mimir http://localhost:9009` in place of `--prom`.
 
 ### Releases
 
-A `v*` tag builds archives for Linux, macOS and Windows (amd64 and arm64) with goreleaser and signs `checksums.txt` with cosign (keyless). Tags with a suffix such as `v0.0.1-rc.1` publish a pre-release. The verify command is in `.goreleaser.yaml`.
+A `v*` tag builds reproducible archives for Linux, macOS and Windows (amd64 and arm64) with goreleaser and signs `checksums.txt` with cosign (keyless). Tags with a suffix such as `v0.1.0-rc1` publish a pre-release. The checklist is [docs/release.md](docs/release.md).
 
 Run it against [tvt-lab](../tvt-lab), a Podman Grafana stack seeded with known waste and known dependencies:
 
