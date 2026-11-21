@@ -46,7 +46,58 @@ type RetentionTier struct {
 
 // WriterNone is RetentionTier.Writer when no pipeline kind tvt writes
 // can set retention per signal.
-const WriterNone = "none yet: Prometheus and Mimir set retention per server or tenant, not per metric"
+const WriterNone = "none yet: Prometheus and Mimir set retention per server or tenant, not per metric (set tiers.dormant_tenant for a Mimir tier tenant)"
+
+// WriterTenant starts RetentionTier.Writer when tvt writes the tier as a
+// route to a Mimir tenant (tiers.dormant_tenant).
+const WriterTenant = "Mimir tenant "
+
+// ActionRetentionTier: send a dormant metric to the tier tenant, which
+// keeps a short history (S10 item 2, ADR 0010: before the archive and a
+// drop).
+const ActionRetentionTier = "retention_tier"
+
+// retentionRec is a confirm row's tier as a recommendation: its owner
+// confirms the shorter history on the PR, as for any change.
+func retentionRec(c Confirm, s graph.Signal, meta Scan) Recommendation {
+	t := c.Retention
+	money := fmt.Sprintf("%.2f", t.Monthly)
+	if meta.Currency != "" {
+		money += " " + meta.Currency
+	}
+	rec := Recommendation{
+		ID:     ActionRetentionTier + ":" + c.Signal.ID,
+		Action: ActionRetentionTier,
+		Signal: c.Signal,
+		Claim: fmt.Sprintf("%s is dormant (%s): keeping %d days of it in its own tenant instead of %.1f saves %s a month, and the history an incident would need stays.",
+			c.Signal.Name, c.Reason, t.KeepDays, t.CurrentDays, money),
+		Evidence:    Evidence{References: []string{}, QueryLog: []LoggedQuery{}, Gaps: append([]string{}, c.Gaps...), Acknowledged: c.Acknowledged},
+		Downstream:  []Reader{},
+		Assumptions: []string{"the tier tenant's retention is set to the tier's days in Mimir's runtime overrides (compactor_blocks_retention_period)"},
+		Owner:       c.Owner, OwnerSource: c.OwnerSource, OwnerInferred: c.OwnerInferred,
+		Status:        StatusOpen,
+		Savings:       Savings{Monthly: t.Monthly, Currency: meta.Currency, DiskBytes: t.DiskBytes, Approximate: true},
+		RiskIfWrong:   Risk{Evidence: "none", Dormant: true, Tier: s.Tier},
+		CheapestCheck: c.Question,
+		CheckMinutes:  5,
+		KeepDays:      t.KeepDays,
+	}
+	if rec.Evidence.Gaps == nil {
+		rec.Evidence.Gaps = []string{}
+	}
+	if t.Lookback != "" {
+		rec.Assumptions = append(rec.Assumptions, fmt.Sprintf("the longest window a reader reads back is %s (%s), inside the tier", t.Lookback, t.Reader))
+	}
+	rec.EvidenceHash = EvidenceHash(rec.Evidence)
+	rec.SavingsPerMinute = rec.Savings.Monthly / float64(rec.CheckMinutes)
+	rec.Expected = Expected{WithinSec: expectedWithin.Seconds(), SeriesAfter: -1, EmptyReaders: []string{}, MonthlySaving: t.Monthly,
+		Statements: []string{
+			fmt.Sprintf("%s stops arriving in the main tenant within an hour of the deploy and arrives in the tier tenant instead", c.Signal.Name),
+			fmt.Sprintf("the tier tenant keeps %d days of it", t.KeepDays),
+			"no rule, alert or panel goes empty: nothing reads it",
+		}}
+	return rec
+}
 
 // retentionTier is the tier for a dormant metric, or nil with the reason
 // when there's none: not a self-hosted metric with a known retention, a

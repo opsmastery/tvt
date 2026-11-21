@@ -191,7 +191,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		switch {
 		case !rec.Proposable:
 			skipped = append(skipped, proposal{Rec: rec, Note: "not proposable: " + cmp.Or(rec.PipelineNote, "no pipeline")})
-		case !(rec.Action == report.ActionDrop && rec.Signal.Kind == string(graph.KindMetric)) && !(rec.Action == report.ActionReroute && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionLabelRemoval && rec.Signal.Kind == string(graph.KindLabel)) && !(rec.Action == report.ActionBucket && rec.Signal.Kind == string(graph.KindLabel)) && !(rec.Action == report.ActionLevelTier && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionCollapse && rec.Signal.Kind == string(graph.KindStream)):
+		case !(rec.Action == report.ActionDrop && rec.Signal.Kind == string(graph.KindMetric)) && !(rec.Action == report.ActionReroute && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionLabelRemoval && rec.Signal.Kind == string(graph.KindLabel)) && !(rec.Action == report.ActionBucket && rec.Signal.Kind == string(graph.KindLabel)) && !(rec.Action == report.ActionLevelTier && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionCollapse && rec.Signal.Kind == string(graph.KindStream)) && !(rec.Action == report.ActionRetentionTier && rec.Signal.Kind == string(graph.KindMetric)):
 			skipped = append(skipped, proposal{Rec: rec, Note: "no writer for " + rec.Action + " of a " + rec.Signal.Kind + " yet"})
 		default:
 			byPipeline[rec.Pipeline] = append(byPipeline[rec.Pipeline], rec)
@@ -221,7 +221,7 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		if len(recs) == 0 && len(ivs) == 0 {
 			continue
 		}
-		done, skip, diff := proposePipeline(p, recs, ivs, records, r.Scan.Currency, jobs, o.Checkouts, r.Scan.ID, v.check(ctx, p), func(n string) { v.build = append(v.build, p.Repo+" "+n) })
+		done, skip, diff := proposePipeline(p, recs, ivs, records, cfg.Tiers.DormantTenant, r.Scan.Currency, jobs, o.Checkouts, r.Scan.ID, v.check(ctx, p), func(n string) { v.build = append(v.build, p.Repo+" "+n) })
 		for i := range done {
 			done[i].Repo = p.Repo
 		}
@@ -520,10 +520,10 @@ func prBody(repo string, scan int64, written []proposal, validation, build []str
 // written only when every job its metric carries has a scrape config in
 // p's files: a drop in some jobs would leave the rest of the series, and
 // the savings, in place.
-func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []report.IntervalChange, records []string, currency string, jobs map[string][]string, checkouts checkoutFlag, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
-	var tiers, collapses []report.Recommendation
+func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []report.IntervalChange, records []string, tenant, currency string, jobs map[string][]string, checkouts checkoutFlag, scan int64, check checkFunc, note func(string)) (written, skipped []proposal, diff string) {
+	var tiers, collapses, tenantRecs []report.Recommendation
 	skipAll := func(note string) ([]proposal, []proposal, string) {
-		for _, rec := range append(append(slices.Clone(recs), tiers...), collapses...) {
+		for _, rec := range append(append(append(slices.Clone(recs), tiers...), collapses...), tenantRecs...) {
 			skipped = append(skipped, proposal{Rec: rec, Note: note})
 		}
 		for _, iv := range ivs {
@@ -534,6 +534,16 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 	// Level tiers (S10 item 3): an OTel Collector's go to its own writer;
 	// Fluent Bit and Alloy write them as reroutes of the lines below warn.
 	recs = slices.DeleteFunc(slices.Clone(recs), func(rec report.Recommendation) bool {
+		if rec.Action == report.ActionRetentionTier {
+			// Retention tiers (S10 item 2): a route to the tier tenant in
+			// a Prometheus pipeline's remote_write.
+			if p.Kind != "prometheus" {
+				skipped = append(skipped, proposal{Rec: rec, Note: "the Mimir tenant tier is written in a Prometheus pipeline's remote_write; none for " + p.Kind + " pipelines yet"})
+			} else {
+				tenantRecs = append(tenantRecs, rec)
+			}
+			return true
+		}
 		if rec.Action == report.ActionCollapse {
 			// Collapses (S10 item 4): log_dedup, an OTel Collector processor.
 			if p.Kind != "otelcol" {
@@ -556,7 +566,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 		}
 		return true
 	})
-	if len(recs) == 0 && len(ivs) == 0 && len(tiers) == 0 && len(collapses) == 0 {
+	if len(recs) == 0 && len(ivs) == 0 && len(tiers) == 0 && len(collapses) == 0 && len(tenantRecs) == 0 {
 		return nil, skipped, ""
 	}
 	if len(ivs) > 0 && p.Kind != "prometheus" && p.Kind != "alloy" {
@@ -642,7 +652,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 		}
 		drops = append(drops, rec)
 	}
-	if recs = drops; len(recs) == 0 && len(reroutes) == 0 && len(ivs) == 0 && len(tiers) == 0 && len(collapses) == 0 {
+	if recs = drops; len(recs) == 0 && len(reroutes) == 0 && len(ivs) == 0 && len(tiers) == 0 && len(collapses) == 0 && len(tenantRecs) == 0 {
 		return nil, skipped, ""
 	}
 	var routes []propose.Route
@@ -655,7 +665,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 		d := dropOf(rec.ID, []report.Recommendation{rec}, scan)
 		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold, BelowWarn: rec.Action == report.ActionLevelTier})
 	}
-	if len(recs) == 0 && len(ivs) == 0 && len(tiers) == 0 && len(collapses) == 0 {
+	if len(recs) == 0 && len(ivs) == 0 && len(tiers) == 0 && len(collapses) == 0 && len(tenantRecs) == 0 {
 		return proposeAlloyRoutesOnly(p, reroutes, routes, checkouts, scan, check, skipped)
 	}
 	var listJobs func([]byte) ([]string, error)
@@ -745,20 +755,35 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 		ivPlan[f][iv.Job] = propose.Interval{ID: rec.ID, Scan: scan, Reason: rec.Claim, Every: time.Duration(iv.ProposedSec * float64(time.Second))}
 		ivRecs[iv.Job] = rec
 	}
+	// The retention tier: one route to the tier tenant per pipeline.
+	var tenantTier *propose.TenantTier
+	if len(tenantRecs) > 0 {
+		t := propose.TenantTier{ID: propose.TenantPrefix + p.Name, Scan: scan, Tenant: tenant}
+		for _, rec := range tenantRecs {
+			t.Metrics = append(t.Metrics, rec.Signal.Name)
+			t.KeepDays = max(t.KeepDays, rec.KeepDays)
+		}
+		d := dropOf(t.ID, tenantRecs, scan)
+		t.Evidence, t.Reason = d.Evidence, plural(len(tenantRecs), "dormant metric keeps", "dormant metrics keep")+fmt.Sprintf(" %d days in tenant %s, see tvt why", t.KeepDays, tenant)
+		tenantTier = &t
+	}
+	tenantDone, tenantFailure := false, ""
 	var b strings.Builder
 	routed := false
 	failed := map[string]string{} // rec ID -> why its file couldn't be written
 	var ivWritten []proposal
 	for _, f := range p.Files {
 		byJob := plan[f]
-		if len(byJob) == 0 && len(ivPlan[f]) == 0 {
+		hasRW := tenantTier != nil && !tenantDone && p.Kind == "prometheus" && strings.Contains(string(srcs[f]), "remote_write:")
+		if len(byJob) == 0 && len(ivPlan[f]) == 0 && !hasRW {
 			continue
 		}
 		out := srcs[f]
 		var err error
 		switch {
 		case len(byJob) == 0:
-			// Intervals only; an Alloy file still takes the reroutes.
+			// Intervals or the tier only; an Alloy file still takes the
+			// reroutes.
 			if p.Kind == "alloy" && len(routes) > 0 && !routed {
 				if next, rerr := propose.AlloyRoutesKeep(out, routes); rerr == nil {
 					out, routed = next, true
@@ -798,10 +823,24 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 				out, err = propose.AlloyIntervals(out, ivPlan[f])
 			}
 		}
+		if err == nil && hasRW {
+			var tout []byte
+			if tout, err = propose.PrometheusTenantTier(out, tenantTier); err == nil {
+				out, tenantDone = tout, true
+			} else if len(byJob) == 0 && len(ivPlan[f]) == 0 {
+				tenantFailure = f + ": " + err.Error()
+				continue
+			} else {
+				tenantFailure, err = f+": "+err.Error(), nil
+			}
+		}
 		if err == nil {
 			err = check(root, f, out)
 		}
 		if err != nil {
+			if hasRW && tenantDone {
+				tenantDone, tenantFailure = false, f+": "+err.Error()
+			}
 			for _, rs := range byJob {
 				for _, rec := range rs {
 					failed[rec.ID] = f + ": " + err.Error()
@@ -826,6 +865,16 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 			continue
 		} else {
 			written = append(written, proposal{Rec: rec})
+		}
+	}
+	for _, rec := range tenantRecs {
+		switch {
+		case tenantDone:
+			written = append(written, proposal{Rec: rec})
+		case tenantFailure != "":
+			skipped = append(skipped, proposal{Rec: rec, Note: tenantFailure})
+		default:
+			skipped = append(skipped, proposal{Rec: rec, Note: "no file of the pipeline has a remote_write to send the tier from"})
 		}
 	}
 	for _, rec := range reroutes {
