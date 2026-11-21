@@ -74,3 +74,39 @@ func TestLedger(t *testing.T) {
 		}
 	}
 }
+
+// TestCollectorRates: the Collector's sent counters become rates over the
+// last two scans before the first merge and the last two after the last;
+// a counter that went down (a restart) has no rate.
+func TestCollectorRates(t *testing.T) {
+	t0 := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	times := map[int64]time.Time{1: t0, 2: t0.Add(time.Hour), 3: t0.Add(3 * time.Hour), 4: t0.Add(4 * time.Hour)}
+	s := func(exp, sig string, v float64) graph.CollectorSent {
+		return graph.CollectorSent{Pipeline: "agent", Exporter: exp, Signal: sig, Sent: v}
+	}
+	sent := map[int64][]graph.CollectorSent{
+		1: {s("otlp_http/loki", "logs", 0), s("rw", "metrics", 100)},
+		2: {s("otlp_http/loki", "logs", 3600), s("rw", "metrics", 200)},
+		// The merge at 2h, then a restart: counters start over.
+		3: {s("otlp_http/loki", "logs", 100), s("file/cold", "logs", 50), s("rw", "metrics", 10)},
+		4: {s("otlp_http/loki", "logs", 460), s("file/cold", "logs", 3650), s("rw", "metrics", 5)},
+	}
+	merges := []graph.Merge{{MergedAt: t0.Add(2 * time.Hour)}}
+	got := collectorRates(merges, sent, times)
+	byKey := map[string]CollectorRate{}
+	for _, r := range got {
+		byKey[r.Exporter] = r
+	}
+	if r := byKey["otlp_http/loki"]; !r.BeforeKnown || r.Before != 1 || !r.AfterKnown || r.After != 0.1 {
+		t.Errorf("loki %+v: want 1/s before, 0.1/s after", r)
+	}
+	if r := byKey["file/cold"]; r.BeforeKnown || !r.AfterKnown || r.After != 1 {
+		t.Errorf("cold %+v", r)
+	}
+	if r := byKey["rw"]; !r.BeforeKnown || r.AfterKnown {
+		t.Errorf("rw %+v: the counter went down after, so no rate", r)
+	}
+	if collectorRates(nil, sent, times) != nil {
+		t.Error("rates with nothing merged")
+	}
+}

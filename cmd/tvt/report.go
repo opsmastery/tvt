@@ -378,6 +378,13 @@ func readLedger(ctx context.Context, st *store.Store, info store.ScanInfo, in *r
 	}
 	delete(need, 0)
 	in.Merges = merges
+	if in.Collector, err = st.CollectorSent(ctx); err != nil {
+		return err
+	}
+	in.ScanTimes = map[int64]time.Time{}
+	for _, s := range scans {
+		in.ScanTimes[s.ID] = s.StartedAt
+	}
 	in.History = map[int64]report.ScanCosts{}
 	for id := range need {
 		cs, err := st.Costs(ctx, id)

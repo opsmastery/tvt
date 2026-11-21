@@ -334,3 +334,15 @@ CREATE TABLE IF NOT EXISTS merges (
     expected       REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (repo, proposal_scan, recommendation)
 );
+
+-- OTel Collector exporters' sent counters per scan (graph.CollectorSent,
+-- S11 item 4), from each otelcol pipeline's telemetry endpoint: the
+-- ledger turns two scans' counters into a rate before and after a merge.
+CREATE TABLE IF NOT EXISTS collector_sent (
+    scan_id  INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    pipeline TEXT NOT NULL,
+    exporter TEXT NOT NULL,
+    signal   TEXT NOT NULL,
+    sent     REAL NOT NULL,
+    PRIMARY KEY (scan_id, pipeline, exporter, signal)
+);

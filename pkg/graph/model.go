@@ -463,3 +463,13 @@ type Merge struct {
 	FirstScan      int64
 	Expected       float64
 }
+
+// CollectorSent is what one exporter of an OTel Collector pipeline had sent
+// by a scan (S11 item 4): its otelcol_exporter_sent_* counter for one
+// signal (logs, traces or metrics), from the Collector's own metrics.
+type CollectorSent struct {
+	Pipeline string
+	Exporter string
+	Signal   string
+	Sent     float64
+}
