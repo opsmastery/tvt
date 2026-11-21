@@ -105,3 +105,16 @@ func TestOtelcolDedupValidate(t *testing.T) {
 		t.Errorf("%+v\n%s", r, out)
 	}
 }
+
+// TestOtelcolNoService: a config with no service section is refused, not
+// a crash (value used to dereference the missing section).
+func TestOtelcolNoService(t *testing.T) {
+	src := []byte("processors:\n  batch: {}\nexporters:\n  file/cold:\n")
+	if _, err := OtelcolDedup(src, []string{"logs"}, &dedup); err == nil {
+		t.Error("dedup: accepted")
+	}
+	tr := tier
+	if _, err := OtelcolTier(src, "logs", &tr); err == nil {
+		t.Error("tier: accepted")
+	}
+}
