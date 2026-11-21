@@ -12,7 +12,8 @@ while read -r _local_ref local_sha _remote_ref _remote_sha; do
 done
 $pushes || exit 0
 
-go test -timeout 5m ./... >/dev/null || {
+# cmd/tvt alone takes 6 minutes on a loaded laptop, past the old 5m cap.
+go test -timeout 15m ./... >/dev/null || {
 	echo "pre-push: go test ./... failed; run it to see why" >&2
 	exit 1
 }

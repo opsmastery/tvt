@@ -15,7 +15,7 @@ From Sprint 3 on, sprints are two working days, each with one theme. They're ord
 | S9 | [s09](s09-owner-workflow.md) | Owner workflow | A lab drop goes from draft to ready only after a recorded confirmation, and changing its evidence reopens it | Planned |
 | S10 | [s10](s10-reduce-before-drop.md) | Reduce before drop | For each lab finding, `propose` picks the least-lossy action that `check` accepts | In progress: items 1, 2 (Prometheus writer), 3, 5 and 6 done; open: sampling (item 4), attribute measurement (item 7), the Alloy and Collector tenant writers |
 | S11 | [s11](s11-savings-ledger.md) | Savings ledger | The MVP gate is rehearsed on the lab: merge a tvt PR, and the next scan records measured savings | In progress: the ledger and Collector rates done; the lab rehearsal waits for Jason |
-| S12 | [s12](s12-release-candidate.md) | Release candidate | `v0.1.0-rc1` is tagged, and the install guide works on a clean machine | In progress: items 1–6 done |
+| S12 | [s12](s12-release-candidate.md) | Release candidate | `v0.1.0-rc1` is tagged, and the install guide works on a clean machine | Done Nov 21: rc1 released and verified on a fresh Linux container and macOS; a fresh macOS user and the browser look wait for Jason |
 | S13 | [s13](s13-alert-noise-1.md) | Alert noise I | Lab alert findings match ground truth | Planned |
 | S14 | [s14](s14-alert-noise-2.md) | Alert noise II | Each seeded noisy alert lands in the right class | Planned |
 | S15 | [s15](s15-agents-and-history.md) | Agents and history | `--as-of` shows each lab state with no leakage, and MCP and CLI answers match | Planned |
