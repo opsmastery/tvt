@@ -1,6 +1,6 @@
 # S12: release candidate
 
-**Status:** In progress (Nov 21). Items 1 to 6 are done:
+**Status:** Done (Nov 21), except two clean-machine checks that need Jason (below). `v0.1.0-rc1` is tagged and released. Items 1 to 6 are done:
 
 - **Item 1 (#170).** Reproducible builds: `-trimpath`, and the commit's time in `mod_timestamp`, `version.Date` and archive mtimes. CI's `reproducible` job builds every target twice from two checkout paths and diffs the hashes. Dependabot runs weekly for Go modules and actions. The release checklist is `docs/release.md`. Cosign signing, govulncheck and gitleaks were already in place.
 - **Item 2 (#170).** `SECURITY.md` and `docs/install.md`.
@@ -15,7 +15,16 @@ Two Dependabot PRs wait:
 - #173 bumps `prometheus/common` to v0.74.0, which raises the `go` directive to 1.27.3, against ADR 0004's Go 1.26 floor.
 - #172 moves the actions to new majors, including cosign-installer v4. The release path isn't exercised in PR CI, so it waits until after the tag.
 
-The done-when's clean-machine install is checked in a fresh Linux container on the Mac mini. A fresh macOS user needs Jason: creating a user account is a system change.
+**The rc1 release (Nov 21), checked by docs/install.md and docs/release.md:**
+
+- The release workflow passed and published a pre-release with 6 archives, `checksums.txt`, `.sig` and `.pem`.
+- **Fresh Linux** (a new `ubuntu:24.04` container on the Mac mini, arm64): cosign (latest, installed in the container) printed `Verified OK` for `checksums.txt`; `sha256sum --ignore-missing -c` passed; `tvt version` printed `tvt 0.1.0-rc1 (commit befb021, built 2026-11-21T14:31:18Z)`; `tvt report` rendered the live lab's latest scan to `report-linux.html` (201 KB). Cosign 3 calls `--certificate` and `--signature` deprecated in favour of `--bundle`; they still verify.
+- **macOS** (the Mac mini's existing user, arm64, and the MacBook, amd64): checksums passed, `tvt version` matched, and `tvt report` wrote the same 201 KB page.
+- **Reproducible:** `goreleaser build --clean --single-target` on a clean worktree of the tag gave the release's darwin/amd64 binary byte for byte (`ad9cf810...`).
+
+Still open, for Jason:
+- A **fresh macOS user**: creating an account is a system change.
+- **Opening the HTML report in a browser** on both machines: the pages were written and are in `~/rc1-verify` on the Mac mini (`report-mac.html`, `report-linux.html`), but nobody has looked at them yet.
 
 **Done when:** `v0.1.0-rc1` is tagged, and the install guide works on a clean machine.
 
