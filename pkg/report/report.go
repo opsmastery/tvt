@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -489,6 +490,19 @@ func Build(in Input, limit int) Report {
 		rec.Expected = expected(rec, costs[rec.Signal.ID], totalStreamBytes)
 		r.Recommendations = append(r.Recommendations, rec)
 	}
+	// Level tiers (S10 item 3) take a whole-stream reroute's place: the
+	// tier is less lossy (ADR 0010).
+	r.LevelTiers = levelTierRows(in, in.Signals, refs, consumers, costs)
+	if tiers := levelTierRecs(r.LevelTiers, signals, consumers, gs, listed, in.Scan); len(tiers) > 0 {
+		tiered := map[string]bool{}
+		for _, rec := range tiers {
+			tiered[rec.Signal.ID] = true
+		}
+		r.Recommendations = slices.DeleteFunc(r.Recommendations, func(rec Recommendation) bool {
+			return rec.Action == ActionReroute && tiered[rec.Signal.ID]
+		})
+		r.Recommendations = append(r.Recommendations, tiers...)
+	}
 	r.Services = services(in.Signals, r.Recommendations, refs, costs)
 	sort.SliceStable(r.Recommendations, func(i, j int) bool {
 		a, b := r.Recommendations[i], r.Recommendations[j]
@@ -512,7 +526,6 @@ func Build(in Input, limit int) Report {
 		}
 	}
 	r.Intervals = intervalRows(in, refs, consumers, costs)
-	r.LevelTiers = levelTierRows(in, in.Signals, refs, consumers, costs)
 	r.Pipelines = pipelineTargets(r.Recommendations, r.Confirm, in.PipelineTargets, in.StreamVolumes, gs)
 	r.Overflow = overflow(in.OverflowFindings, r.Recommendations, r.Confirm, gs)
 	r.Totals.Overflow = len(r.Overflow)
@@ -535,7 +548,7 @@ func Build(in Input, limit int) Report {
 	}
 	for _, rec := range r.Recommendations {
 		r.Totals.Recommendations++
-		if rec.Action == ActionReroute {
+		if rec.Action == ActionReroute || rec.Action == ActionLevelTier {
 			r.Totals.StreamSavings += rec.Savings.Monthly
 		} else {
 			r.Totals.MetricSavings += rec.Savings.Monthly

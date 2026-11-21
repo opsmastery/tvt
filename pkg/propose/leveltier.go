@@ -322,3 +322,55 @@ func flowItems(p *yaml.Node, key, pipeline string) ([]string, error) {
 	}
 	return out, nil
 }
+
+// OtelcolLogsShipper is the logs pipeline a level tier goes in: the one
+// logs pipeline that exports to an exporter (not only to connectors) and
+// isn't tvt's tier pipeline or a cold copy (exporting only to cold). ""
+// when the file has none; an error when it has several, since tvt won't
+// guess which carries the stream.
+func OtelcolLogsShipper(src []byte, cold string) (string, error) {
+	root, err := otelRoot(src)
+	if err != nil {
+		return "", err
+	}
+	connectors := map[string]bool{}
+	if cs := value(root, "connectors"); cs != nil && cs.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(cs.Content); i += 2 {
+			connectors[cs.Content[i].Value] = true
+		}
+	}
+	all := value(value(root, "service"), "pipelines")
+	if all == nil || all.Kind != yaml.MappingNode {
+		return "", nil
+	}
+	var found []string
+	for i := 0; i+1 < len(all.Content); i += 2 {
+		name := all.Content[i].Value
+		if (name != "logs" && !strings.HasPrefix(name, "logs/")) || name == OtelcolTierPipeline {
+			continue
+		}
+		exps, err := flowItems(all.Content[i+1], "exporters", name)
+		if err != nil {
+			return "", err
+		}
+		ships, coldOnly := false, len(exps) > 0
+		for _, e := range exps {
+			if !connectors[e] {
+				ships = true
+			}
+			if e != cold {
+				coldOnly = false
+			}
+		}
+		if ships && !coldOnly {
+			found = append(found, name)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return "", nil
+	case 1:
+		return found[0], nil
+	}
+	return "", fmt.Errorf("propose: logs pipelines %s all ship to exporters; tvt won't guess which carries the stream", strings.Join(found, ", "))
+}
