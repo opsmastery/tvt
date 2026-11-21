@@ -53,6 +53,7 @@ var page = template.Must(template.New("report.html.tmpl").Funcs(template.FuncMap
 	"inc":       func(i int) int { return i + 1 },
 	"join":      strings.Join,
 	"why":       WhyCommand,
+	"sensitive": sensitiveText,
 	"zeroreads": func() string { return ZeroreadsURL },
 }).ParseFS(templates, "templates/report.html.tmpl"))
 
@@ -85,4 +86,19 @@ func RenderHTMLFromJSON(w io.Writer, b []byte) error {
 // shell.
 func WhyCommand(id string) string {
 	return "tvt why '" + strings.ReplaceAll(id, "'", `'\''`) + "'"
+}
+
+// sensitiveText names a sensitive-content kind for the page.
+func sensitiveText(kind string) string {
+	switch kind {
+	case SensitivePrompt:
+		return "prompts or completions"
+	case SensitiveResponse:
+		return "request or response bodies"
+	case SensitiveEmail:
+		return "email addresses"
+	case SensitiveHostPath:
+		return "host paths"
+	}
+	return kind
 }

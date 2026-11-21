@@ -193,6 +193,10 @@ type Recommendation struct {
 	// KeepDays is a retention_tier row's history in the tier tenant (S10
 	// item 2).
 	KeepDays int `json:"keep_days,omitempty"`
+	// Sensitive is what an unread label or attribute's name suggests it
+	// holds (S12 item 5): prompt, response, email or host_path. tvt read
+	// only the name and size; the owner checks the values.
+	Sensitive string `json:"sensitive,omitempty"`
 	// DismissedReason says why, for a dismissed recommendation.
 	DismissedReason string `json:"dismissed_reason,omitempty"`
 	// Review says why an owner's earlier decision no longer holds (S9
@@ -561,6 +565,7 @@ func Build(in Input, limit int) Report {
 	r.Intervals = intervalRows(in, refs, consumers, costs)
 	r.Pipelines = pipelineTargets(r.Recommendations, r.Confirm, in.PipelineTargets, in.StreamVolumes, gs)
 	r.Overflow = overflow(in.OverflowFindings, r.Recommendations, r.Confirm, gs)
+	markSensitive(r.Recommendations)
 	r.Totals.Overflow = len(r.Overflow)
 	r.Decisions = applyDecisions(&r, in.Decisions, in.Signals, in.Scan.StartedAt)
 	if limit > 0 && len(r.Recommendations) > limit {
