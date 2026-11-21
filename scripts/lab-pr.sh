@@ -22,8 +22,14 @@
 # The Keychain only gives tokens to the logged-in session, not to ssh, so
 # over ssh run it as a launchd job. macOS also keeps launchd jobs out of
 # external volumes: then point TVT_LAB_DIR at a clone in your home folder
-# and TVT_LAB_LOGS at the lab's logs copied there (grafana.log*,
-# prometheus/query.log, loki.log); the export is skipped.
+# and TVT_LAB_LOGS at a folder there. The logs are copied into it straight
+# from the containers (podman exec and podman logs, no external volume)
+# just before the scan, and while the scan waits for its probe queries the
+# newest probe lines are copied every 5 seconds into probes files beside
+# them, so the probe proves the copy is live (S12 test plan: the copies
+# used to be made by hand, hours old, and both query logs came out
+# unproven). TVT_LAB_LOKI_EXCLUDE, a grep -E pattern, leaves matching Loki
+# query lines out (ad hoc queries that would count as reads).
 #
 # TVT_LABEL_TOP (default 2000) is the scan's --label-top: the lab has about
 # 1,550 metrics, and S10's bucket and label findings need per-label
@@ -33,12 +39,41 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 LAB="${TVT_LAB_DIR:-$HERE/../tvt-lab}"
-CONFIG="${TVT_LAB_CONFIG:-$HERE/testdata/bench/writers-2/tvt-lab.yaml}"
+# The lab's own tvt.yaml (tvt-lab #47 on) when it has one; the frozen
+# fixture config before that.
+CONFIG="${TVT_LAB_CONFIG:-}"
+if [[ -z "$CONFIG" ]]; then
+  if [[ -f "$LAB/tvt.yaml" ]]; then CONFIG="$LAB/tvt.yaml"; else CONFIG="$HERE/testdata/bench/writers-2/tvt-lab.yaml"; fi
+fi
 OUT="${TVT_LAB_OUT:-$HOME/tvt-lab-pr/$(date -u +%Y%m%dT%H%M%SZ)}"
 REPO=github.com/Opsmastery-Summit/tvt-lab
 export PATH="/opt/podman/bin:/usr/local/go/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 
 token() { security find-generic-password -s tvt-lab -a "$1" -w 2>/dev/null; }
+
+# copy_logs DIR: the lab's logs from its containers.
+copy_logs() {
+  local d="$1"
+  mkdir -p "$d/prometheus"
+  podman exec tvt-lab-prometheus-1 cat /var/log/prometheus/query.log > "$d/prometheus/query.log.new" &&
+    mv "$d/prometheus/query.log.new" "$d/prometheus/query.log"
+  podman exec tvt-lab-grafana-1 sh -c 'cd /var/lib/grafana/logs && tar cf - grafana.log*' | tar xf - -C "$d"
+  podman logs --since 720h tvt-lab-loki-1 2>&1 | grep 'caller=metrics.go' |
+    { if [[ -n "${TVT_LAB_LOKI_EXCLUDE:-}" ]]; then grep -v -E "$TVT_LAB_LOKI_EXCLUDE"; else cat; fi; } > "$d/loki.log.new" || true
+  mv "$d/loki.log.new" "$d/loki.log"
+  : > "$d/prometheus/probes.log"; : > "$d/loki-probes.log"
+}
+
+# copy_probes DIR: the newest probe lines, every 5 s, until killed.
+copy_probes() {
+  local d="$1"
+  while sleep 5; do
+    podman exec tvt-lab-prometheus-1 tail -n 2000 /var/log/prometheus/query.log 2>/dev/null | grep -F tvt_query_log_probe > "$d/prometheus/probes.log.new" || true
+    mv "$d/prometheus/probes.log.new" "$d/prometheus/probes.log"
+    podman logs --since 5m tvt-lab-loki-1 2>&1 | grep 'caller=metrics.go' | grep -F 'source=tvt-probe' > "$d/loki-probes.log.new" || true
+    mv "$d/loki-probes.log.new" "$d/loki-probes.log"
+  done
+}
 
 check() {
   local ok=0 a accounts=(grafana-token)
@@ -62,8 +97,14 @@ run() {
   mkdir -p "$OUT"
   # The lab's logs, as tvt's e2e suite reads them: Grafana's router log out
   # of its container, Loki's query lines from its container log.
-  local logs="${TVT_LAB_LOGS:-}"
-  if [[ -z "$logs" ]]; then
+  local logs="${TVT_LAB_LOGS:-}" probes=()
+  if [[ -n "$logs" ]]; then
+    copy_logs "$logs"
+    copy_probes "$logs" &
+    TAILER=$!
+    trap 'kill "${TAILER:-}" 2>/dev/null || true' EXIT
+    probes=(--prom-query-log "$logs/prometheus/probes.log" --loki-query-log "$logs/loki-probes.log")
+  else
     logs="$LAB/lab-logs"
     (cd "$LAB" && make -s export-logs >/dev/null)
     (cd "$LAB" && LAB_LOGS="$LAB/lab-logs" podman compose logs --no-log-prefix --since 720h loki 2>&1 | grep 'caller=metrics.go' > "$logs/loki.log" || true)
@@ -74,7 +115,7 @@ run() {
     --grafana http://localhost:3000 --prom http://localhost:9090 --loki http://localhost:3100 \
     --grafana-log "$logs/grafana.log*" \
     --prom-query-log "$logs/prometheus/query.log" \
-    --loki-query-log "$logs/loki.log" \
+    --loki-query-log "$logs/loki.log" ${probes[@]+"${probes[@]}"} \
     --label-top "${TVT_LABEL_TOP:-2000}"
   ./bin/tvt report --db "$OUT/tvt.db" --config "$CONFIG" --label-drops --top 0 --json "$OUT/report.json" --html "$OUT/report.html"
   GITHUB_TOKEN="$gh" ./bin/tvt propose --db "$OUT/tvt.db" --config "$CONFIG" --report "$OUT/report.json" \
