@@ -48,4 +48,17 @@ func TestBucketRows(t *testing.T) {
 	if e := expected(r, costs[r.Signal.ID], 0); e.SeriesAfter != 50 || !strings.Contains(e.Statements[0], "bucketed to its class") {
 		t.Errorf("expected %+v", e)
 	}
+	// Measured classes (the lab's seed): 5 values, but only 2xx, 4xx and
+	// 5xx, so bucketing still merges series where the estimate of at most
+	// 5 classes would have seen nothing to save.
+	costs["prom:label:http_requests_total:code_few"] = graph.Cost{DistinctValues: 5, Classes: 3, ActiveSeries: 40, MonthlyCost: 1}
+	rows = bucketRows(signals, refs, consumers, costs, newGaps(nil, nil), map[string]bool{}, Scan{Currency: "USD"})
+	if len(rows) != 2 {
+		t.Fatalf("%d rows, want code and code_few: %+v", len(rows), rows)
+	}
+	for _, r := range rows {
+		if r.Signal.Name == "code_few" && (r.Savings.Monthly != 1*(1-3.0/5) || !strings.Contains(r.Claim, "5 values to at most 3 classes")) {
+			t.Errorf("code_few %+v", r)
+		}
+	}
 }
