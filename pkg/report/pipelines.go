@@ -57,6 +57,10 @@ func pipelineTargets(recs []Recommendation, confirm []Confirm, targets []graph.P
 	// set returns the row's pipeline, note and, when unmapped, its gap.
 	set := func(id string) (string, string, *Gap) {
 		t, ok := by[id]
+		if sel, stream := strings.CutPrefix(id, "loki:stream:"); !ok && stream {
+			// A stream from the volume API is mapped by its label set.
+			t, ok = by["stream:"+sel]
+		}
 		if !ok {
 			t = graph.PipelineTarget{Subject: id, Note: "not mapped by the scan"}
 		}

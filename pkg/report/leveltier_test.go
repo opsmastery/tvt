@@ -120,3 +120,49 @@ func TestManifestWarnPlus(t *testing.T) {
 		}
 	}
 }
+
+// TestLevelTierRecommendation: an unheld level tier is a recommendation
+// on the stream's signal, and it takes the place of the whole-stream
+// reroute tvt would otherwise propose (ADR 0010: less lossy first). The
+// stream's pipeline comes from its label set.
+func TestLevelTierRecommendation(t *testing.T) {
+	in, costs := levelTierInput()
+	const agent = `{service_name="coding-agent"}`
+	id := "loki:stream:" + agent
+	in.Signals[0].Class = "candidate"
+	in.Signals[0].Owner = "agents-team"
+	for sid, c := range costs {
+		c.SignalID = sid
+		in.Costs = append(in.Costs, c)
+	}
+	in.Scores = []graph.Score{{SignalID: id, MonthlyCost: 2, Confidence: 1, Priority: 2, Strongest: "none"}}
+	in.Scan.Currency = "USD"
+	in.PipelineTargets = []graph.PipelineTarget{{Subject: "stream:" + agent, Pipeline: "otelcol-agent"}}
+	r := Build(in, 0)
+	var tier *Recommendation
+	for i, rec := range r.Recommendations {
+		if rec.Signal.ID == id && rec.Action == ActionReroute {
+			t.Errorf("the whole-stream reroute stayed beside the tier: %+v", rec)
+		}
+		if rec.Action == ActionLevelTier {
+			tier = &r.Recommendations[i]
+		}
+	}
+	if tier == nil {
+		t.Fatalf("no level_tier recommendation: %+v", r.Recommendations)
+	}
+	if tier.ID != "level_tier:"+id || tier.Pipeline != "otelcol-agent" || !tier.Proposable || tier.Owner != "agents-team" ||
+		math.Abs(tier.Savings.Monthly-1.92) > 1e-9 || tier.EvidenceHash == "" || !strings.Contains(tier.Claim, "96.0% of "+agent) {
+		t.Errorf("tier %+v", *tier)
+	}
+	if math.Abs(r.Totals.StreamSavings-1.92) > 1e-9 {
+		t.Errorf("stream savings %v, want the tier's 1.92", r.Totals.StreamSavings)
+	}
+	// Held, there's no recommendation and the reroute stays.
+	in.Signals[0].Record = "listed in records.streams"
+	for _, rec := range Build(in, 0).Recommendations {
+		if rec.Action == ActionLevelTier {
+			t.Errorf("a held tier was recommended: %+v", rec)
+		}
+	}
+}
