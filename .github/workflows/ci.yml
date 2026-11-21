@@ -44,6 +44,40 @@ jobs:
           version: "~> v2"
           args: check
 
+  reproducible:
+    # Build every release target twice, from two checkouts in different
+    # directories, and fail if any binary differs (S12 item 1).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: a
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: b/nested
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: a/go.mod
+          cache: false
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: build --snapshot --clean
+          workdir: a
+      - run: go clean -cache
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: build --snapshot --clean
+          workdir: b/nested
+      - run: |
+          (cd a/dist && find . -type f -name 'tvt*' | sort | xargs sha256sum) > a.sum
+          (cd b/nested/dist && find . -type f -name 'tvt*' | sort | xargs sha256sum) > b.sum
+          cat a.sum
+          diff a.sum b.sum
+
   vulncheck:
     runs-on: ubuntu-latest
     steps:
