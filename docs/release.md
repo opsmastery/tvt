@@ -1,10 +1,10 @@
 # Release checklist
 
-A `v*` tag runs `.github/workflows/release.yml`: lint, the race suite, then goreleaser builds archives for Linux, macOS and Windows (amd64 and arm64), writes `checksums.txt`, signs it with cosign (keyless, through the workflow's GitHub OIDC identity) and publishes the GitHub release. A tag with a suffix (`v0.1.0-rc1`) publishes a pre-release.
+A `v*` tag runs `.github/workflows/release.yml`: lint, the race suite, then goreleaser builds archives for Linux, macOS and Windows (amd64 and arm64), writes `checksums.txt`, signs it with cosign (keyless, through the workflow's GitHub OIDC identity) into `checksums.txt.sigstore.json` and publishes the GitHub release. A tag with a suffix (`v0.1.0-rc1`) publishes a pre-release.
 
 ## Before the tag
 
-1. **main is green.** Every job on the last main commit passed: `test`, `benchmark`, `reproducible`, `release-config`, `vulncheck`, `secrets`.
+1. **main is green.** Every job on the last main commit passed: `test`, `benchmark`, `reproducible`, `release-config`, `vulncheck`, `secrets`, and `release-dry-run` on the last PR that touched the release path.
 2. **No open Dependabot or govulncheck finding** that affects a shipped package. Merge or dismiss each with a reason.
 3. **The benchmark baseline is current.** `make bench` passes, and any change to `testdata/bench/baseline.json` since the last tag was reviewed on purpose.
 4. **The live lab agrees.** On the Mac mini, `./scripts/lab-pr.sh patch` runs a scan, a report and a propose against the lab without error, and `tvt check` passes the patch. Note anything new in its gaps.
