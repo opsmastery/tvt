@@ -814,11 +814,16 @@ var v24Drops = append(append([]string{}, v25Drops...),
 	`ALTER TABLE pipeline_targets DROP COLUMN jobs`,
 )
 
+// v27Drops turns a current database's tables back into version 26's.
+var v27Drops = []string{
+	`ALTER TABLE stream_volumes DROP COLUMN levels`,
+}
+
 // v26Drops turns a current database's tables back into version 25's.
-var v26Drops = []string{
+var v26Drops = append(append([]string{}, v27Drops...),
 	`ALTER TABLE signals DROP COLUMN owner_source`,
 	`ALTER TABLE signals DROP COLUMN owner_inferred`,
-}
+)
 
 // v25Drops turns a current database's tables back into version 24's.
 var v25Drops = append(append([]string{}, v26Drops...),
@@ -1557,5 +1562,36 @@ func TestPipelineJobsUpgrade(t *testing.T) {
 	defer s2.Close()
 	if ts, err = s2.PipelineTargets(ctx, id); err != nil || len(ts) != 1 || ts[0].Jobs != nil || ts[0].Pipeline != "scrape" {
 		t.Fatalf("upgraded targets %+v, %v: want one, with no jobs", ts, err)
+	}
+}
+
+// TestStreamLevels (schema 27, S10 item 3): a stream's per-level bytes
+// round-trip, a stream without them reads back nil, and a version 26
+// database gains the column, empty for its rows.
+func TestStreamLevels(t *testing.T) {
+	s, path := open(t)
+	id := scan(t, s, t0, func(sc *Scan) {
+		must(t, sc.PutStreamVolume(ctx, graph.StreamVolume{Selector: `{service_name="coding-agent"}`, BytesPerDay: 1000,
+			Levels: map[string]int64{"debug": 700, "info": 290, "warn": 10}}))
+		must(t, sc.PutStreamVolume(ctx, graph.StreamVolume{Selector: `{app="shop", level="info"}`, BytesPerDay: 50}))
+	})
+	vs, err := s.StreamVolumes(ctx, id)
+	must(t, err)
+	if len(vs) != 2 || vs[1].Levels["debug"] != 700 || len(vs[1].Levels) != 3 || vs[0].Levels != nil {
+		t.Fatalf("volumes %+v", vs)
+	}
+	s.Close()
+	raw, err := sql.Open("sqlite", path)
+	must(t, err)
+	for _, q := range append(append([]string{}, v27Drops...), `UPDATE meta SET value = '26' WHERE key = 'schema_version'`) {
+		_, err := raw.Exec(q)
+		must(t, err)
+	}
+	raw.Close()
+	s2, err := Open(ctx, path)
+	must(t, err)
+	defer s2.Close()
+	if vs, err = s2.StreamVolumes(ctx, id); err != nil || len(vs) != 2 || vs[1].Levels != nil {
+		t.Fatalf("upgraded volumes %+v, %v: want both, no levels", vs, err)
 	}
 }

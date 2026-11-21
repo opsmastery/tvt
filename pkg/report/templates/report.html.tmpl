@@ -136,6 +136,22 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </div>
 {{end}}
 
+{{if .LevelTiers}}
+<h2>Level tiers</h2>
+<p class="muted">Streams whose level isn't a label, with lines below warn that can go to the cheapest tier. Records stay hot whatever their level, and so does any line matching the error guard. A reader whose query may see info or debug lines holds the stream back. Savings are upper bounds: record and guarded lines at those levels stay.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Stream</th><th class="num">Below warn</th><th>Readers</th><th>Held</th><th class="num">Saves / month</th></tr></thead>
+<tbody>{{$cur := .Scan.Currency}}
+{{range .LevelTiers}}<tr><td><code>{{.Stream}}</code><br><span class="muted">{{bytes .BytesPerDay}}/day{{range $l, $b := .Levels}}, {{$l}} {{bytes $b}}{{end}}</span></td>
+<td class="num">{{pct .Share}}</td>
+<td>{{range .Readers}}{{.Consumer}} <span class="muted">({{.Sees}})</span><br>{{else}}<span class="muted">none</span>{{end}}</td>
+<td>{{if .Held}}{{.Held}}{{else}}<span class="muted">no</span>{{end}}</td><td class="num">{{money .Monthly $cur}}</td></tr>
+{{end}}</tbody>
+</table>
+</div>
+{{end}}
+
 <h2>Line-level findings</h2>
 <p class="muted">Line patterns inside a stream worth cutting, from Loki's pattern API over its last few hours. Savings are estimates (patterns count lines, not bytes). tvt never writes a line filter: <a href="{{zeroreads}}">zeroreads</a> proves which lines nothing reads and generates the cut.</p>
 <div class="table-wrap">

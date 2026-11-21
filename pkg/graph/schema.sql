@@ -186,6 +186,9 @@ CREATE TABLE IF NOT EXISTS stream_volumes (
     scan_id       INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
     selector      TEXT NOT NULL,
     bytes_per_day INTEGER NOT NULL,
+    -- S10 item 3 (v27): bytes per day per line level (detected_level),
+    -- JSON, for streams whose level isn't a label; '' when not measured.
+    levels        TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (scan_id, selector)
 );
 

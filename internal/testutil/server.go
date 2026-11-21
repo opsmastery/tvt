@@ -39,6 +39,12 @@ func forbidden(r *http.Request) bool {
 			return false
 		}
 	}
+	// Per-level bytes of one stream (S10 item 3): the one LogQL metric
+	// query tvt sends, in exactly its shape and tagged as tvt's.
+	if strings.HasSuffix(path, "/loki/api/v1/query") && !strings.Contains(path, "/api/datasources/proxy/") &&
+		collect.IsLokiLevelQuery(r.URL.Query().Get("query")) && r.Header.Get("X-Query-Tags") == collect.LevelTag {
+		return false
+	}
 	// Usage Insights (Grafana Cloud's view events) is read through the
 	// data source proxy, tagged as tvt's own; nothing else may be.
 	if strings.HasPrefix(path, "/api/datasources/proxy/uid/"+collect.UsageInsightsUID+"/loki/api/v1/query_range") &&
@@ -60,7 +66,8 @@ func forbidden(r *http.Request) bool {
 
 // Serve starts a test server for h that fails the test on any request
 // other than a GET and on any request to a query endpoint (invariant 4:
-// read-only, no PromQL or LogQL run). Such requests get 405 or 403 and never
+// read-only, no PromQL or LogQL run beyond the probe marker and the
+// per-level bytes query). Such requests get 405 or 403 and never
 // reach h. The server is closed when the test ends.
 func Serve(t testing.TB, h http.Handler) *httptest.Server {
 	t.Helper()
