@@ -27,7 +27,7 @@ func TestReadMerges(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	git(nil, "init", "-q")
+	git(nil, "init", "-q", "-b", "main")
 	pipes := []config.Pipeline{{Name: "p", Repo: "github.com/o/pipes", Checkout: dir}, {Name: "q", Repo: "github.com/o/pipes", Checkout: dir}}
 	ctx := context.Background()
 	if ms, errs := readMerges(ctx, pipes); len(ms) != 0 || len(errs) != 0 {
@@ -66,5 +66,17 @@ func TestReadMerges(t *testing.T) {
 	ms, errs = readMerges(ctx, pipes)
 	if len(errs) != 0 || len(ms) != 2 || ms[0].ProposalScan != 7 {
 		t.Errorf("on the PR branch with origin HEAD: merges %+v, errs %v", ms, errs)
+	}
+
+	// The PR merged with a merge commit an hour after its branch committed
+	// the proposal: the merge time counts.
+	mergedAt := at.Add(26 * time.Hour)
+	dates := []string{"GIT_COMMITTER_DATE=" + mergedAt.Format(time.RFC3339), "GIT_AUTHOR_DATE=" + mergedAt.Format(time.RFC3339)}
+	git(nil, "checkout", "-q", "main")
+	git(dates, "merge", "-q", "--no-ff", "-m", "Merge tvt/propose", "tvt/propose")
+	git(nil, "update-ref", "refs/remotes/origin/main", "main")
+	ms, errs = readMerges(ctx, pipes)
+	if len(errs) != 0 || len(ms) != 1 || ms[0].ProposalScan != 9 || !ms[0].MergedAt.Equal(mergedAt) {
+		t.Errorf("merge commit: merges %+v, errs %v; want scan 9 merged at %v", ms, errs, mergedAt)
 	}
 }
