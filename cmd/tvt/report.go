@@ -19,6 +19,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
 	"github.com/Opsmastery-Summit/tvt/pkg/cost"
+	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
@@ -177,6 +178,18 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 			fmt.Fprintf(out, " and up to %.2f in streams", r.Totals.StreamSavings)
 		}
 	}
+	if l := r.Ledger; l != nil {
+		measured := 0
+		for _, row := range l.Rows {
+			if row.Status == report.LedgerMeasured {
+				measured++
+			}
+		}
+		fmt.Fprintf(out, "; ledger: %d merged changes measured, saving %.2f/month (claimed %.2f)", measured, l.Saved, l.Expected)
+		if l.Pending > 0 {
+			fmt.Fprintf(out, ", %d waiting for a scan after their merge", l.Pending)
+		}
+	}
 	reasons := make([]string, 0, len(r.Held))
 	for reason := range r.Held {
 		reasons = append(reasons, reason)
@@ -318,6 +331,9 @@ func readLatest(ctx context.Context, path string) (report.Input, store.ScanInfo,
 	if in.LineFindings, err = st.LineFindings(ctx, info.ID); err != nil {
 		return in, info, err
 	}
+	if err := readLedger(ctx, st, info, &in); err != nil {
+		return in, info, err
+	}
 	reads, err := st.LastReads(ctx)
 	if err != nil {
 		return in, info, err
@@ -327,6 +343,57 @@ func readLatest(ctx context.Context, path string) (report.Input, store.ScanInfo,
 			LastRead: report.LastRead{Consumer: r.ConsumerID, Actor: r.Actor, At: r.At}})
 	}
 	return in, info, nil
+}
+
+// readLedger loads the merged tvt changes and the costs of the scans that
+// measure them (S11): for each merge, its proposal's scan, the last scan
+// before it and the first after it, plus the current scan.
+func readLedger(ctx context.Context, st *store.Store, info store.ScanInfo, in *report.Input) error {
+	merges, err := st.Merges(ctx)
+	if err != nil || len(merges) == 0 {
+		return err
+	}
+	scans, err := st.Scans(ctx)
+	if err != nil {
+		return err
+	}
+	byID := map[int64]store.ScanInfo{}
+	for _, s := range scans {
+		byID[s.ID] = s
+	}
+	need := map[int64]bool{info.ID: true}
+	for _, m := range merges {
+		if s, ok := byID[m.ProposalScan]; ok && s.StartedAt.Before(m.MergedAt) {
+			need[m.ProposalScan] = true
+		}
+		var before, after int64
+		for _, s := range scans { // oldest first
+			if s.StartedAt.Before(m.MergedAt) {
+				before = s.ID
+			} else if after == 0 && s.StartedAt.After(m.MergedAt) {
+				after = s.ID
+			}
+		}
+		need[before], need[after] = true, true
+	}
+	delete(need, 0)
+	in.Merges = merges
+	in.History = map[int64]report.ScanCosts{}
+	for id := range need {
+		cs, err := st.Costs(ctx, id)
+		if err != nil {
+			return err
+		}
+		sc := report.ScanCosts{StartedAt: byID[id].StartedAt, Costs: map[string]graph.Cost{}}
+		if sh := byID[id].SelfHosted; sh != nil {
+			sc.Retention = sh.Retention
+		}
+		for _, c := range cs {
+			sc.Costs[c.SignalID] = c
+		}
+		in.History[id] = sc
+	}
+	return nil
 }
 
 // writeFileAtomic writes b to path through a temporary file in the same
