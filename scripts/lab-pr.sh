@@ -24,6 +24,11 @@
 # external volumes: then point TVT_LAB_DIR at a clone in your home folder
 # and TVT_LAB_LOGS at the lab's logs copied there (grafana.log*,
 # prometheus/query.log, loki.log); the export is skipped.
+#
+# TVT_LABEL_TOP (default 2000) is the scan's --label-top: the lab has about
+# 1,550 metrics, and S10's bucket and label findings need per-label
+# cardinality on small metrics such as coding_agent_api_requests_total,
+# which the scan's default of the 50 largest leaves out.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -69,7 +74,8 @@ run() {
     --grafana http://localhost:3000 --prom http://localhost:9090 --loki http://localhost:3100 \
     --grafana-log "$logs/grafana.log*" \
     --prom-query-log "$logs/prometheus/query.log" \
-    --loki-query-log "$logs/loki.log"
+    --loki-query-log "$logs/loki.log" \
+    --label-top "${TVT_LABEL_TOP:-2000}"
   ./bin/tvt report --db "$OUT/tvt.db" --config "$CONFIG" --label-drops --top 0 --json "$OUT/report.json" --html "$OUT/report.html"
   GITHUB_TOKEN="$gh" ./bin/tvt propose --db "$OUT/tvt.db" --config "$CONFIG" --report "$OUT/report.json" \
     --checkout "$REPO=$LAB" --validate require --output "$MODE" --dir "$OUT/proposals"
