@@ -24,6 +24,7 @@ th { font-size:12px; color:var(--muted); font-weight:600; }
 td.num, th.num { text-align:right; white-space:nowrap; }
 code { font:12px ui-monospace, SFMono-Regular, Menlo, monospace; word-break:break-all; }
 .tag { display:inline-block; font-size:11px; padding:1px 6px; border-radius:10px; border:1px solid var(--line); color:var(--muted); }
+.tag.sensitive { border-color:#b45309; color:#b45309; }
 details { margin-top:6px; }
 summary { cursor:pointer; color:var(--accent); }
 .detail { background:var(--soft); border-radius:6px; padding:8px 10px; margin-top:6px; }
@@ -77,7 +78,7 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 {{if $r.Assumptions}}<b>Assumptions</b><ul>{{range $r.Assumptions}}<li>{{.}}</li>{{end}}</ul>{{end}}
 </div></details>
 </td>
-<td class="num">{{if $r.CostFloor}}at least {{end}}{{money $r.Savings.Monthly $r.Savings.Currency}}{{if $r.Savings.Approximate}}<br><span class="muted">approx.</span>{{end}}{{if $r.CostFloor}}<br><span class="muted">overflow: a floor</span>{{end}}</td>
+<td class="num">{{if $r.CostFloor}}at least {{end}}{{money $r.Savings.Monthly $r.Savings.Currency}}{{if $r.Savings.Approximate}}<br><span class="muted">approx.</span>{{end}}{{if $r.CostFloor}}<br><span class="muted">overflow: a floor</span>{{end}}{{with $r.Sensitive}}<br><span class="tag sensitive" title="tvt read only the name and size, never values">may hold {{sensitive .}}</span>{{end}}</td>
 <td class="num">{{$r.CheckMinutes}} min</td>
 <td>{{if $r.Owner}}{{$r.Owner}}{{else}}<span class="muted">unknown</span>{{end}}{{if $r.Pipeline}}<br><span class="muted">pipeline:</span> {{if $r.Proposable}}{{$r.Pipeline}}{{else}}<b>unmapped</b><br><span class="muted">{{$r.PipelineNote}}</span>{{end}}{{end}}</td>
 </tr>
