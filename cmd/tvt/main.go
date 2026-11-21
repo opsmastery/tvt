@@ -24,10 +24,11 @@ Usage:
   tvt <command> [flags]
 
 Commands:
+  init      Test each backend's access and logs, then write tvt.yaml (read-only)
   scan      Build the usage graph from Grafana, Prometheus/Mimir and Loki (read-only)
   report    Write the ranked savings report (JSON and HTML)
   why       Show every reader of one signal and the evidence behind it
-  propose   Write drop rules into Prometheus and Alloy configs as patches
+  propose   Write the recommended changes into pipeline configs, as patches or draft PRs
   check     CI gate: fail if a config change drops data an alert, SLO or viewed dashboard uses
   confirm   Record an owner decision (confirm, dismiss, keep) in a pipeline repo
   version   Print version information
@@ -45,6 +46,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	switch cmd, rest := args[0], args[1:]; cmd {
+	case "init":
+		return cmdInit(rest, os.Stdin, stdout, stderr)
 	case "scan":
 		return cmdScan(rest, stdout, stderr)
 	case "report":
