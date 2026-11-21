@@ -15,15 +15,14 @@ gh release download "v$VERSION" --repo Opsmastery-Summit/tvt \
   --pattern 'checksums.txt*'
 ```
 
-You now have the archive, `checksums.txt`, `checksums.txt.sig` and `checksums.txt.pem`.
+You now have the archive, `checksums.txt` and `checksums.txt.sigstore.json` (the signature and its certificate in one Sigstore bundle). Releases up to v0.1.0-rc1 have `checksums.txt.sig` and `checksums.txt.pem` instead; verify those with `--certificate checksums.txt.pem --signature checksums.txt.sig` in place of `--bundle`.
 
 ## 2. Verify
 
 Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) (`brew install cosign` on macOS). Check that `checksums.txt` was signed by this repository's release workflow, then that the archive matches it:
 
 ```sh
-cosign verify-blob \
-  --certificate checksums.txt.pem --signature checksums.txt.sig \
+cosign verify-blob --bundle checksums.txt.sigstore.json \
   --certificate-identity-regexp 'https://github.com/Opsmastery-Summit/tvt/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt
