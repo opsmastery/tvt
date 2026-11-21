@@ -13,8 +13,8 @@ import (
 const ZeroreadsURL = "https://github.com/Bisman-Singh/zeroreads"
 
 // LineFinding is a line pattern worth cutting inside one stream (S5 items
-// 3-4). It is reported, never acted on: the stream itself stays whatever
-// its recommendation (or protection) says.
+// 3-4). The row itself is reported, never acted on; a repeated line in a
+// stream nothing reads also yields a collapse recommendation (S10 item 4).
 type LineFinding struct {
 	ID      string `json:"id"`
 	Kind    string `json:"kind"` // graph.LineRepeated or graph.LineHandoff
@@ -49,7 +49,7 @@ func lineFindings(fs []graph.LineFinding, currency string) []LineFinding {
 		}
 		switch f.Kind {
 		case graph.LineRepeated:
-			row.Action = fmt.Sprintf("The same line, %d times in %s (%.0f%% of the stream's bytes). Log it once: rate-limit or deduplicate it at the source, or prove and cut the repeats with zeroreads. tvt changes nothing in the stream.",
+			row.Action = fmt.Sprintf("The same line, %d times in %s (%.0f%% of the stream's bytes). Log it once: rate-limit or deduplicate it at the source, or prove and cut the repeats with zeroreads. When nothing reads the stream, tvt proposes collapsing them to one line a minute with a count (a collapse row, S10 item 4).",
 				f.Lines, humanDuration(f.Window), f.Share*100)
 		default:
 			row.Action = fmt.Sprintf("%.0f%% of the stream's bytes. Prove with zeroreads that no alert, dashboard or query filter reads these lines, and let it generate the cut. tvt still ranks and acts on whole streams only.", f.Share*100)
