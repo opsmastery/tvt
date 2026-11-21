@@ -97,7 +97,7 @@ func streamCosts(vols []collect.StreamVolume, signals []graph.Signal, at time.Ti
 		for k, val := range v.Labels {
 			ms = append(ms, parse.Matcher{Label: k, Op: parse.MatchEqual, Value: val})
 		}
-		out[i] = graph.StreamVolume{Selector: parse.CanonicalSelector(ms), BytesPerDay: perDay[i]}
+		out[i] = graph.StreamVolume{Selector: parse.CanonicalSelector(ms), BytesPerDay: perDay[i], Levels: levelsPerDay(v.Levels, perDay[i])}
 	}
 	var costs []graph.Cost
 	for _, s := range signals {
@@ -217,6 +217,25 @@ func unreadStreams(vols []collect.StreamVolume, signals []graph.Signal) []graph.
 		}
 		ids[id] = true
 		out = append(out, graph.Signal{ID: id, Kind: graph.KindStream, Name: sel, Source: "loki"})
+	}
+	return out
+}
+
+// levelsPerDay scales a stream's measured line bytes per level to its
+// bytes per day, so the levels sum to the volume (S10 item 3). The level
+// query counts line bytes only; structured metadata is assumed to split
+// the same way. nil when nothing was measured.
+func levelsPerDay(levels map[string]int64, perDay int64) map[string]int64 {
+	var total int64
+	for _, b := range levels {
+		total += b
+	}
+	if total <= 0 {
+		return nil
+	}
+	out := make(map[string]int64, len(levels))
+	for l, b := range levels {
+		out[l] = int64(float64(perDay) * float64(b) / float64(total))
 	}
 	return out
 }

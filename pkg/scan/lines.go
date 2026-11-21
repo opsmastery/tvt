@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/config"
@@ -22,6 +23,14 @@ const LineShare = 0.25
 // PatternStreams is how many of the largest streams a scan asks Loki's
 // pattern API about.
 const PatternStreams = 10
+
+// LevelStreams is how many of the largest streams with no level label a
+// scan measures per level (S10 item 3), one tagged query each; LevelWindow
+// is the range each query sums.
+const (
+	LevelStreams = 10
+	LevelWindow  = time.Hour
+)
 
 // variableBytes is the length assumed for each <_> field when estimating
 // a pattern's bytes: Loki's patterns say where a field is, not how long.
