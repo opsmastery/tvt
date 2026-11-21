@@ -814,10 +814,15 @@ var v24Drops = append(append([]string{}, v25Drops...),
 	`ALTER TABLE pipeline_targets DROP COLUMN jobs`,
 )
 
-// v30Drops turns a current database's tables back into version 29's.
-var v30Drops = []string{
-	`DROP TABLE collector_sent`,
+// v31Drops turns a current database's tables back into version 30's.
+var v31Drops = []string{
+	`DROP TABLE stream_attrs`,
 }
+
+// v30Drops turns a current database's tables back into version 29's.
+var v30Drops = append(append([]string{}, v31Drops...),
+	`DROP TABLE collector_sent`,
+)
 
 // v29Drops turns a current database's tables back into version 28's.
 var v29Drops = append(append([]string{}, v30Drops...),

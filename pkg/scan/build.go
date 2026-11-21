@@ -159,6 +159,9 @@ type Inputs struct {
 	// Patterns are Loki's line patterns per stream (its canonical full
 	// label set), for the line findings; nil when not collected.
 	Patterns map[string][]collect.LinePattern
+	// StreamAttrs are sampled key sizes per stream (its canonical full
+	// label set), S10 item 7; nil when not collected.
+	StreamAttrs map[string]collect.StreamAttrs
 	// Seasons are tvt.yaml seasons: one the window misses is a gap, and
 	// its services' unread signals are dormant.
 	Seasons []config.Season
@@ -220,6 +223,9 @@ type Output struct {
 	// LineFindings are line patterns worth cutting inside streams (S5
 	// items 3-4), largest first.
 	LineFindings []graph.LineFinding
+	// StreamAttrs are key sizes in the largest streams and how each key
+	// is read (S10 item 7), largest first.
+	StreamAttrs []graph.StreamAttr
 	// TSDB is what the Prometheus server reported (Inputs.Storage), stored
 	// so the scan can be repriced; nil when it wasn't read.
 	TSDB *collect.Storage
@@ -573,6 +579,7 @@ func Build(in Inputs) (Output, error) {
 	if out.LineFindings, err = lineFindings(in.Patterns, out.StreamVolumes, in.Owners, in.PriceCard, readers); err != nil {
 		return Output{}, err
 	}
+	out.StreamAttrs = streamAttrs(in.StreamAttrs, out.StreamVolumes, in.PriceCard, readers)
 	out.Scores = scoreCandidates(in, out.Signals, out.Consumers, out.References, out.Costs, out.Sources, since)
 	return out, nil
 }

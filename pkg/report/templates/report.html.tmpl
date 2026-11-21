@@ -177,6 +177,23 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 </div>
 {{end}}
 
+{{if .Attributes}}
+<h2>Large keys in log lines</h2>
+<p class="muted">The largest keys in the largest streams, from a sample of up to 1,000 recent lines each. tvt kept only key names and sizes, never values. A key a reader shows or names is kept; one nothing reads, with values past 512 bytes, is worth capping. Savings are estimates.</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Stream and key</th><th>What to do</th><th class="num">Bytes / day</th><th class="num">Cap saving / month</th></tr></thead>
+<tbody>
+{{range .Attributes}}
+<tr id="{{.ID}}"><td><code>{{.Stream}}</code><br><code>{{.Key}}</code>{{with .Sensitive}} <span class="tag sensitive" title="tvt read only the name and size, never values">may hold {{sensitive .}}</span>{{end}}<br><span class="muted">in {{pct .Share}} of lines, up to {{.MaxBytes}} bytes, {{.Distinct}} distinct</span></td>
+<td>{{.Action}}</td>
+<td class="num">{{bytes .BytesPerDay}}</td>
+<td class="num">{{with .Cap}}{{money .Monthly .Currency}}{{else}}<span class="muted">-</span>{{end}}</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{end}}
 <h2>Line-level findings</h2>
 <p class="muted">Line patterns inside a stream worth cutting, from Loki's pattern API over its last few hours. Savings are estimates (patterns count lines, not bytes). tvt never writes a line filter: <a href="{{zeroreads}}">zeroreads</a> proves which lines nothing reads and generates the cut.</p>
 <div class="table-wrap">
