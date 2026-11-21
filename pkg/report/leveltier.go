@@ -40,6 +40,9 @@ type LevelTier struct {
 	// and the guard's lines at those levels stay.
 	Monthly float64 `json:"monthly_saving"`
 	Held    string  `json:"held,omitempty"`
+	// refs are the readers' consumer IDs, for the recommendation's
+	// evidence.
+	refs []string
 }
 
 // LevelReader is one reader of a level-tier stream.
@@ -114,6 +117,7 @@ func levelTierRows(in Input, signals []graph.Signal, refs map[string][]graph.Ref
 					continue
 				}
 				seen[ref.ConsumerID] = true
+				row.refs = append(row.refs, ref.ConsumerID)
 				c := consumers[ref.ConsumerID]
 				floor, known := parse.LevelFloor(c.Expr)
 				sees := "all"
@@ -146,6 +150,64 @@ func levelTierRows(in Input, signals []graph.Signal, refs map[string][]graph.Ref
 		}
 		return out[i].Monthly > out[j].Monthly
 	})
+	return out
+}
+
+// ActionLevelTier: send a stream's lines below warn to the cold tier and
+// keep the rest hot (S10 item 3). Less lossy than a whole-stream reroute
+// (ADR 0010), so it takes the reroute's place for the same stream.
+const ActionLevelTier = "level_tier"
+
+// levelTierRecs makes a recommendation of each level tier nothing holds,
+// on the stream's own signal (loki:stream:<selector>; its pipeline comes
+// from the stream's label set).
+func levelTierRecs(rows []LevelTier, signals map[string]graph.Signal, consumers map[string]graph.Consumer, gs *gaps, listed map[string]bool, meta Scan) []Recommendation {
+	var out []Recommendation
+	for _, row := range rows {
+		if row.Held != "" || row.Monthly <= 0 {
+			continue
+		}
+		id := "loki:stream:" + row.Stream
+		s, ok := signals[id]
+		if !ok {
+			s = graph.Signal{ID: id, Kind: graph.KindStream, Name: row.Stream, Source: "loki"}
+		}
+		rec := Recommendation{
+			ID:     ActionLevelTier + ":" + id,
+			Action: ActionLevelTier,
+			Signal: SignalRef{ID: id, Kind: string(graph.KindStream), Name: row.Stream, Source: s.Source},
+			Claim: fmt.Sprintf("%.1f%% of %s is below warn and no reader sees those lines: sending them to the cold tier, with records and lines naming an error kept hot, saves %.2f%s a month.",
+				100*row.Share, row.Stream, row.Monthly, map[bool]string{true: " " + meta.Currency, false: ""}[meta.Currency != ""]),
+			Evidence:    Evidence{References: []string{}, QueryLog: []LoggedQuery{}},
+			Downstream:  []Reader{},
+			Assumptions: []string{"levels are the scan's measurement over the last hour (Loki's detected_level); a writer moves only lines whose severity is set and below warn"},
+			Owner:       s.Owner, OwnerSource: s.OwnerSource, OwnerInferred: s.OwnerInferred,
+			Status:      StatusOpen,
+			Savings:     Savings{Monthly: row.Monthly, Currency: meta.Currency, Approximate: true},
+			RiskIfWrong: Risk{Evidence: "level", Tier: s.Tier},
+		}
+		for _, cid := range row.refs {
+			c := consumers[cid]
+			rec.Evidence.References = append(rec.Evidence.References, cid)
+			rec.Downstream = append(rec.Downstream, Reader{Consumer: c.ID, Kind: string(c.Kind), Name: c.Name})
+		}
+		sort.Strings(rec.Evidence.References)
+		rec.Evidence.Gaps, rec.Evidence.Acknowledged = split(gs.forSignal(s, listed))
+		if rec.Evidence.Gaps == nil {
+			rec.Evidence.Gaps = []string{}
+		}
+		rec.CheapestCheck = "Check that nothing needs the stream's debug and info lines in the hot tier: tvt why '" + row.Stream + "'"
+		rec.CheckMinutes = 5
+		rec.EvidenceHash = EvidenceHash(rec.Evidence)
+		rec.SavingsPerMinute = rec.Savings.Monthly / float64(rec.CheckMinutes)
+		rec.Expected = Expected{WithinSec: expectedWithin.Seconds(), SeriesAfter: -1, EmptyReaders: []string{}, MonthlySaving: row.Monthly,
+			HotBytesPerDayFall: row.BelowWarn, Statements: []string{
+				fmt.Sprintf("%s's debug and info lines stop arriving in the hot tier within an hour of the deploy and arrive in cold storage instead", row.Stream),
+				fmt.Sprintf("its warn, error and fatal lines, its records and lines naming an error stay hot: hot bytes fall by about %s a day", humanBytes(row.BelowWarn)),
+				"no query, alert or panel changes: every reader keeps to warn and above",
+			}}
+		out = append(out, rec)
+	}
 	return out
 }
 

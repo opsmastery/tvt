@@ -123,3 +123,39 @@ func TestOtelcolTierValidate(t *testing.T) {
 		t.Errorf("%+v\n%s", r, out)
 	}
 }
+
+func TestOtelcolLogsShipper(t *testing.T) {
+	lab := `connectors:
+  count/x:
+exporters:
+  otlp_http/loki:
+  file/cold:
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      exporters: [otlp_http/loki]
+    logs/shop-errors:
+      receivers: [otlp/shop]
+      exporters: [count/x]
+    logs/tvt-tier:
+      receivers: [otlp]
+      exporters: [file/cold]
+    logs/archive:
+      receivers: [otlp]
+      exporters: [file/cold]
+    metrics:
+      receivers: [otlp]
+      exporters: [otlp_http/loki]
+`
+	if got, err := OtelcolLogsShipper([]byte(lab), "file/cold"); err != nil || got != "logs" {
+		t.Errorf("lab: %q, %v", got, err)
+	}
+	two := strings.Replace(lab, "exporters: [count/x]", "exporters: [count/x, otlp_http/loki]", 1)
+	if _, err := OtelcolLogsShipper([]byte(two), "file/cold"); err == nil {
+		t.Error("two shippers: no error")
+	}
+	if got, err := OtelcolLogsShipper([]byte("receivers:\n  otlp:\n"), "file/cold"); err != nil || got != "" {
+		t.Errorf("no pipelines: %q, %v", got, err)
+	}
+}

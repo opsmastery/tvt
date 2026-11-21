@@ -166,7 +166,12 @@ func promBlock(indent string, d Drop, withKey bool) string {
 	return b.String()
 }
 
+// value is a mapping's value for key; nil when m is nil or lacks it, so
+// lookups chain through absent sections.
 func value(m *yaml.Node, key string) *yaml.Node {
+	if m == nil {
+		return nil
+	}
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if m.Content[i].Value == key {
 			return m.Content[i+1]
