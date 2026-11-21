@@ -95,3 +95,28 @@ func TestLevelTierHTML(t *testing.T) {
 		}
 	}
 }
+
+// TestManifestWarnPlus: a stream's readers keep to warn and above only
+// when every one has a level matcher at warn or above.
+func TestManifestWarnPlus(t *testing.T) {
+	exprs := map[string]string{
+		"warn": `sum(count_over_time({service_name="a"} | detected_level=~"warn|error" [5m]))`,
+		"all":  `sum(count_over_time({service_name="a"} [5m]))`,
+		"info": `{service_name="a"} | detected_level="info"`,
+	}
+	refs := func(ids ...string) []graph.Reference {
+		var out []graph.Reference
+		for _, id := range ids {
+			out = append(out, graph.Reference{ConsumerID: id})
+		}
+		return out
+	}
+	for _, c := range []struct {
+		ids  []string
+		want bool
+	}{{nil, false}, {[]string{"warn"}, true}, {[]string{"warn", "all"}, false}, {[]string{"info"}, false}} {
+		if got := warnPlus(refs(c.ids...), exprs); got != c.want {
+			t.Errorf("%v: %v, want %v", c.ids, got, c.want)
+		}
+	}
+}

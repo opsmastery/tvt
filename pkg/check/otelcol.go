@@ -3,6 +3,7 @@ package check
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -229,6 +230,12 @@ func otelcolEffects(p report.PipelineDef, path string, src []byte, ix *index, fi
 	// exporters read (S8 items 9 and 10), by pipeline.
 	readers := pipelineReaders(c, produced, protectedNames)
 	for _, pl := range c.pipelines {
+		if isColdCopy(p, pl) {
+			// A logs pipeline that exports only to the cold tier narrows
+			// the cold copy: what it drops never leaves the hot tier.
+			continue
+		}
+		hasCold := coldCopyOf(p, c, pl)
 		set := map[string]string{}     // attribute path -> processor that sets it earlier
 		deleted := map[string]string{} // attribute path -> processor that deleted it earlier
 		setLater := laterSets(c, pl)
@@ -337,7 +344,7 @@ func otelcolEffects(p report.PipelineDef, path string, src []byte, ix *index, fi
 								reason: fmt.Sprintf("the condition %q reads %s, which %s deleted earlier in %s", shorten(s.text, 80), r, by, pl.name), at: sat})
 						}
 					}
-					filterEffects(add, ix, p, pl, comp, s, sat, readers[pl.name], i)
+					filterEffects(add, ix, p, pl, comp, s, sat, readers[pl.name], i, hasCold)
 				}
 			}
 			for _, s := range stmts {
@@ -544,7 +551,7 @@ func recordEnvs(ms []parse.OTTL) []ottlEnv {
 // filterEffects judges one filter condition: which protected metrics it
 // can drop (metrics pipelines), whether it can drop a record span or log
 // event, and whether it empties what a connector downstream reads.
-func filterEffects(add func(effect), ix *index, p report.PipelineDef, pl otelPipeline, comp string, s stmt, at string, rd []reader, pos int) {
+func filterEffects(add func(effect), ix *index, p report.PipelineDef, pl otelPipeline, comp string, s stmt, at string, rd []reader, pos int, hasCold bool) {
 	switch pl.signal {
 	case "metrics":
 		for _, sig := range ix.of(p.Name, "metric") {
@@ -563,6 +570,7 @@ func filterEffects(add func(effect), ix *index, p report.PipelineDef, pl otelPip
 			add(effect{rule: RuleRecord, component: comp,
 				reason: fmt.Sprintf("the condition %q %s true for record log events, so the filter drops them", shorten(s.text, 80), canWord(t)), at: at})
 		}
+		logStreamEffects(add, ix, p, comp, s, at, hasCold)
 	}
 	for _, r := range rd {
 		if r.pos <= pos || !r.counts {
@@ -573,6 +581,85 @@ func filterEffects(add func(effect), ix *index, p report.PipelineDef, pl otelPip
 				reason: fmt.Sprintf("the condition %q %s true for what %s counts, which makes %s (%s): the filter empties it", shorten(s.text, 80), canWord(t), r.name, r.produces, r.why), at: at})
 		}
 	}
+}
+
+// warnSeverities are OTLP's WARN, ERROR and FATAL severity numbers.
+var warnSeverities = []int{13, 17, 21}
+
+// logStreamEffects judges a logs filter condition against the streams
+// of the pipeline (S10 item 3): a condition that can be true for a warn,
+// error or fatal line drops warn-and-above lines; one that can be true
+// for a protected or read stream's lines needs every reader of it to keep
+// to warn and above, and the condition to keep warn and above. With a
+// cold tier declared, the lines must go there (a logs pipeline exporting
+// to it with the same receivers) rather than be dropped outright.
+func logStreamEffects(add func(effect), ix *index, p report.PipelineDef, comp string, s stmt, at string, hasCold bool) {
+	warnSafe := true
+	for _, sev := range warnSeverities {
+		if canBeTrue(s.o, s.groups, envOf(map[string]any{"severity_number": sev})) != parse.False {
+			warnSafe = false
+		}
+	}
+	if !warnSafe {
+		add(effect{rule: RuleWarnLogs, component: comp,
+			reason: fmt.Sprintf("the log filter %q can drop warn-and-above lines: keep them with `and log.severity_number < 13`", shorten(s.text, 80)), at: at})
+	}
+	for _, sig := range ix.of(p.Name, "stream") {
+		t := canBeTrue(s.o, s.groups, streamEnv(sig.Name))
+		if t == parse.False || (warnSafe && sig.WarnPlus && sig.Record == "") {
+			continue
+		}
+		add(effect{rule: ruleFor(sig), component: comp, signal: sig.ID,
+			reason: fmt.Sprintf("%s lines of %s, %s (condition %q)", mayWord(t, "drops"), sig.Name, why(sig), shorten(s.text, 80)), at: at})
+	}
+	for _, sig := range ix.read[p.Name] {
+		if sig.Kind != "stream" {
+			continue
+		}
+		t := canBeTrue(s.o, s.groups, streamEnv(sig.Name))
+		if t == parse.False || (warnSafe && sig.WarnPlus) {
+			continue
+		}
+		reason := fmt.Sprintf("the condition %q %s true for %s: %s", shorten(s.text, 80), canWord(t), sig.Name, lessLossy(sig))
+		if warnSafe {
+			reason = fmt.Sprintf("the condition %q moves lines below warn of %s, which a reader may see: a reader of lower-level lines blocks a level tier (S10 item 3)", shorten(s.text, 80), sig.Name)
+		}
+		add(effect{rule: RuleLeastLossy, component: comp, signal: sig.ID, reason: reason, at: at})
+	}
+	if p.Cold != "" && !hasCold {
+		add(effect{rule: RuleLeastLossy, component: comp,
+			reason: fmt.Sprintf("the log filter %q drops lines outright: send them to %s first (a logs pipeline with the same receivers exporting only there), and drop after the quiet period (ADR 0010: drops are staged)", shorten(s.text, 80), p.Cold), at: at})
+	}
+}
+
+// isColdCopy: a logs pipeline that exports only to the pipeline's cold
+// tier.
+func isColdCopy(p report.PipelineDef, pl otelPipeline) bool {
+	if pl.signal != "logs" || p.Cold == "" || len(pl.exporters) == 0 {
+		return false
+	}
+	for _, e := range pl.exporters {
+		if e != p.Cold {
+			return false
+		}
+	}
+	return true
+}
+
+// coldCopyOf: another logs pipeline takes a receiver of pl to the cold
+// tier.
+func coldCopyOf(p report.PipelineDef, c *otelConfig, pl otelPipeline) bool {
+	for _, q := range c.pipelines {
+		if q.name == pl.name || !isColdCopy(p, q) {
+			continue
+		}
+		for _, r := range q.receivers {
+			if slices.Contains(pl.receivers, r) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func mayWord(t parse.Tri, verb string) string {
