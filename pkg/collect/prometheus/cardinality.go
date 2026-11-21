@@ -156,7 +156,12 @@ func (c *Client) LabelCardinality(ctx context.Context, metric string) ([]collect
 
 	out := make([]collect.LabelCardinality, 0, len(values))
 	for label, vals := range values {
+		classes := map[string]struct{}{}
+		for v := range vals {
+			classes[collect.BucketValue(v)] = struct{}{}
+		}
 		out = append(out, collect.LabelCardinality{
+			Classes:       int64(len(classes)),
 			Metric:        metric,
 			Label:         label,
 			Values:        int64(len(vals)),

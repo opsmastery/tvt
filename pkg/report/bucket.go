@@ -33,7 +33,13 @@ func bucketRows(signals []graph.Signal, refs map[string][]graph.Reference, consu
 			continue
 		}
 		c := costs[s.ID]
-		if c.DistinctValues <= bucketClasses || c.MonthlyCost <= 0 {
+		// The values left once bucketed: measured when the scan read the
+		// values, else at most bucketClasses.
+		after := int64(bucketClasses)
+		if c.Classes > 0 {
+			after = c.Classes
+		}
+		if c.DistinctValues <= after || c.MonthlyCost <= 0 {
 			continue
 		}
 		coarse, blocked := 0, ""
@@ -64,7 +70,6 @@ func bucketRows(signals []graph.Signal, refs map[string][]graph.Reference, consu
 		if blocked != "" || coarse == 0 {
 			continue
 		}
-		after := int64(bucketClasses)
 		share := 1 - float64(after)/float64(c.DistinctValues)
 		rec := Recommendation{
 			ID:     ActionBucket + ":" + s.ID,

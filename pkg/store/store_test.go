@@ -814,10 +814,15 @@ var v24Drops = append(append([]string{}, v25Drops...),
 	`ALTER TABLE pipeline_targets DROP COLUMN jobs`,
 )
 
-// v27Drops turns a current database's tables back into version 26's.
-var v27Drops = []string{
-	`ALTER TABLE stream_volumes DROP COLUMN levels`,
+// v28Drops turns a current database's tables back into version 27's.
+var v28Drops = []string{
+	`ALTER TABLE costs DROP COLUMN classes`,
 }
+
+// v27Drops turns a current database's tables back into version 26's.
+var v27Drops = append(append([]string{}, v28Drops...),
+	`ALTER TABLE stream_volumes DROP COLUMN levels`,
+)
 
 // v26Drops turns a current database's tables back into version 25's.
 var v26Drops = append(append([]string{}, v27Drops...),
@@ -1468,7 +1473,7 @@ func TestCostMerges(t *testing.T) {
 			must(t, sc.PutSignal(ctx, graph.Signal{ID: "prom:label:m:" + l, Kind: graph.KindLabel, Name: l, Parent: "m", Source: "prom"}))
 		}
 		must(t, sc.PutCost(ctx, graph.Cost{SignalID: "prom:label:m:a", Merges: 0, MergesKnown: true, Summable: true}))
-		must(t, sc.PutCost(ctx, graph.Cost{SignalID: "prom:label:m:b", Merges: 12, MergesKnown: true}))
+		must(t, sc.PutCost(ctx, graph.Cost{SignalID: "prom:label:m:b", Merges: 12, MergesKnown: true, Classes: 3}))
 		must(t, sc.PutCost(ctx, graph.Cost{SignalID: "prom:label:m:c"}))
 	})
 	costs, err := s.Costs(ctx, id)
@@ -1480,7 +1485,7 @@ func TestCostMerges(t *testing.T) {
 	if a := got["prom:label:m:a"]; !a.MergesKnown || a.Merges != 0 || !a.Summable {
 		t.Errorf("a %+v", a)
 	}
-	if b := got["prom:label:m:b"]; !b.MergesKnown || b.Merges != 12 || b.Summable {
+	if b := got["prom:label:m:b"]; !b.MergesKnown || b.Merges != 12 || b.Summable || b.Classes != 3 {
 		t.Errorf("b %+v", b)
 	}
 	if c := got["prom:label:m:c"]; c.MergesKnown || c.Merges != 0 {

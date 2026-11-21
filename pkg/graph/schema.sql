@@ -175,6 +175,9 @@ CREATE TABLE IF NOT EXISTS costs (
     -- -1 when unknown; summable: a counter or histogram metric.
     merges        INTEGER NOT NULL DEFAULT -1,
     summable      INTEGER NOT NULL DEFAULT 0,
+    -- Labels (S10 item 1): distinct values once bucketed to their class,
+    -- 0 when unknown.
+    classes       INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (signal_id, scan_id)
 );
 
