@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -97,5 +98,23 @@ func TestDeltaCheck(t *testing.T) {
 	}
 	if err := deltaCheck([]map[string][]sample{poll(900_000, 8, model)}, "c", restart); err == nil {
 		t.Error("no samples after the restart passed")
+	}
+}
+
+func TestServerTime(t *testing.T) {
+	h := http.Header{}
+	h.Set("Date", "Sat, 21 Nov 2026 00:05:17 GMT")
+	at, ok := serverTime(h)
+	if want := time.Date(2026, 11, 21, 0, 5, 18, 0, time.UTC); !ok || !at.Equal(want) {
+		t.Errorf("serverTime = %v %v, want %v (the Date rounded up)", at, ok, want)
+	}
+	// The Nov 21 run: the last old-config sample at 00:05:17.9 on the lab's
+	// clock is within the grace of a restart the lab saw end at 00:05:17.
+	last := []sample{{TsMs: time.Date(2026, 11, 21, 0, 5, 17, 900e6, time.UTC).UnixMilli()}}
+	if !stopped(last, at) {
+		t.Error("a sample before the server's restart time counted as still flowing")
+	}
+	if _, ok := serverTime(http.Header{}); ok {
+		t.Error("no Date header read as a time")
 	}
 }
