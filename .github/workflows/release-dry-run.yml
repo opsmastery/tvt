@@ -1,0 +1,48 @@
+name: release-dry-run
+
+# The release path without a tag: goreleaser builds a snapshot and signs
+# checksums.txt with cosign (keyless) exactly as release.yml does, then the
+# signature is verified the way docs/install.md tells users to. It runs on
+# any PR that touches the release workflow, the goreleaser config or the
+# actions they use, so a signing break shows up before a tag, not after.
+# Keyless signing writes an entry (repository, workflow and commit) to the
+# public Rekor transparency log, as every release does.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/workflows/release-dry-run.yml
+      - .goreleaser.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # keyless cosign signing (Sigstore OIDC)
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - run: cosign version
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean
+      - name: Verify the signature as docs/install.md does
+        run: |
+          ls -la dist/checksums.txt*
+          cosign verify-blob \
+            --certificate dist/checksums.txt.pem --signature dist/checksums.txt.sig \
+            --certificate-identity-regexp 'https://github.com/Opsmastery-Summit/tvt/' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            dist/checksums.txt
+          (cd dist && sha256sum --ignore-missing -c checksums.txt)
