@@ -1,6 +1,21 @@
 # S12: release candidate
 
-**Status:** Planned.
+**Status:** In progress (Nov 21). Items 1 to 6 are done:
+
+- **Item 1 (#170).** Reproducible builds: `-trimpath`, and the commit's time in `mod_timestamp`, `version.Date` and archive mtimes. CI's `reproducible` job builds every target twice from two checkout paths and diffs the hashes. Dependabot runs weekly for Go modules and actions. The release checklist is `docs/release.md`. Cosign signing, govulncheck and gitleaks were already in place.
+- **Item 2 (#170).** `SECURITY.md` and `docs/install.md`.
+- **Item 3 (#171).** Every command has a page: `docs/init.md`, scan, report, why, propose, check and confirm.
+- **Item 4 (#171).** The README carries the claim.
+- **Item 5 (#174).** `report.SensitiveName` sets `sensitive` on label and span-attribute rows (prompt, response, email, host_path), and the HTML shows it under the saving. On the live lab (Nov 21) it flagged `coding_agent_token_usage_total{user_email}`.
+- **Item 6 (#175, with Sprint 2 item 9).** `internal/telemetry`, off unless `OTEL_*` asks for an exporter. Its spans and metrics follow `docs/telemetry.md`: `TVT_TELEMETRY_DETAIL=basic` keeps names, paths, queries and error text out; attributes are capped at 512 characters with a marker; no metric carries a per-scan or per-signal attribute.
+
+Sprint 2 item 10's `tvt init` is #176. Item 8 (more Grafana evidence) is still open.
+
+Two Dependabot PRs wait:
+- #173 bumps `prometheus/common` to v0.74.0, which raises the `go` directive to 1.27.3, against ADR 0004's Go 1.26 floor.
+- #172 moves the actions to new majors, including cosign-installer v4. The release path isn't exercised in PR CI, so it waits until after the tag.
+
+The done-when's clean-machine install is checked in a fresh Linux container on the Mac mini. A fresh macOS user needs Jason: creating a user account is a system change.
 
 **Done when:** `v0.1.0-rc1` is tagged, and the install guide works on a clean machine.
 
