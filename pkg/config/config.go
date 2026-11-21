@@ -460,6 +460,9 @@ func (c *Config) validate() error {
 			return err
 		}
 	}
+	if t := c.Tiers.DormantTenant; t != "" && (strings.ContainsAny(t, " \t\n\r|\"'") || len(t) > 150) {
+		return fmt.Errorf("tiers.dormant_tenant %q: want a Mimir tenant ID (no spaces, quotes or |)", t)
+	}
 	if d := c.Tiers.DormantRetention; d != "" {
 		if v, err := model.ParseDuration(d); err != nil || v <= 0 {
 			return fmt.Errorf("tiers.dormant_retention %q: want a positive duration such as 7d", d)
@@ -684,8 +687,12 @@ func StreamMatchers(sel string) ([]parse.Matcher, error) {
 // the digest lists report.DefaultQueue.
 // Tiers: dormant_retention is the history a dormant metric's retention
 // tier keeps (S10 item 2), a Prometheus duration; empty means a week.
+// dormant_tenant is the Mimir tenant that keeps it: set, tvt proposes the
+// tier as a route to that tenant (Prometheus pipelines); empty, it only
+// reports the tier.
 type Tiers struct {
 	DormantRetention string `yaml:"dormant_retention"`
+	DormantTenant    string `yaml:"dormant_tenant"`
 }
 
 type Queue struct {

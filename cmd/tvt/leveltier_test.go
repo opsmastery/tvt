@@ -137,3 +137,62 @@ func TestProposeLevelTierAlloy(t *testing.T) {
 		}
 	}
 }
+
+// TestProposeTenantTier: a retention_tier row (S10 item 2) goes into the
+// Prometheus pipeline's remote_write as a route to tiers.dormant_tenant.
+func TestProposeTenantTier(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := readLatest(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := report.Build(in, 0)
+	r.Recommendations = []report.Recommendation{{ID: "retention_tier:prom:metric:shop_cache_evictions_total", Action: report.ActionRetentionTier,
+		Signal:   report.SignalRef{ID: "prom:metric:shop_cache_evictions_total", Kind: "metric", Name: "shop_cache_evictions_total", Source: "prom"},
+		Pipeline: "prometheus-scrape", Proposable: true, EvidenceHash: "abc", KeepDays: 7}}
+	dir := t.TempDir()
+	rj := filepath.Join(dir, "report.json")
+	b, _ := json.Marshal(r)
+	os.WriteFile(rj, b, 0o644)
+	checkout := filepath.Join(dir, "checkout")
+	if err := copyTree(filepath.Join(dirs[st.Name], "checkout"), checkout); err != nil {
+		t.Fatal(err)
+	}
+	cfgSrc, _ := os.ReadFile(filepath.Join(dirs[st.Name], "tvt-lab.yaml"))
+	cfg := filepath.Join(dir, "tvt-lab.yaml")
+	run := func(cfgText string) (string, string) {
+		os.WriteFile(cfg, []byte(cfgText), 0o644)
+		var out strings.Builder
+		pd := filepath.Join(dir, "p")
+		os.RemoveAll(pd)
+		o := proposeOptions{DB: db, Config: cfg, Report: rj, Output: "patch", Dir: pd,
+			Checkouts: checkoutFlag{"github.com/Opsmastery-Summit/tvt-lab": checkout}, Validate: "off"}
+		if err := runPropose(context.Background(), o, &out); err != nil {
+			t.Fatalf("%v\n%s", err, out.String())
+		}
+		patch, _ := os.ReadFile(filepath.Join(pd, report.ManifestDir("github.com/Opsmastery-Summit/tvt-lab")+".patch"))
+		return out.String(), string(patch)
+	}
+	withTenant := string(cfgSrc) + "\ntiers:\n  dormant_tenant: tvt-dormant\n"
+	// The capture's scrape config has no remote_write: skipped, saying so.
+	if out, _ := run(withTenant); !strings.Contains(out, "remote_write") {
+		t.Errorf("no remote_write: not skipped with the reason:\n%s", out)
+	}
+	// With one, the route is written.
+	scrape := filepath.Join(checkout, "prometheus", "scrape", "lab.yml")
+	src, _ := os.ReadFile(scrape)
+	os.WriteFile(scrape, append(src, []byte("remote_write:\n  - url: http://mimir:9009/api/v1/push\n")...), 0o644)
+	out, patch := run(withTenant)
+	for _, want := range []string{"+    name: tvt-dormant", "+      X-Scope-OrgID: \"tvt-dormant\"", "+        action: keep", `"recommendation": "retention_tier:prom:metric:shop_cache_evictions_total"`} {
+		if !strings.Contains(patch, want) {
+			t.Errorf("patch lacks %q\n%s\n%s", want, patch, out)
+		}
+	}
+}
