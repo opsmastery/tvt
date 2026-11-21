@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"go.yaml.in/yaml/v3"
 )
@@ -103,6 +104,59 @@ func prometheusEffects(p report.PipelineDef, path string, src []byte, ix *index)
 			return nil, fmt.Errorf("job %s: %w", job, err)
 		}
 		out = append(out, relabelEffects(p, path, "job "+job, rules, []string{job}, ix, blocks)...)
+	}
+	rw, err := remoteWriteEffects(p, path, root, ix, blocks)
+	return append(out, rw...), err
+}
+
+// remoteWriteEffects judges remote_write's write_relabel_configs: a drop
+// there takes metrics out of the backend as a scrape-time drop does. A
+// remote_write to the retention tier's tenant (the manifest's
+// dormant_tenant, S10 item 2) only narrows the tier's copy, and a dormant
+// metric it keeps may leave the other remote_writes: that's the tier,
+// not a drop. Anything else it keeps is judged as dropped.
+func remoteWriteEffects(p report.PipelineDef, path string, root *yaml.Node, ix *index, blocks []blockSpan) ([]effect, error) {
+	rw := field(root, "remote_write")
+	if rw == nil || rw.Kind != yaml.SequenceNode {
+		return nil, nil
+	}
+	var tiers [][]relabelRule
+	type target struct {
+		name  string
+		rules []relabelRule
+	}
+	var others []target
+	for i, e := range rw.Content {
+		rules, err := yamlRules(field(e, "write_relabel_configs"), false)
+		if err != nil {
+			return nil, fmt.Errorf("remote_write %d: %w", i, err)
+		}
+		if ix.dormantTenant != "" && scalar(field(e, "headers"), "X-Scope-OrgID") == ix.dormantTenant {
+			tiers = append(tiers, rules)
+			continue
+		}
+		others = append(others, target{name: cmpOr(scalar(e, "name"), scalar(e, "url")), rules: rules})
+	}
+	tiered := func(metric string) bool {
+		for _, rs := range tiers {
+			if evalRelabel(rs, metric, "", "").dropped == parse.False {
+				return true
+			}
+		}
+		return false
+	}
+	byID := map[string]report.ProtectedSignal{}
+	for _, s := range ix.of(p.Name, "metric") {
+		byID[s.ID] = s
+	}
+	var out []effect
+	for _, o := range others {
+		for _, e := range relabelEffects(p, path, "remote_write "+o.name, o.rules, nil, ix, blocks) {
+			if s, ok := byID[e.signal]; ok && s.Class == "dormant" && s.Record == "" && tiered(s.Name) {
+				continue // the retention tier keeps it, in its own tenant
+			}
+			out = append(out, e)
+		}
 	}
 	return out, nil
 }

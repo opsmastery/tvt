@@ -70,6 +70,10 @@ type Manifest struct {
 	// ScrapeLimits are the longest scrape interval each job's readers
 	// allow (S10 item 5): check refuses an increase past one.
 	ScrapeLimits []ScrapeLimit `json:"scrape_limits,omitempty"`
+	// DormantTenant is the retention tier's Mimir tenant (S10 item 2):
+	// check lets a dormant metric leave a remote_write that a second
+	// remote_write sends to this tenant.
+	DormantTenant string `json:"dormant_tenant,omitempty"`
 }
 
 // ManifestDetection is tvt.yaml detection: per-severity objectives and
@@ -228,7 +232,7 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 			})
 			m = Manifest{Version: ManifestVersion, Repo: r, GeneratedAt: in.Scan.StartedAt.UTC(), Scan: in.Scan.ID,
 				Signals: []ProtectedSignal{}, Decisions: []Decision{}, Evidence: []ManifestEvidence{}, Acknowledged: acks,
-				PipelineDefs: []PipelineDef{}, RecordMatches: BuiltinRecordMatches, Gaps: []ManifestGap{}, Alerts: []AlertTiming{}, Read: []ReadSignal{},
+				PipelineDefs: []PipelineDef{}, RecordMatches: BuiltinRecordMatches, DormantTenant: in.DormantTenant, Gaps: []ManifestGap{}, Alerts: []AlertTiming{}, Read: []ReadSignal{},
 				Detection: ManifestDetection{GroupWaitSec: DefaultGroupWait.Seconds()}}
 		}
 		m.Pipelines = append(m.Pipelines, p)

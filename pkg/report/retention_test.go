@@ -81,4 +81,22 @@ func TestRetentionTierInReport(t *testing.T) {
 	if len(r.Confirm) != 1 || r.Confirm[0].Retention == nil || r.Confirm[0].Retention.KeepDays != 7 {
 		t.Fatalf("self-hosted: %+v", r.Confirm)
 	}
+	for _, rec := range r.Recommendations {
+		if rec.Action == ActionRetentionTier {
+			t.Errorf("a tier with no tenant was recommended: %+v", rec)
+		}
+	}
+	// With a tier tenant (S10 item 2) the tier is a recommendation.
+	in.DormantTenant = "tvt-dormant"
+	r = Build(in, 0)
+	var rec *Recommendation
+	for i := range r.Recommendations {
+		if r.Recommendations[i].Action == ActionRetentionTier {
+			rec = &r.Recommendations[i]
+		}
+	}
+	if rec == nil || rec.ID != "retention_tier:"+s.ID || rec.KeepDays != 7 || rec.Savings.Monthly <= 0 || !rec.RiskIfWrong.Dormant || rec.EvidenceHash == "" ||
+		r.Confirm[0].Retention.Writer != WriterTenant+"tvt-dormant" {
+		t.Errorf("tenant tier: %+v, writer %q", rec, r.Confirm[0].Retention.Writer)
+	}
 }

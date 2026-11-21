@@ -18,10 +18,12 @@ type index struct {
 	// spans and logEvents pick out record spans and log events.
 	spans, logEvents []parse.OTTL
 	matchErrs        []string
+	// dormantTenant is the retention tier's Mimir tenant (S10 item 2).
+	dormantTenant string
 }
 
 func newIndex(m report.Manifest) *index {
-	ix := &index{byPipeline: map[string][]report.ProtectedSignal{}, read: map[string][]report.ReadSignal{}}
+	ix := &index{byPipeline: map[string][]report.ProtectedSignal{}, read: map[string][]report.ReadSignal{}, dormantTenant: m.DormantTenant}
 	for _, s := range m.Signals {
 		ix.byPipeline[s.Pipeline] = append(ix.byPipeline[s.Pipeline], s)
 	}

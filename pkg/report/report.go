@@ -187,6 +187,9 @@ type Recommendation struct {
 	// series merge but can be summed. Merges is how many collide.
 	Removal string `json:"removal,omitempty"`
 	Merges  int64  `json:"merges,omitempty"`
+	// KeepDays is a retention_tier row's history in the tier tenant (S10
+	// item 2).
+	KeepDays int `json:"keep_days,omitempty"`
 	// DismissedReason says why, for a dismissed recommendation.
 	DismissedReason string `json:"dismissed_reason,omitempty"`
 	// Review says why an owner's earlier decision no longer holds (S9
@@ -380,6 +383,10 @@ type Input struct {
 	// retention tier (S10 item 2).
 	Retention        time.Duration
 	DormantRetention time.Duration
+	// DormantTenant is tvt.yaml's tiers.dormant_tenant: the Mimir tenant
+	// a dormant metric's retention tier goes to (S10 item 2). Empty: the
+	// tier is reported, not recommended.
+	DormantTenant string
 }
 
 // LastReadOf is a signal's last read, as the store returns it.
@@ -525,7 +532,20 @@ func Build(in Input, limit int) Report {
 				continue
 			}
 			c.Retention, c.RetentionHeld = retentionTier(bySignal[c.Signal.ID], costs[c.Signal.ID], refs[c.Signal.ID], consumers, in.Retention, in.DormantRetention)
+			// With a tier tenant (S10 item 2), the tier is a
+			// recommendation tvt writes, the owner confirming it.
+			if c.Retention != nil && in.DormantTenant != "" {
+				c.Retention.Writer = WriterTenant + in.DormantTenant
+				r.Recommendations = append(r.Recommendations, retentionRec(*c, bySignal[c.Signal.ID], in.Scan))
+			}
 		}
+		sort.SliceStable(r.Recommendations, func(i, j int) bool {
+			a, b := r.Recommendations[i], r.Recommendations[j]
+			if a.SavingsPerMinute != b.SavingsPerMinute {
+				return a.SavingsPerMinute > b.SavingsPerMinute
+			}
+			return a.ID < b.ID
+		})
 	}
 	r.Intervals = intervalRows(in, refs, consumers, costs)
 	r.Pipelines = pipelineTargets(r.Recommendations, r.Confirm, in.PipelineTargets, in.StreamVolumes, gs)
