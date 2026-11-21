@@ -59,11 +59,12 @@ From source, with Go 1.26 or later: `go install github.com/Opsmastery-Summit/tvt
 
 ## 4. First run
 
-tvt needs read access to Grafana and to your metrics or logs backend. Tokens come from the environment, never from flags:
+tvt needs read access to Grafana and to your metrics or logs backend. Tokens come from the environment, never from flags. `tvt init` checks the access and the logs first ([init.md](init.md)):
 
 ```sh
 export TVT_GRAFANA_TOKEN=...      # Grafana service account, Viewer role
-tvt scan --grafana https://grafana.example.com --prom https://prometheus.example.com
+tvt init --grafana https://grafana.example.com --prom https://prometheus.example.com
+tvt scan --config tvt.yaml --grafana https://grafana.example.com --prom https://prometheus.example.com
 tvt report --html report.html --json report.json
 open report.html                  # macOS; xdg-open on Linux
 ```
