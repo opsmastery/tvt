@@ -18,6 +18,7 @@ Download a release, verify its cosign signature, and put `tvt` on your PATH: [do
 
 | Command | What it does | Docs |
 | --- | --- | --- |
+| `tvt init` | Tests each backend's access and logs, then writes `tvt.yaml`. Read-only | [init.md](docs/init.md) |
 | `tvt scan` | Builds the usage graph from your backends and logs. Read-only | [scan.md](docs/scan.md) |
 | `tvt report` | The ranked savings report, HTML and JSON, with every gap listed | [report.md](docs/report.md) |
 | `tvt why <signal>` | Every reader of one signal, and the evidence | [why.md](docs/why.md) |
@@ -27,7 +28,8 @@ Download a release, verify its cosign signature, and put `tvt` on your PATH: [do
 | `tvt version` | The version, commit and build date | |
 
 ```sh
-tvt scan --grafana https://grafana.example.com --prom https://prometheus.example.com --loki https://loki.example.com
+tvt init --grafana https://grafana.example.com --prom https://prometheus.example.com --loki https://loki.example.com
+tvt scan --config tvt.yaml --grafana https://grafana.example.com --prom https://prometheus.example.com --loki https://loki.example.com
 tvt report                                              # report.html and report.json
 tvt why shop_cart_operations_total
 tvt propose --config tvt.yaml --checkout github.com/acme/pipes=../pipes
