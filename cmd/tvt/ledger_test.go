@@ -37,7 +37,7 @@ func TestReadMerges(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, ".tvt", "proposal.json"), []byte(`{"scan": 7, "pipelines": {"p": [
 		{"recommendation": "drop:prom:metric:a", "signal": "prom:metric:a", "evidence": "x", "expected": {"monthly_saving": 2.5}},
 		{"recommendation": "level_tier:loki:stream:{service_name=\"s\"}", "signal": "loki:stream:{service_name=\"s\"}", "evidence": "y", "expected": {}}]}}`), 0o644)
-	if _, errs := readMerges(ctx, pipes); len(errs) != 1 || !strings.Contains(errs[0], "unknown") {
+	if _, errs := readMerges(ctx, pipes); len(errs) != 1 || !strings.Contains(errs[0], "aren't in the ledger") {
 		t.Errorf("uncommitted: %v", errs)
 	}
 	at := time.Date(2026, 11, 21, 9, 30, 0, 0, time.UTC)
@@ -49,5 +49,22 @@ func TestReadMerges(t *testing.T) {
 	}
 	if m := ms[0]; m.Repo != "github.com/o/pipes" || m.ProposalScan != 7 || m.Recommendation != "drop:prom:metric:a" || !m.MergedAt.Equal(at) || m.Expected != 2.5 {
 		t.Errorf("merge %+v", m)
+	}
+
+	// The checkout on the PR's branch, with a newer proposal that hasn't
+	// merged: with no origin HEAD, tvt refuses to guess; with one, only
+	// the default branch's proposal counts.
+	git(nil, "checkout", "-q", "-b", "tvt/propose")
+	os.WriteFile(filepath.Join(dir, ".tvt", "proposal.json"), []byte(`{"scan": 9, "pipelines": {"p": [
+		{"recommendation": "drop:prom:metric:b", "signal": "prom:metric:b", "evidence": "z", "expected": {"monthly_saving": 9}}]}}`), 0o644)
+	git(nil, "commit", "-q", "-am", "tvt: propose")
+	if ms, errs := readMerges(ctx, pipes); len(ms) != 0 || len(errs) != 1 || !strings.Contains(errs[0], "tvt/propose") {
+		t.Errorf("on the PR branch with no origin HEAD: merges %+v, errs %v", ms, errs)
+	}
+	git(nil, "update-ref", "refs/remotes/origin/main", "tvt/propose~1")
+	git(nil, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	ms, errs = readMerges(ctx, pipes)
+	if len(errs) != 0 || len(ms) != 2 || ms[0].ProposalScan != 7 {
+		t.Errorf("on the PR branch with origin HEAD: merges %+v, errs %v", ms, errs)
 	}
 }

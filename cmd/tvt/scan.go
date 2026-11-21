@@ -1436,13 +1436,25 @@ func readMerges(ctx context.Context, ps []config.Pipeline) ([]graph.Merge, []str
 			continue
 		}
 		seen[p.Repo] = true
-		path := filepath.Join(p.Checkout, filepath.FromSlash(report.ProposalPath))
-		b, err := os.ReadFile(path)
-		if errors.Is(err, fs.ErrNotExist) {
+		// What merged is what's on the default branch, not the working
+		// tree: the checkout may be on the PR's own branch (tvt confirm
+		// runs there), whose proposal hasn't merged.
+		_, statErr := os.Stat(filepath.Join(p.Checkout, filepath.FromSlash(report.ProposalPath)))
+		ref, err := mergedRef(ctx, p.Checkout)
+		if err != nil {
+			if statErr == nil {
+				errs = append(errs, fmt.Sprintf("%s: %v: its changes aren't in the ledger", p.Repo, err))
+			}
 			continue
 		}
+		show := exec.CommandContext(ctx, "git", "show", ref+":"+report.ProposalPath)
+		show.Dir = p.Checkout
+		b, err := show.Output()
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", p.Repo, err))
+			// Not on the default branch (yet), or not a Git checkout.
+			if statErr == nil {
+				errs = append(errs, fmt.Sprintf("%s: %s isn't committed on %s: its changes aren't in the ledger", p.Repo, report.ProposalPath, ref))
+			}
 			continue
 		}
 		var prop report.Proposal
@@ -1450,12 +1462,12 @@ func readMerges(ctx context.Context, ps []config.Pipeline) ([]graph.Merge, []str
 			errs = append(errs, fmt.Sprintf("%s: %s: %v", p.Repo, report.ProposalPath, err))
 			continue
 		}
-		cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%ct", "--", report.ProposalPath)
+		cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%ct", ref, "--", report.ProposalPath)
 		cmd.Dir = p.Checkout
 		ts, err := cmd.Output()
 		secs, perr := strconv.ParseInt(strings.TrimSpace(string(ts)), 10, 64)
 		if err != nil || perr != nil {
-			errs = append(errs, fmt.Sprintf("%s: when %s was committed is unknown (not a Git checkout, or uncommitted): its changes aren't in the ledger", p.Repo, report.ProposalPath))
+			errs = append(errs, fmt.Sprintf("%s: when %s was committed is unknown: its changes aren't in the ledger", p.Repo, report.ProposalPath))
 			continue
 		}
 		at := time.Unix(secs, 0).UTC()
@@ -1473,6 +1485,27 @@ func readMerges(ctx context.Context, ps []config.Pipeline) ([]graph.Merge, []str
 		return out[i].Recommendation < out[j].Recommendation
 	})
 	return out, errs
+}
+
+// mergedRef is the checkout's default branch: origin's HEAD when the
+// clone knows it, else the checked-out branch, unless that's a tvt PR
+// branch (tvt/...), whose proposal hasn't merged.
+func mergedRef(ctx context.Context, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+	cmd.Dir = dir
+	if out, err := cmd.Output(); err == nil {
+		return strings.TrimPrefix(strings.TrimSpace(string(out)), "refs/remotes/"), nil
+	}
+	cmd = exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", errors.New("not a Git checkout")
+	}
+	if b := strings.TrimSpace(string(out)); strings.HasPrefix(b, "tvt/") {
+		return "", fmt.Errorf("the checkout is on %s and origin's default branch is unknown (git remote set-head origin --auto)", b)
+	}
+	return "HEAD", nil
 }
 
 // readRewrites reads each pipeline's name-touching rules from its
