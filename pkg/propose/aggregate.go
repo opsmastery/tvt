@@ -37,7 +37,7 @@ const (
 
 // tvtProcessors are every processor tvt writes; a rerun takes them out of
 // flow-style processors lists.
-var tvtProcessors = []string{OtelcolProcessor, OtelcolAggregateProcessor, OtelcolWindowProcessor, OtelcolDedupProcessor}
+var tvtProcessors = []string{OtelcolProcessor, OtelcolAggregateProcessor, OtelcolWindowProcessor, OtelcolDedupProcessor, OtelcolTierHot, OtelcolTierCold}
 
 // Aggregate removes labels from delta counters in an OTel Collector
 // pipeline. Labels maps each metric (as Prometheus stores it) to the
