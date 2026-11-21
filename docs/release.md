@@ -8,7 +8,7 @@ A `v*` tag runs `.github/workflows/release.yml`: lint, the race suite, then gore
 2. **No open Dependabot or govulncheck finding** that affects a shipped package. Merge or dismiss each with a reason.
 3. **The benchmark baseline is current.** `make bench` passes, and any change to `testdata/bench/baseline.json` since the last tag was reviewed on purpose.
 4. **The live lab agrees.** On the Mac mini, `./scripts/lab-pr.sh patch` runs a scan, a report and a propose against the lab without error, and `tvt check` passes the patch. Note anything new in its gaps.
-5. **Docs match the binary.** Every command's `-h` matches its page in `docs/` (scan, report, why, propose, check, confirm, version), and the README's command list is current.
+5. **Docs match the binary.** Every command's `-h` matches its page in `docs/` (init, scan, report, why, propose, check, confirm, version), and the README's command list is current.
 6. **The schema is frozen.** If `SchemaVersion` moved since the last tag, `pkg/store/testdata/schema/vN.sql` exists and the upgrade test passes from the previous release's version.
 7. **Release notes.** Write the highlights, any schema upgrade, and any change to what tvt reads (a new query, endpoint or log) at the top of the release, since goreleaser's changelog is commit titles only.
 
