@@ -504,10 +504,10 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 		}
 		return nil, skipped, ""
 	}
-	// Level tiers (S10 item 3): written in OTel Collector pipelines with a
-	// cold exporter.
+	// Level tiers (S10 item 3): an OTel Collector's go to its own writer;
+	// Fluent Bit and Alloy write them as reroutes of the lines below warn.
 	recs = slices.DeleteFunc(slices.Clone(recs), func(rec report.Recommendation) bool {
-		if rec.Action != report.ActionLevelTier {
+		if rec.Action != report.ActionLevelTier || p.Kind == "fluentbit" || p.Kind == "alloy" {
 			return false
 		}
 		switch {
@@ -567,7 +567,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 	// Stream reroutes: Fluent Bit above; Alloy below, with the drops.
 	var drops, reroutes []report.Recommendation
 	for _, rec := range recs {
-		if rec.Action == report.ActionReroute {
+		if rec.Action == report.ActionReroute || rec.Action == report.ActionLevelTier {
 			switch {
 			case p.Kind != "alloy":
 				skipped = append(skipped, proposal{Rec: rec, Note: "no writer for stream reroutes in " + p.Kind + " pipelines yet"})
@@ -617,7 +617,7 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 			continue
 		}
 		d := dropOf(rec.ID, []report.Recommendation{rec}, scan)
-		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold})
+		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold, BelowWarn: rec.Action == report.ActionLevelTier})
 	}
 	if len(recs) == 0 && len(ivs) == 0 && len(tiers) == 0 {
 		return proposeAlloyRoutesOnly(p, reroutes, routes, checkouts, scan, check, skipped)
@@ -1284,7 +1284,7 @@ func proposeFluentBit(p config.Pipeline, recs []report.Recommendation, root stri
 	var ok []report.Recommendation
 	var routes []propose.Route
 	for _, rec := range recs {
-		if rec.Action != report.ActionReroute {
+		if rec.Action != report.ActionReroute && rec.Action != report.ActionLevelTier {
 			skipped = append(skipped, proposal{Rec: rec, Note: "a fluentbit pipeline carries logs; no writer for " + rec.Action + " there"})
 			continue
 		}
@@ -1298,7 +1298,7 @@ func proposeFluentBit(p config.Pipeline, recs []report.Recommendation, root stri
 			continue
 		}
 		d := dropOf(rec.ID, []report.Recommendation{rec}, scan)
-		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold})
+		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold, BelowWarn: rec.Action == report.ActionLevelTier})
 		ok = append(ok, rec)
 	}
 	if len(ok) == 0 {
@@ -1639,7 +1639,7 @@ func proposeFluentBitHelm(p config.Pipeline, recs []report.Recommendation, root 
 	var ok []report.Recommendation
 	var routes []propose.Route
 	for _, rec := range recs {
-		if rec.Action != report.ActionReroute {
+		if rec.Action != report.ActionReroute && rec.Action != report.ActionLevelTier {
 			skipped = append(skipped, proposal{Rec: rec, Note: "a fluentbit pipeline carries logs; no writer for " + rec.Action + " there"})
 			continue
 		}
@@ -1653,7 +1653,7 @@ func proposeFluentBitHelm(p config.Pipeline, recs []report.Recommendation, root 
 			continue
 		}
 		d := dropOf(rec.ID, []report.Recommendation{rec}, scan)
-		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold})
+		routes = append(routes, propose.Route{ID: rec.ID, Scan: scan, Evidence: d.Evidence, Reason: d.Reason, Stream: labels, Cold: p.Cold, BelowWarn: rec.Action == report.ActionLevelTier})
 		ok = append(ok, rec)
 	}
 	fail := func(note string) ([]proposal, []proposal, string) {

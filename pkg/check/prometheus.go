@@ -203,7 +203,13 @@ func fluentbitEffects(p report.PipelineDef, path string, src []byte, ix *index) 
 		if !textGuard(ruleText) {
 			out = append(out, guardEffect(p, path, comp, what+" with no negative lookahead keeping the error pattern", fmt.Sprintf("line %d", f.Line), blockAt(blocks, f.Line)))
 		}
+		belowWarn := name == "rewrite_tag" && lookaheadLevel(ruleText)
 		for _, s := range ix.of(p.Name, "stream") {
+			if belowWarn && s.WarnPlus && s.Record == "" {
+				// A level tier (S10 item 3): every reader keeps to warn and
+				// above, and only lines naming a lower level move.
+				continue
+			}
 			rule := ruleFor(s)
 			reason := fmt.Sprintf("may take lines of %s from Loki, %s", s.Name, why(s))
 			out = append(out, effect{rule: rule, pipeline: p.Name, file: path, component: comp, signal: s.ID, reason: reason,
