@@ -18,6 +18,10 @@ type Branch struct {
 	Name     string
 	Patch    string
 	Message  string
+	// Revert, when set, is a second branch pushed on top of Name with a
+	// commit that undoes the change (S10 item 6: every drop comes with
+	// its revert).
+	Revert string
 }
 
 // Push applies b.Patch on origin's base in a temporary worktree (the
@@ -36,8 +40,16 @@ func Push(ctx context.Context, b Branch) (base string, err error) {
 		}
 		return strings.TrimSpace(out.String()), nil
 	}
-	if b.Name == "" || strings.ContainsAny(b.Name, " \t\n") || strings.HasPrefix(b.Name, "-") {
+	if b.Name == "" {
 		return "", fmt.Errorf("vcs: bad branch name %q", b.Name)
+	}
+	for _, n := range []string{b.Name, b.Revert} {
+		if strings.ContainsAny(n, " \t\n") || strings.HasPrefix(n, "-") {
+			return "", fmt.Errorf("vcs: bad branch name %q", n)
+		}
+	}
+	if b.Revert == b.Name {
+		return "", fmt.Errorf("vcs: the revert branch can't be the change's own branch")
 	}
 	base = b.Base
 	if base == "" {
@@ -79,6 +91,14 @@ func Push(ctx context.Context, b Branch) (base string, err error) {
 	}
 	if _, err := git(wt, "push", "--quiet", "--force", "origin", "HEAD:refs/heads/"+b.Name); err != nil {
 		return "", err
+	}
+	if b.Revert != "" {
+		if _, err := git(wt, "revert", "--no-edit", "HEAD"); err != nil {
+			return "", err
+		}
+		if _, err := git(wt, "push", "--quiet", "--force", "origin", "HEAD:refs/heads/"+b.Revert); err != nil {
+			return "", err
+		}
 	}
 	return base, nil
 }
