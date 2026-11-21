@@ -2,6 +2,7 @@ package check
 
 import (
 	"fmt"
+	"regexp"
 	"regexp/syntax"
 	"strconv"
 	"strings"
@@ -44,6 +45,37 @@ func alloyEffects(p report.PipelineDef, path string, src []byte, ix *index) ([]e
 				rules = append(rules, r)
 			}
 			out = append(out, relabelEffects(p, path, comp, rules, nil, ix, blocks)...)
+		case name == "prometheus.remote_write":
+			// write_relabel_config in each endpoint drops metrics on the
+			// way to that backend (S10 item 2 debug pass: check never read
+			// them, so an Alloy remote-write drop passed unseen).
+			var targets []writeTarget
+			for i, es := range b.Body {
+				eb, ok := es.(*ast.BlockStmt)
+				if !ok || len(eb.Name) != 1 || eb.Name[0] != "endpoint" {
+					continue
+				}
+				var rules []relabelRule
+				name := fmt.Sprintf("%s endpoint %d", comp, i)
+				for _, rs := range eb.Body {
+					rb, ok := rs.(*ast.BlockStmt)
+					if !ok || len(rb.Name) != 1 || rb.Name[0] != "write_relabel_config" {
+						continue
+					}
+					r, err := alloyRelabelRule(rb)
+					if err != nil {
+						return nil, fmt.Errorf("%s: %w", name, err)
+					}
+					rules = append(rules, r)
+				}
+				if v, ok := attrOf(eb.Body, "name"); ok {
+					if s, ok := literal(v); ok {
+						name = fmt.Sprintf("%s endpoint %q", comp, s)
+					}
+				}
+				targets = append(targets, writeTarget{name: name, rules: rules, tier: ix.dormantTenant != "" && alloyTenant(src, eb) == ix.dormantTenant})
+			}
+			out = append(out, writeTargetEffects(p, path, targets, ix, blocks)...)
 		case name == "loki.relabel":
 			out = append(out, lokiRelabelEffects(p, path, comp, b, ix, blocks)...)
 		case name == "loki.process":
@@ -67,6 +99,26 @@ func alloyEffects(p report.PipelineDef, path string, src []byte, ix *index) ([]e
 		}
 	}
 	return out, nil
+}
+
+// alloyTenantRe finds X-Scope-OrgID in an endpoint's headers object.
+var alloyTenantRe = regexp.MustCompile(`"X-Scope-OrgID"\s*=\s*"([^"]*)"`)
+
+// alloyTenant is the tenant an Alloy remote_write endpoint sends to, from
+// a literal X-Scope-OrgID header; empty when it has none.
+func alloyTenant(src []byte, eb *ast.BlockStmt) string {
+	v, ok := attrOf(eb.Body, "headers")
+	if !ok {
+		return ""
+	}
+	start, end := ast.StartPos(v).Position().Offset, ast.EndPos(v).Position().Offset
+	if start < 0 || end >= len(src) || start > end {
+		return ""
+	}
+	if m := alloyTenantRe.FindSubmatch(src[start : end+1]); m != nil {
+		return string(m[1])
+	}
+	return ""
 }
 
 func recordSpanText(ix *index) string {
