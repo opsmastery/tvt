@@ -34,7 +34,12 @@ func TestProposeLevelTier(t *testing.T) {
 	r := report.Build(in, 0)
 	r.Recommendations = []report.Recommendation{{ID: "level_tier:loki:stream:" + sel, Action: report.ActionLevelTier,
 		Signal:   report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel, Source: "loki"},
-		Pipeline: "otelcol-agent", Proposable: true, EvidenceHash: "abc", Savings: report.Savings{Monthly: 0.4, Currency: "USD"}}}
+		Pipeline: "otelcol-agent", Proposable: true, EvidenceHash: "abc", Savings: report.Savings{Monthly: 0.4, Currency: "USD"}},
+		// A collapse of the same stream's repeated lines (S10 item 4)
+		// goes in the same pipeline, log_dedup first.
+		{ID: "collapse:loki:stream:" + sel, Action: report.ActionCollapse,
+			Signal:   report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel, Source: "loki"},
+			Pipeline: "otelcol-agent", Proposable: true, EvidenceHash: "def", Savings: report.Savings{Monthly: 0.1, Currency: "USD"}}}
 	dir := t.TempDir()
 	rj := filepath.Join(dir, "report.json")
 	b, _ := json.Marshal(r)
@@ -75,7 +80,10 @@ func TestProposeLevelTier(t *testing.T) {
 		`and not (log.attributes["event.name"] == "tool_result") and not (log.attributes["event.name"] == "tool_decision")`,
 		"+    logs/tvt-tier:",
 		"+      exporters: [file/cold]",
-		"processors: [filter/tvt-tier-hot, batch]",
+		"processors: [filter/tvt-tier-hot, log_dedup/tvt, batch]",
+		"+  log_dedup/tvt:",
+		`"recommendation": "collapse:loki:stream:{service_name=\"coding-agent\"}"`,
+		"unread stream of repeated lines",
 		`"recommendation": "level_tier:loki:stream:{service_name=\"coding-agent\"}"`,
 		"stream whose lines below warn nothing reads",
 	} {

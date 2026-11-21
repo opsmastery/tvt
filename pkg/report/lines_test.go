@@ -32,16 +32,30 @@ func TestLineFindingRows(t *testing.T) {
 	if f.Savings != (Savings{Monthly: 0.5, Currency: "USD", Approximate: true}) || f.Handoff != ZeroreadsURL {
 		t.Errorf("savings %+v, handoff %q", f.Savings, f.Handoff)
 	}
-	if !strings.Contains(f.Action, "10000 times in 1m") || !strings.Contains(f.Action, "zeroreads") || !strings.Contains(f.Action, "tvt changes nothing") {
+	if !strings.Contains(f.Action, "10000 times in 1m") || !strings.Contains(f.Action, "zeroreads") || !strings.Contains(f.Action, "proposes collapsing them") {
 		t.Errorf("action %q", f.Action)
 	}
 	if again := Build(lineFixture(), 0).LineFindings[0].ID; !strings.HasPrefix(f.ID, "line-") || again != f.ID {
 		t.Errorf("ids %q, %q: want stable", f.ID, again)
 	}
-	// A line finding is not a recommendation and adds to no total.
+	// A line finding is not a recommendation; its repeated line in a
+	// stream nothing reads adds one collapse (S10 item 4), and only that.
 	plain := Build(fixture(), 0)
-	if len(r.Recommendations) != len(plain.Recommendations) || r.Totals != plain.Totals {
-		t.Errorf("line findings changed recommendations or totals: %+v vs %+v", r.Totals, plain.Totals)
+	collapses := 0
+	for _, rec := range r.Recommendations {
+		if rec.Action == ActionCollapse {
+			collapses++
+		}
+	}
+	want := plain.Totals
+	want.Recommendations++
+	got := r.Totals
+	if collapses != 1 || len(r.Recommendations) != len(plain.Recommendations)+1 || got.StreamSavings <= want.StreamSavings {
+		t.Errorf("want one collapse added: %d collapses, %+v vs %+v", collapses, got, plain.Totals)
+	}
+	got.StreamSavings = want.StreamSavings
+	if got != want {
+		t.Errorf("totals beyond the collapse changed: %+v vs %+v", r.Totals, want)
 	}
 	if len(plain.LineFindings) != 0 || plain.LineFindings == nil {
 		t.Errorf("no findings: %#v, want an empty list", plain.LineFindings)
