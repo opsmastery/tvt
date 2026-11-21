@@ -30,7 +30,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 28
+const SchemaVersion = 29
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -506,6 +506,13 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 			if _, err := tx.ExecContext(ctx, q); err != nil {
 				return err
 			}
+		}
+	}
+	if from < 29 {
+		// The merges table comes from the schema's CREATE TABLE IF NOT
+		// EXISTS, run before these steps.
+		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = '29' WHERE key = 'schema_version'`); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()
@@ -1067,6 +1074,7 @@ type Scan struct {
 	sloFinding  *sql.Stmt
 	pipeline    *sql.Stmt
 	overflow    *sql.Stmt
+	merge       *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -1175,6 +1183,8 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		{&sc.queryCost, `INSERT INTO query_costs (scan_id, consumer_id, queries, samples, bytes) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.sloFinding, `INSERT INTO slo_findings (scan_id, kind, subject, name, detail, fix) VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.pipeline, `INSERT INTO pipeline_targets (scan_id, subject, pipeline, note, jobs) VALUES (?, ?, ?, ?, ?)`},
+		{&sc.merge, `INSERT OR IGNORE INTO merges (repo, proposal_scan, recommendation, signal_id, merged_at, first_scan, expected)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.overflow, `INSERT INTO overflow_findings (scan_id, signal, series, capped, readers) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.score, `INSERT INTO scores (scan_id, signal_id, monthly_cost, usage_weight, strongest, confidence, priority, held)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`},
@@ -1387,6 +1397,40 @@ func (sc *Scan) PutQueryCost(ctx context.Context, c graph.QueryCost) error {
 
 // PutPipelineTarget records one subject's pipeline target, once per
 // subject. Unmapped (empty Pipeline) needs a Note saying why.
+// PutMerge records a merged tvt change the first time a scan sees it; a
+// later scan's copy is ignored (S11 item 1).
+func (sc *Scan) PutMerge(ctx context.Context, m graph.Merge) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if m.Repo == "" || m.Recommendation == "" || m.SignalID == "" || m.MergedAt.IsZero() {
+		return errors.New("store: merge: Repo, Recommendation, SignalID and MergedAt are required")
+	}
+	_, err := sc.merge.ExecContext(ctx, m.Repo, m.ProposalScan, m.Recommendation, m.SignalID, millis(m.MergedAt), sc.ID, m.Expected)
+	return wrap("merge", m.Recommendation, err)
+}
+
+// Merges returns every merged tvt change recorded so far, oldest first.
+func (s *Store) Merges(ctx context.Context) ([]graph.Merge, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT repo, proposal_scan, recommendation, signal_id, merged_at, first_scan, expected FROM merges ORDER BY merged_at, repo, recommendation`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.Merge
+	for rows.Next() {
+		var m graph.Merge
+		var at int64
+		if err := rows.Scan(&m.Repo, &m.ProposalScan, &m.Recommendation, &m.SignalID, &at, &m.FirstScan, &m.Expected); err != nil {
+			return nil, err
+		}
+		m.MergedAt = fromMillis(at)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 func (sc *Scan) PutPipelineTarget(ctx context.Context, t graph.PipelineTarget) error {
 	if err := sc.check(); err != nil {
 		return err

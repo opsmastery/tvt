@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,10 +13,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +37,7 @@ import (
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 	"github.com/Opsmastery-Summit/tvt/pkg/propose"
+	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/Opsmastery-Summit/tvt/pkg/scan"
 	"github.com/Opsmastery-Summit/tvt/pkg/score"
 	"github.com/Opsmastery-Summit/tvt/pkg/store"
@@ -171,6 +175,9 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		}
 		in.Pipelines = cfg.Pipelines
 		in.Rewrites, in.RewriteErrs = readRewrites(cfg.Pipelines)
+		var mergeErrs []string
+		in.Merged, mergeErrs = readMerges(ctx, cfg.Pipelines)
+		in.RewriteErrs = append(in.RewriteErrs, mergeErrs...)
 		in.MinWindowDays = cfg.WindowDays
 		in.Seasons = cfg.Seasons
 		// Validated when the config was read.
@@ -928,6 +935,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 			return err
 		}
 	}
+	for _, m := range g.Merged {
+		if err := sc.PutMerge(ctx, m); err != nil {
+			return err
+		}
+	}
 	for _, f := range g.OverflowFindings {
 		if err := sc.PutOverflowFinding(ctx, f); err != nil {
 			return err
@@ -1373,6 +1385,59 @@ func ruleSummary(costs []graph.RuleCost, findings []graph.RuleFinding) string {
 		parts = append(parts, fmt.Sprintf("%s %d", k, kinds[k]))
 	}
 	return s + " (" + strings.Join(parts, ", ") + ")"
+}
+
+// readMerges reads the merged tvt changes from each pipeline repo's
+// checkout (S11 item 1): a .tvt/proposal.json there came in with a merged
+// tvt PR (only tvt's branch adds it), and its last commit is when. A repo
+// is read once; a checkout that isn't a Git repo, or has no proposal, adds
+// nothing. Errors are reported, never fatal.
+func readMerges(ctx context.Context, ps []config.Pipeline) ([]graph.Merge, []string) {
+	var out []graph.Merge
+	var errs []string
+	seen := map[string]bool{}
+	for _, p := range ps {
+		if p.Checkout == "" || p.Repo == "" || seen[p.Repo] {
+			continue
+		}
+		seen[p.Repo] = true
+		path := filepath.Join(p.Checkout, filepath.FromSlash(report.ProposalPath))
+		b, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", p.Repo, err))
+			continue
+		}
+		var prop report.Proposal
+		if err := json.Unmarshal(b, &prop); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %s: %v", p.Repo, report.ProposalPath, err))
+			continue
+		}
+		cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%ct", "--", report.ProposalPath)
+		cmd.Dir = p.Checkout
+		ts, err := cmd.Output()
+		secs, perr := strconv.ParseInt(strings.TrimSpace(string(ts)), 10, 64)
+		if err != nil || perr != nil {
+			errs = append(errs, fmt.Sprintf("%s: when %s was committed is unknown (not a Git checkout, or uncommitted): its changes aren't in the ledger", p.Repo, report.ProposalPath))
+			continue
+		}
+		at := time.Unix(secs, 0).UTC()
+		for _, changes := range prop.Pipelines {
+			for _, c := range changes {
+				out = append(out, graph.Merge{Repo: p.Repo, ProposalScan: prop.Scan, Recommendation: c.Recommendation, SignalID: c.Signal,
+					MergedAt: at, Expected: c.Expected.MonthlySaving})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Repo != out[j].Repo {
+			return out[i].Repo < out[j].Repo
+		}
+		return out[i].Recommendation < out[j].Recommendation
+	})
+	return out, errs
 }
 
 // readRewrites reads each pipeline's name-touching rules from its
