@@ -7,17 +7,23 @@ builds:
       - CGO_ENABLED=0
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
+    # Reproducible: no local paths, and every timestamp is the commit's, so
+    # two builds of one commit give byte-identical binaries (CI checks it).
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w
       - -X github.com/Opsmastery-Summit/tvt/internal/version.Version={{.Version}}
       - -X github.com/Opsmastery-Summit/tvt/internal/version.Commit={{.ShortCommit}}
-      - -X github.com/Opsmastery-Summit/tvt/internal/version.Date={{.Date}}
+      - -X github.com/Opsmastery-Summit/tvt/internal/version.Date={{.CommitDate}}
 
 archives:
   - formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
+    builds_info:
+      mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: checksums.txt
