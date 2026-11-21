@@ -54,6 +54,11 @@ type proposeOptions struct {
 // (S7 item 10), and the branch is tvt's.
 const prBranch = "tvt/propose"
 
+// revertBranch holds the commit that undoes prBranch's (S10 item 6): its
+// PR is based on prBranch, so GitHub retargets it to the base branch
+// once the change merges and its branch is deleted.
+const revertBranch = "tvt/propose-revert"
+
 // checkoutFlag is --checkout repo=path, repeatable: where each pipeline
 // repo is checked out. tvt reads the files there and writes patches; it
 // never pushes, so it needs no Git token.
@@ -318,7 +323,7 @@ func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, git
 			if !ok {
 				return fmt.Errorf("no --checkout for %s", repo)
 			}
-			used, err := vcs.Push(ctx, vcs.Branch{Checkout: checkout, Base: base, Name: prBranch, Patch: patches[repo].String(),
+			used, err := vcs.Push(ctx, vcs.Branch{Checkout: checkout, Base: base, Name: prBranch, Revert: revertBranch, Patch: patches[repo].String(),
 				Message: fmt.Sprintf("tvt propose: changes from scan %d", scan)})
 			if err != nil {
 				return err
@@ -337,6 +342,18 @@ func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, git
 			if res.Note != "" {
 				fmt.Fprintf(out, "  %s\n", res.Note)
 			}
+			// Every change comes with its revert (S10 item 6, ADR 0010).
+			rev, err := o.GitHub.OpenOrUpdate(ctx, vcs.PR{Owner: owner, Repo: name, Head: revertBranch, Base: prBranch, Reviewers: reviewers,
+				Title: fmt.Sprintf("tvt: revert the telemetry changes from scan %d", scan),
+				Body:  revertBody(scan, res.URL, used)})
+			if err != nil {
+				return fmt.Errorf("the change's PR is up, but its revert PR isn't: %w", err)
+			}
+			verb = "updated"
+			if rev.Created {
+				verb = "opened"
+			}
+			fmt.Fprintf(out, "revert PR %s for %s: %s\n", verb, repo, rev.URL)
 			return nil
 		}()
 		if err != nil {
@@ -431,6 +448,16 @@ func newFileDiff(path string, content []byte) string {
 	for _, l := range lines {
 		b.WriteString("+" + l)
 	}
+	return b.String()
+}
+
+// revertBody describes the revert PR: what it undoes and when to merge it.
+func revertBody(scan int64, change, base string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Undoes tvt's telemetry changes from scan %d (%s). ", scan, change)
+	fmt.Fprintf(&b, "It's based on tvt's branch, so until that PR merges it shows exactly the commit that reverses it. Once it merges and its branch is deleted, GitHub retargets this PR to `%s`.\n\n", base)
+	b.WriteString("Merge this if something that needed the dropped data turns up: it puts back what tvt removed, and adds nothing. `tvt check` needs no owner confirmation for it, since it drops nothing.\n\n")
+	b.WriteString("tvt regenerates both branches on each `tvt propose`, so don't edit them by hand.\n")
 	return b.String()
 }
 
