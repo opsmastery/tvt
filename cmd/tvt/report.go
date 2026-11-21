@@ -111,6 +111,7 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 		if d, err := model.ParseDuration(cfg.Tiers.DormantRetention); err == nil && cfg.Tiers.DormantRetention != "" {
 			in.DormantRetention = time.Duration(d)
 		}
+		in.DormantTenant = cfg.Tiers.DormantTenant
 		if in.Decisions, err = repoDecisions(cfg); err != nil {
 			return err
 		}
