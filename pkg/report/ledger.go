@@ -36,6 +36,24 @@ type Ledger struct {
 	// this scan's rate (S11 item 3); 0 for a vendor card.
 	DiskFreedBytes      int64   `json:"disk_freed_bytes,omitempty"`
 	RetentionDaysGained float64 `json:"retention_days_gained,omitempty"`
+	// Collector is what each OTel Collector exporter sent per second
+	// before the first merge and since the last one, from the Collector's
+	// own counters (S11 item 4).
+	Collector []CollectorRate `json:"collector,omitempty"`
+}
+
+// CollectorRate is one Collector exporter's send rate for one signal:
+// Before over the last two scans before the first merge, After over the
+// last two scans after the last merge. A pair with a counter reset (a
+// restart) between them has no rate: Known says which are.
+type CollectorRate struct {
+	Pipeline    string  `json:"pipeline"`
+	Exporter    string  `json:"exporter"`
+	Signal      string  `json:"signal"`
+	Before      float64 `json:"before_per_second"`
+	After       float64 `json:"after_per_second"`
+	BeforeKnown bool    `json:"before_known"`
+	AfterKnown  bool    `json:"after_known"`
 }
 
 // LedgerRow is one merged recommendation.
@@ -186,4 +204,87 @@ func growth(before, now map[string]graph.Cost, baseline int64, saved float64) *G
 	g.Growth = g.Total + saved
 	g.Existing = g.Growth - g.NewSignals
 	return g
+}
+
+// collectorRates turns the Collector counters into send rates before the
+// first merge and after the last one.
+func collectorRates(merges []graph.Merge, sent map[int64][]graph.CollectorSent, times map[int64]time.Time) []CollectorRate {
+	if len(merges) == 0 || len(sent) == 0 {
+		return nil
+	}
+	first, last := merges[0].MergedAt, merges[0].MergedAt
+	for _, m := range merges {
+		if m.MergedAt.Before(first) {
+			first = m.MergedAt
+		}
+		if m.MergedAt.After(last) {
+			last = m.MergedAt
+		}
+	}
+	var ids []int64
+	for id := range sent {
+		if _, ok := times[id]; ok {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return times[ids[i]].Before(times[ids[j]]) })
+	var before, after []int64
+	for _, id := range ids {
+		switch {
+		case times[id].Before(first):
+			before = append(before, id)
+		case times[id].After(last):
+			after = append(after, id)
+		}
+	}
+	type key struct{ pipeline, exporter, signal string }
+	value := func(id int64) map[key]float64 {
+		out := map[key]float64{}
+		for _, c := range sent[id] {
+			out[key{c.Pipeline, c.Exporter, c.Signal}] = c.Sent
+		}
+		return out
+	}
+	rows := map[key]*CollectorRate{}
+	row := func(k key) *CollectorRate {
+		if rows[k] == nil {
+			rows[k] = &CollectorRate{Pipeline: k.pipeline, Exporter: k.exporter, Signal: k.signal}
+		}
+		return rows[k]
+	}
+	rate := func(pair []int64, set func(*CollectorRate, float64)) {
+		if len(pair) < 2 {
+			return
+		}
+		a, b := pair[len(pair)-2], pair[len(pair)-1]
+		secs := times[b].Sub(times[a]).Seconds()
+		if secs <= 0 {
+			return
+		}
+		va, vb := value(a), value(b)
+		for k, v := range vb {
+			if prev, ok := va[k]; ok && v >= prev {
+				set(row(k), (v-prev)/secs)
+			} else {
+				row(k)
+			}
+		}
+	}
+	rate(before, func(r *CollectorRate, v float64) { r.Before, r.BeforeKnown = v, true })
+	rate(after, func(r *CollectorRate, v float64) { r.After, r.AfterKnown = v, true })
+	out := make([]CollectorRate, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, *r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Pipeline != b.Pipeline {
+			return a.Pipeline < b.Pipeline
+		}
+		if a.Exporter != b.Exporter {
+			return a.Exporter < b.Exporter
+		}
+		return a.Signal < b.Signal
+	})
+	return out
 }
