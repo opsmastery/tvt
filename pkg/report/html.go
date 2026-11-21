@@ -22,7 +22,16 @@ var page = template.Must(template.New("report.html.tmpl").Funcs(template.FuncMap
 		return s
 	},
 	"pct": pct,
-	"bytes": func(v float64) string {
+	"bytes": func(n any) string {
+		var v float64
+		switch x := n.(type) {
+		case float64:
+			v = x
+		case int64:
+			v = float64(x)
+		case int:
+			v = float64(x)
+		}
 		units := []string{"B", "kB", "MB", "GB", "TB"}
 		i := 0
 		for v >= 1000 && i < len(units)-1 {

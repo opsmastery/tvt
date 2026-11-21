@@ -396,6 +396,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			var msg string
 			in.Patterns, msg = streamPatterns(ctx, lc, in.StreamVolumes)
 			fmt.Fprintf(out, "%-12s %s\n", "patterns", msg)
+			fmt.Fprintf(out, "%-12s %s\n", "levels", streamLevels(ctx, lc, in.StreamVolumes))
 		}
 	}
 
@@ -681,6 +682,67 @@ func history(ctx context.Context, path string) (scan.History, error) {
 // what the pattern ingester keeps.
 const patternWindow = 3 * time.Hour
 
+// streamLevels measures bytes per line level for the scan.LevelStreams
+// largest streams whose level isn't a label (S10 item 3), one tagged query
+// each (collect.LokiLevelQuery), and sets each one's Levels. A stream Loki
+// gave no detected_level stays unmeasured. Levels are an input to level
+// tiers, not protection: a failed query leaves the rest unmeasured and
+// says why.
+func streamLevels(ctx context.Context, lc *loki.Client, vols []collect.StreamVolume) string {
+	var idx []int
+	for i, v := range vols {
+		if !hasLevelLabel(v.Labels) {
+			idx = append(idx, i)
+		}
+	}
+	if len(idx) == 0 {
+		return "every stream carries its level as a label"
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return vols[idx[a]].Bytes > vols[idx[b]].Bytes })
+	idx = idx[:min(len(idx), scan.LevelStreams)]
+	names := streamLabelNames(vols)
+	measured, below := 0, 0
+	for _, i := range idx {
+		lv, err := lc.StreamLevels(ctx, loki.ExactStreamSelector(vols[i].Labels, names), scan.LevelWindow)
+		if err != nil {
+			return fmt.Sprintf("measured %d of %d streams with no level label, then: %v", measured, len(idx), err)
+		}
+		if _, none := lv[""]; none || len(lv) == 0 {
+			continue // no detected_level: discover_log_levels is off
+		}
+		vols[i].Levels = lv
+		measured++
+		for l, b := range lv {
+			if r, ok := parse.LevelRank(l); ok && r < parse.RankWarn && b > 0 {
+				below++
+				break
+			}
+		}
+	}
+	return fmt.Sprintf("%d of the %d largest streams with no level label measured per level over %s, %d with lines below warn", measured, len(idx), scan.LevelWindow, below)
+}
+
+func hasLevelLabel(labels map[string]string) bool {
+	for k := range labels {
+		if parse.IsLevelKey(k) {
+			return true
+		}
+	}
+	return false
+}
+
+// streamLabelNames is every label name across the streams, sorted.
+func streamLabelNames(vols []collect.StreamVolume) []string {
+	var names []string
+	for _, v := range vols {
+		for k := range v.Labels {
+			names = append(names, k)
+		}
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
+}
+
 // streamPatterns reads the line patterns of the scan.PatternStreams largest
 // streams, one patterns call per stream (its full label set). Patterns are
 // an input to line findings, not protection: a Loki without the pattern
@@ -693,14 +755,7 @@ func streamPatterns(ctx context.Context, lc *loki.Client, vols []collect.StreamV
 	// Ask for exactly each stream: its labels, and every other stream's
 	// label names pinned to "", so a stream carrying more labels can't add
 	// its lines (S5 debug pass).
-	var names []string
-	for _, v := range vols {
-		for k := range v.Labels {
-			names = append(names, k)
-		}
-	}
-	slices.Sort(names)
-	names = slices.Compact(names)
+	names := streamLabelNames(vols)
 	out := map[string][]collect.LinePattern{}
 	var lines int
 	for _, v := range top {
