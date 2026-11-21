@@ -12,7 +12,7 @@ Every signal tvt marks unread had no reader in your evidence window, and every g
 
 ## Install
 
-Download a release, verify its cosign signature, and put `tvt` on your PATH: [docs/install.md](docs/install.md). Or, with Go 1.26+, `go install github.com/Opsmastery-Summit/tvt/cmd/tvt@latest`.
+Download a release, verify its cosign signature, and put `tvt` on your PATH: [docs/install.md](docs/install.md). Or, with Go 1.27+, `go install github.com/Opsmastery-Summit/tvt/cmd/tvt@latest`.
 
 ## Commands
 
@@ -40,7 +40,7 @@ Credentials come from the environment (`TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `T
 
 ## Develop
 
-Requires Go 1.26+.
+Requires Go 1.27+.
 
 ```sh
 make            # lint, test, build -> bin/tvt
