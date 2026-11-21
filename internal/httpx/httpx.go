@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/internal/telemetry"
 	"github.com/Opsmastery-Summit/tvt/internal/version"
 )
 
@@ -33,7 +34,7 @@ var ErrTooLarge = errors.New("response body too large")
 
 // DefaultClient returns the client collectors use when none is set.
 func DefaultClient() *http.Client {
-	return &http.Client{Timeout: DefaultTimeout, CheckRedirect: CheckRedirect}
+	return &http.Client{Timeout: DefaultTimeout, CheckRedirect: CheckRedirect, Transport: telemetry.Transport(nil)}
 }
 
 // CheckRedirect refuses a redirect from https to plain http. Go strips

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/internal/httpx"
+	"github.com/Opsmastery-Summit/tvt/internal/telemetry"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/grafana"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect/kube"
@@ -140,7 +141,19 @@ func cmdScan(args []string, stdout, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := runScan(ctx, o, os.Getenv, stdout); err != nil {
+	shutdown, err := telemetry.Setup(ctx, os.Getenv)
+	if err != nil {
+		fmt.Fprintf(stderr, "tvt scan: %v\n", err)
+		return exitUsage
+	}
+	defer func() {
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdown(sctx); err != nil {
+			fmt.Fprintf(stderr, "tvt scan: telemetry: %v\n", err)
+		}
+	}()
+	if err := tracedScan(ctx, o, func(ctx context.Context) error { return runScan(ctx, o, os.Getenv, stdout) }); err != nil {
 		if ctx.Err() != nil {
 			fmt.Fprintln(stderr, "tvt scan: interrupted; nothing was written")
 		} else {
@@ -183,7 +196,8 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			if p.Kind != "otelcol" || p.Telemetry == "" {
 				continue
 			}
-			sent, err := otelcol.Telemetry(ctx, &http.Client{Timeout: 10 * time.Second}, p.Telemetry)
+			telemetry.RegisterBackend(p.Telemetry, "otelcol")
+			sent, err := otelcol.Telemetry(ctx, &http.Client{Timeout: 10 * time.Second, Transport: telemetry.Transport(nil)}, p.Telemetry)
 			if err != nil {
 				fmt.Fprintf(out, "%-12s %s: %v\n", "collector", p.Name, err)
 				continue
@@ -596,6 +610,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		classes[string(score.ClassHardKeep)], classes[string(score.ClassKeepHigh)], classes[string(score.ClassDormant)],
 		classes[string(score.ClassCandidate)], len(in.External))
 
+	recordScanResult(ctx, g, classes)
 	fmt.Fprintf(out, "%-12s %s\n", "scores", scoreSummary(g.Scores, in.MinWindowDays))
 	if len(g.RuleCosts) > 0 {
 		fmt.Fprintf(out, "%-12s %s\n", "rules", ruleSummary(g.RuleCosts, g.RuleFindings))
