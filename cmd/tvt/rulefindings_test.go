@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
@@ -161,7 +163,65 @@ func findRule(t *testing.T, byName map[string]string, gt groundTruth, name strin
 }
 
 // benchDB scans a benchmark state into a database and returns its path.
+// benchDBs caches each capture's scanned database across tests (a scan of
+// a capture takes about 20s, and the package has a 5-minute pre-push
+// budget): each caller gets its own copy, so tests can't see each other's
+// writes.
+var (
+	benchMu  sync.Mutex
+	benchDBs = map[string]string{}
+)
+
 func benchDB(t *testing.T, st benchState, dir string) string {
+	t.Helper()
+	benchMu.Lock()
+	defer benchMu.Unlock()
+	if cached, ok := benchDBs[dir]; ok {
+		return copyDB(t, cached)
+	}
+	db := scanBenchDB(t, st, dir)
+	if t.Failed() {
+		return db
+	}
+	keep, err := os.MkdirTemp("", "tvt-benchdb-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached := filepath.Join(keep, "tvt.db")
+	if err := copyFile(db, cached); err != nil {
+		t.Fatal(err)
+	}
+	benchDBs[dir] = cached
+	return db
+}
+
+func copyDB(t *testing.T, src string) string {
+	t.Helper()
+	dst := filepath.Join(t.TempDir(), "tvt.db")
+	if err := copyFile(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	return dst
+}
+
+// copyFile copies a SQLite database with its WAL files, if any are left.
+func copyFile(src, dst string) error {
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		b, err := os.ReadFile(src + suffix)
+		if err != nil {
+			if suffix != "" && os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		if err := os.WriteFile(dst+suffix, b, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func scanBenchDB(t *testing.T, st benchState, dir string) string {
 	t.Helper()
 	l := newLabAt(t, dir, nil)
 	db := filepath.Join(t.TempDir(), "tvt.db")

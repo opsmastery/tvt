@@ -184,6 +184,29 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 		r.Recommendations, blocked, replayLines = replayLabelRemovals(ctx, in, r.Recommendations, rp)
 		skipped = append(skipped, blocked...)
 	}
+	// ADR 0010: a signal something reads ad hoc gets a less lossy action
+	// than a drop or a whole-stream reroute, and check refuses those
+	// (least_lossy). tvt doesn't write what check would refuse; the less
+	// lossy row (a label removal, an interval, a tier) goes ahead on its
+	// own (S10 done-when, Nov 21).
+	repoOf := map[string]string{}
+	for _, p := range cfg.Pipelines {
+		repoOf[p.Name] = p.Repo
+	}
+	read := map[string]report.ReadSignal{}
+	for _, m := range report.Manifests(in, repoOf) {
+		for _, rs := range m.Read {
+			read[rs.ID] = rs
+		}
+	}
+	r.Recommendations = slices.DeleteFunc(r.Recommendations, func(rec report.Recommendation) bool {
+		rs, ok := read[rec.Signal.ID]
+		if !ok || (rec.Action != report.ActionDrop && rec.Action != report.ActionReroute) {
+			return false
+		}
+		skipped = append(skipped, proposal{Rec: rec, Note: fmt.Sprintf("read ad hoc by %d readers: ADR 0010 wants a less lossy action before a %s, and check refuses it (least_lossy)", rs.Readers, rec.Action)})
+		return true
+	})
 	var queued []proposal
 	r.Recommendations, queued = capQueue(r.Recommendations, cfg.Queue.PerOwner)
 	skipped = append(skipped, queued...)
