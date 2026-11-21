@@ -1,7 +1,7 @@
 MODULE  := github.com/Opsmastery-Summit/tvt
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
-DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+DATE    ?= $(shell TZ=UTC git log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd 2>/dev/null || echo unknown)
 LDFLAGS := -s -w \
 	-X $(MODULE)/internal/version.Version=$(VERSION) \
 	-X $(MODULE)/internal/version.Commit=$(COMMIT) \
@@ -12,7 +12,7 @@ LDFLAGS := -s -w \
 all: lint test build
 
 build:
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/tvt ./cmd/tvt
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/tvt ./cmd/tvt
 
 test:
 	go test ./...
