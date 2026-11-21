@@ -107,7 +107,9 @@ var ottlFuncs = map[string]bool{"IsMatch": true, "delete_matching_keys": true,
 	// Pseudonymised IDs (S7 item 8).
 	"set": true, "Substring": true, "SHA256": true, "String": true,
 	// Bucketing (S10 item 1).
-	"replace_pattern": true, "IsInt": true}
+	"replace_pattern": true, "IsInt": true,
+	// Level tiers (S10 item 3).
+	"IsString": true}
 
 var ottlCall = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\(`)
 

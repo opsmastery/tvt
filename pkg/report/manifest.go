@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 )
 
 // ManifestVersion is the protection manifest's format (ADR 0003, amended by
@@ -110,6 +111,8 @@ type ReadSignal struct {
 	Labels    []string `json:"labels,omitempty"`
 	AllLabels bool     `json:"all_labels,omitempty"`
 	Readers   int      `json:"readers"`
+	// WarnPlus (streams): as ProtectedSignal's, over these readers.
+	WarnPlus bool `json:"warn_plus,omitempty"`
 }
 
 // ManifestHelm is a pipeline's Helm values (tvt.yaml helm_values).
@@ -158,6 +161,11 @@ type ProtectedSignal struct {
 	// Protectors are the readers behind the class, strongest evidence
 	// first, then by consumer. Sweeps are left out: they never protect.
 	Protectors []Protector `json:"protectors"`
+	// WarnPlus (streams): every reader keeps to warn and above (a level
+	// matcher tvt reads, S10 item 3), so a level tier moving only lines
+	// below warn leaves them whole. False when any reader may see lower
+	// levels, or none is known.
+	WarnPlus bool `json:"warn_plus,omitempty"`
 }
 
 // Protector is a reader of a protected signal: names and kinds only, never
@@ -243,6 +251,16 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 			counting[c.ID] = true
 		}
 	}
+	exprOf := map[string]string{}
+	for _, c := range in.Consumers {
+		exprOf[c.ID] = c.Expr
+	}
+	allRefs := map[string][]graph.Reference{}
+	for _, ref := range in.References {
+		if !ref.Sweep {
+			allRefs[ref.SignalID] = append(allRefs[ref.SignalID], ref)
+		}
+	}
 	readers := map[string][]graph.Reference{}
 	for _, ref := range in.References {
 		if !ref.Sweep && counting[ref.ConsumerID] {
@@ -280,6 +298,7 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 			}
 			sort.Strings(rs.Labels)
 			rs.Readers = len(cons)
+			rs.WarnPlus = s.Kind == graph.KindStream && warnPlus(readers[s.ID], exprOf)
 			m.Read = append(m.Read, rs)
 			out[repos[p]] = m
 			continue
@@ -310,6 +329,7 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 			}
 			return a.Consumer < b.Consumer
 		})
+		ps.WarnPlus = s.Kind == graph.KindStream && s.Record == "" && warnPlus(allRefs[s.ID], exprOf)
 		m.Signals = append(m.Signals, ps)
 		out[r] = m
 	}
@@ -320,6 +340,21 @@ func Manifests(in Input, repos map[string]string) map[string]Manifest {
 		out[r] = m
 	}
 	return out
+}
+
+// warnPlus: there are readers and every one's query keeps to warn and
+// above.
+func warnPlus(refs []graph.Reference, exprOf map[string]string) bool {
+	if len(refs) == 0 {
+		return false
+	}
+	for _, ref := range refs {
+		floor, ok := parse.LevelFloor(exprOf[ref.ConsumerID])
+		if !ok || floor < parse.RankWarn {
+			return false
+		}
+	}
+	return true
 }
 
 // ManifestDir is the directory, under a manifest root, for a repo: its

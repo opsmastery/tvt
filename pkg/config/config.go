@@ -121,8 +121,10 @@ type Pipeline struct {
 	// config with the same gates the Collector runs with, or a config
 	// that uses a gated function fails to load.
 	FeatureGates []string `yaml:"feature_gates"`
-	// Cold is the alias of the output that takes streams tvt reroutes to
-	// cold storage (fluentbit pipelines): one the config already defines.
+	// Cold is where tvt sends streams and level tiers it moves to cold
+	// storage: the alias of an output (fluentbit pipelines), a component
+	// (alloy, such as loki.write.cold) or an exporter ID (otelcol, such as
+	// otlp_http/cold). One the config already defines.
 	Cold string `yaml:"cold"`
 	// MonitorJobs names the monitor (Kind/namespace/name) for a job tvt
 	// can't work out from the manifests (prometheus-operator pipelines: a
