@@ -233,6 +233,73 @@ func lineFilterGuard(sel string) bool {
 	return false
 }
 
+// Level filters (S10 item 3): a line filter that takes only lines naming
+// a level below warn. Judged on samples, as the guard is: it must match a
+// debug or info line and none of the warn-and-above or unlevelled ones.
+var (
+	lowLevelLines = []string{"ts=1 level=debug msg=x", `{"level":"info","msg":"ok"}`}
+	warnPlusLines = []string{"level=warn x", "level=WARNING x", `{"level":"error"}`, "lvl=fatal x", "severity=critical x", "WARN bare word", "starting worker", "level=information x",
+		`level=warn msg="debug mode, info only"`, "WARN debug info", `{"level":"error","msg":"info"}`}
+	positiveFilter = regexp.MustCompile(`\|~\s*"((?:[^"\\]|\\.)*)"`)
+)
+
+func levelOnlyRegex(re string) bool {
+	r, err := regexp.Compile(re)
+	if err != nil {
+		return false
+	}
+	low := false
+	for _, l := range lowLevelLines {
+		low = low || r.MatchString(l)
+	}
+	for _, l := range warnPlusLines {
+		if r.MatchString(l) {
+			return false
+		}
+	}
+	return low
+}
+
+// lineFilterLevel: a LogQL selector with a |~ line filter that is a level
+// filter.
+func lineFilterLevel(sel string) bool {
+	for _, m := range positiveFilter.FindAllStringSubmatch(sel, -1) {
+		re, err := strconvUnquote(`"` + m[1] + `"`)
+		if err == nil && levelOnlyRegex(re) {
+			return true
+		}
+	}
+	return false
+}
+
+// lookaheadLevel: a Fluent Bit rule whose regex has a positive lookahead
+// (?=.*X) with X a level filter.
+func lookaheadLevel(rule string) bool {
+	for rest := rule; ; {
+		i := strings.Index(rest, "(?=.*")
+		if i < 0 {
+			return false
+		}
+		rest = rest[i+len("(?=.*"):]
+		depth, end := 1, -1
+		for j := 0; j < len(rest) && end < 0; j++ {
+			switch {
+			case rest[j] == '\\':
+				j++
+			case rest[j] == '(':
+				depth++
+			case rest[j] == ')':
+				if depth--; depth == 0 {
+					end = j
+				}
+			}
+		}
+		if end > 0 && levelOnlyRegex(rest[:end]) {
+			return true
+		}
+	}
+}
+
 // textGuard: a rule's text (a Fluent Bit regex, an OTTL condition) names
 // every guard word in a negated form: a negative lookahead or not IsMatch.
 func textGuard(s string) bool {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -157,5 +159,97 @@ service:
 	}
 	if got, err := OtelcolLogsShipper([]byte("receivers:\n  otlp:\n"), "file/cold"); err != nil || got != "" {
 		t.Errorf("no pipelines: %q, %v", got, err)
+	}
+}
+
+// TestLevelLinePattern: a line names its level below warn as a key, in
+// logfmt or JSON, any case; a bare word or a warn level doesn't count.
+func TestLevelLinePattern(t *testing.T) {
+	re := regexp.MustCompile(LevelLinePattern)
+	for line, want := range map[string]bool{
+		`ts=1 level=debug msg="chunk"`: true,
+		`level=INFO msg=ok`:            true,
+		`{"level":"info","msg":"ok"}`:  true,
+		`{"ts":1, "lvl": "trace"}`:     true,
+		`severity=Debug x=1`:           true,
+		`level=warn msg="slow"`:        false,
+		`level=information x`:          false,
+		`DEBUG starting worker`:        false,
+		// The pattern doesn't parse quotes: a level key inside a message counts.
+		`msg="set level=debug for the next hour"`: true,
+		`loglevel=debug`:                      false,
+		`level=debugging`:                     false,
+		`{"level":"error","msg":"info only"}`: false,
+	} {
+		if got := re.MatchString(line); got != want {
+			t.Errorf("%q: %v, want %v", line, got, want)
+		}
+	}
+}
+
+// tierRoute is the shop's api stream as a level tier (its level isn't a
+// label there).
+var tierRoute = Route{ID: "level_tier:loki:stream:shop-api", Scan: 9, Evidence: "feedfacecafe", Reason: "lines below warn nobody reads",
+	Stream: map[string]string{"app": "shop", "component": "api", "level": "debug"}, Cold: "cold", BelowWarn: true}
+
+func TestFluentBitLevelTier(t *testing.T) {
+	src := read(t, "fluent-bit-cold.yaml")
+	out, err := FluentBit(src, tierRoute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "      rule: $log ^(?!.*(?i:error|exception|traceback|critical|fatal))(?=.*(?i:" + strings.TrimPrefix(LevelLinePattern, "(?i)") + ")).*$ tvt.cold.shop.debug false\n"
+	if !strings.Contains(string(out), want) {
+		t.Errorf("lacks %q:\n%s", want, out)
+	}
+	if again, err := FluentBit(out, tierRoute); err != nil || string(again) != string(out) {
+		t.Errorf("rerun changed the file (err %v)", err)
+	}
+	classic, err := FluentBitClassicRoutes(read(t, "fluent-bit-cold.conf"), []Route{tierRoute})
+	if err != nil || !strings.Contains(string(classic), "Rule         $log "+tierRoute.fluentRegex()+" tvt.cold.shop.debug false") {
+		t.Errorf("classic (err %v):\n%s", err, classic)
+	}
+	if strings.Contains(tierRoute.fluentRegex(), " ") {
+		t.Error("the rule's regex has a space: rewrite_tag splits the rule on spaces")
+	}
+	if os.Getenv("TVT_TEST_VALIDATORS") == "" {
+		return
+	}
+	root, done, err := validate.Scratch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer done()
+	os.WriteFile(filepath.Join(root, "fluent-bit.yaml"), out, 0o644)
+	if r := validate.Run(context.Background(), "fluentbit", root, "fluent-bit.yaml", validate.Options{NoNative: true}); !r.Ran || !r.OK {
+		t.Errorf("%+v\n%s", r, out)
+	}
+}
+
+func TestAlloyLevelTier(t *testing.T) {
+	src := strings.Replace(string(read(t, "config.alloy")), "loki.write \"loki\" {", "loki.write \"cold\" {\n  endpoint {\n    url = \"http://loki-cold:3100/loki/api/v1/push\"\n  }\n}\n\nloki.write \"loki\" {", 1)
+	r := tierRoute
+	r.Stream = map[string]string{"app": "shop", "component": "api"}
+	r.Cold = "loki.write.cold"
+	out, err := AlloyRoutes([]byte(src), []Route{r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel := `{app="shop", component="api"} !~ ` + strconv.Quote(ErrorPattern) + ` |~ ` + strconv.Quote(LevelLinePattern)
+	want := "selector = " + strconv.Quote(sel)
+	if !strings.Contains(string(out), want) {
+		t.Errorf("lacks %s:\n%s", want, out)
+	}
+	if os.Getenv("TVT_TEST_VALIDATORS") == "" {
+		return
+	}
+	root, done, err := validate.Scratch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer done()
+	os.WriteFile(filepath.Join(root, "config.alloy"), out, 0o644)
+	if r := validate.Run(context.Background(), "alloy", root, "config.alloy", validate.Options{NoNative: true}); !r.Ran || !r.OK {
+		t.Errorf("%+v\n%s", r, out)
 	}
 }

@@ -173,7 +173,7 @@ func lokiProcessEffects(p report.PipelineDef, path, comp string, body ast.Body, 
 				action, _ = literal(e)
 			}
 			if action == "drop" {
-				out = append(out, streamDropEffects(p, path, comp, "drops the lines of "+text, sel, at, blockAt(blocks, line), ix)...)
+				out = append(out, streamDropEffects(p, path, comp, "drops the lines of "+text, sel, at, blockAt(blocks, line), ix, lineFilterLevel(text))...)
 				if !lineFilterGuard(text) {
 					out = append(out, guardEffect(p, path, comp, "stage.match drops "+text+" with no !~ line filter keeping the error pattern", at, blockAt(blocks, line)))
 				}
@@ -186,21 +186,24 @@ func lokiProcessEffects(p report.PipelineDef, path, comp string, body ast.Body, 
 			out = append(out, lokiProcessEffects(p, path, comp, b.Body, sel, ix, blocks, cold)...)
 		case "stage.drop":
 			text := "drops lines (stage.drop)"
-			out = append(out, streamDropEffects(p, path, comp, text, scope, at, blockAt(blocks, line), ix)...)
+			out = append(out, streamDropEffects(p, path, comp, text, scope, at, blockAt(blocks, line), ix, false)...)
 			out = append(out, guardEffect(p, path, comp, "stage.drop can't keep the error pattern: drop with stage.match and a !~ line filter instead", at, blockAt(blocks, line)))
 			if p.Cold != "" {
 				out = append(out, effect{rule: RuleLeastLossy, pipeline: p.Name, file: path, component: comp,
 					reason: "stage.drop drops lines outright: reroute them to " + p.Cold + " first (ADR 0010: drops are staged)", at: at, block: blockAt(blocks, line)})
 			}
 		case "stage.sampling":
-			out = append(out, streamDropEffects(p, path, comp, "samples lines (stage.sampling)", scope, at, blockAt(blocks, line), ix)...)
+			out = append(out, streamDropEffects(p, path, comp, "samples lines (stage.sampling)", scope, at, blockAt(blocks, line), ix, false)...)
 			out = append(out, guardEffect(p, path, comp, "stage.sampling can't keep the error pattern: sample inside a stage.match with a !~ line filter", at, blockAt(blocks, line)))
 		}
 	}
 	return out
 }
 
-func streamDropEffects(p report.PipelineDef, path, comp, what string, sel []matcher, at, block string, ix *index) []effect {
+// belowWarn says the step takes only lines naming a level below warn (a
+// level tier's line filter, S10 item 3): readers that keep to warn and
+// above lose nothing.
+func streamDropEffects(p report.PipelineDef, path, comp, what string, sel []matcher, at, block string, ix *index, belowWarn bool) []effect {
 	out := []effect{{rule: ruleDropMarker, pipeline: p.Name, file: path, component: comp, reason: what, at: at, block: block}}
 	for _, s := range ix.read[p.Name] {
 		if s.Kind != "stream" {
@@ -209,16 +212,19 @@ func streamDropEffects(p report.PipelineDef, path, comp, what string, sel []matc
 		if ms, ok := selector(s.Name); ok && !mayOverlap(ms, sel) {
 			continue
 		}
+		if belowWarn && s.WarnPlus {
+			continue
+		}
 		out = append(out, effect{rule: RuleLeastLossy, pipeline: p.Name, file: path, component: comp, signal: s.ID,
 			reason: what + ": " + lessLossy(s), at: at, block: block})
 	}
-	if selectsWarnPlus(sel) {
+	if selectsWarnPlus(sel) && !belowWarn {
 		out = append(out, effect{rule: RuleWarnLogs, pipeline: p.Name, file: path, component: comp,
 			reason: what + ", and its selector doesn't rule out warn-and-above lines", at: at, block: block})
 	}
 	for _, s := range ix.of(p.Name, "stream") {
 		ms, ok := selector(s.Name)
-		if ok && !mayOverlap(ms, sel) {
+		if ok && !mayOverlap(ms, sel) || belowWarn && s.WarnPlus && s.Record == "" {
 			continue
 		}
 		out = append(out, effect{rule: ruleFor(s), pipeline: p.Name, file: path, component: comp, signal: s.ID,
@@ -236,7 +242,10 @@ func lokiRelabelEffects(p report.PipelineDef, path, comp string, b *ast.BlockStm
 	if e, ok := attrOf(b.Body, "forward_to"); ok {
 		if arr, ok := e.(*ast.ArrayExpr); ok {
 			for _, el := range arr.Elements {
-				if n, ok := refText(el); ok && strings.HasPrefix(n, "loki.write.") {
+				// The cold tier (pipelines[].cold, such as loki.write.cold)
+				// isn't Loki's hot side: a keep in front of it only narrows
+				// the cold copy.
+				if n, ok := refText(el); ok && strings.HasPrefix(n, "loki.write.") && strings.TrimSuffix(n, ".receiver") != p.Cold {
 					toLoki = true
 				}
 			}

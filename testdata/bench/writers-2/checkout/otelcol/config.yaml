@@ -34,6 +34,11 @@ exporters:
   otlp_http/loki:
     endpoint: http://loki:3100/otlp
   nop: {}
+  # The cold tier (tvt S10 item 3, pipelines[].cold): a stand-in for an
+  # archive, as Fluent Bit's file output and Alloy's loki.echo are. Nothing
+  # exports here until tvt's level-tier block adds logs/tvt-tier.
+  file/cold:
+    path: /tmp/cold.json
 
 service:
   pipelines:
