@@ -198,6 +198,42 @@ func federate(t *testing.T, prom string, metrics ...string) map[string][]sample 
 	return out
 }
 
+// promNow is when the restart finished, on Prometheus's clock: samples
+// carry its timestamps, and the host running the test can disagree (the
+// Mac mini was 11.9s slow of the lab VM on Nov 21, which failed every drop
+// on the first live run). It waits for /-/ready, which no query log sees,
+// and reads the response's Date header.
+func promNow(t *testing.T, prom string) time.Time {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		resp, err := http.Get(strings.TrimRight(prom, "/") + "/-/ready")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				if at, ok := serverTime(resp.Header); ok {
+					return at
+				}
+				t.Fatal("Prometheus /-/ready sent no Date header")
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Prometheus not ready 2m after the restart: %v", err)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// serverTime reads a response's Date header. It has whole seconds, so the
+// moment is rounded up: never earlier than the server's clock.
+func serverTime(h http.Header) (time.Time, bool) {
+	at, err := http.ParseTime(h.Get("Date"))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return at.Add(time.Second), true
+}
+
 func TestLabApply(t *testing.T) {
 	if os.Getenv("TVT_TEST_LAB") == "" {
 		t.Skip("set TVT_TEST_LAB=1 to apply a proposed patch to the running lab")
@@ -232,11 +268,10 @@ func TestLabApply(t *testing.T) {
 		cmd := exec.Command("podman", append([]string{"compose", "restart"}, services...)...)
 		cmd.Dir = lab
 		cmd.Env = append(os.Environ(), "LAB_LOGS="+filepath.Join(lab, "lab-logs"))
-		at := time.Now()
 		if b, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("podman compose restart %v: %v\n%s", services, err, b)
 		}
-		return at
+		return promNow(t, prom)
 	}
 	if b, _ := exec.Command("git", "-C", lab, "status", "--porcelain", "--", "prometheus", "alloy", "fluent-bit", "otelcol").Output(); len(b) > 0 {
 		t.Fatalf("the lab's pipeline files have local changes; commit or revert them first:\n%s", b)
