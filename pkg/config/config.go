@@ -466,6 +466,9 @@ func (c *Config) validate() error {
 			return err
 		}
 	}
+	if n := c.Tiers.SampleOneIn; n != 0 && (n < 2 || n > 1000) {
+		return fmt.Errorf("tiers.sample_one_in: %d; want 0 (off) or 2 to 1000", n)
+	}
 	if t := c.Tiers.DormantTenant; t != "" && (strings.ContainsAny(t, " \t\n\r|\"'") || len(t) > 150) {
 		return fmt.Errorf("tiers.dormant_tenant %q: want a Mimir tenant ID (no spaces, quotes or |)", t)
 	}
@@ -699,6 +702,10 @@ func StreamMatchers(sel string) ([]parse.Matcher, error) {
 type Tiers struct {
 	DormantRetention string `yaml:"dormant_retention"`
 	DormantTenant    string `yaml:"dormant_tenant"`
+	// SampleOneIn (S10 item 4): for an unread stream whose Alloy pipeline
+	// has no cold tier, keep one line in N (and every error-pattern line)
+	// instead of skipping it. 0 is off: rerouting is the default.
+	SampleOneIn int `yaml:"sample_one_in"`
 }
 
 type Queue struct {

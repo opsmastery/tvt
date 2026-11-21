@@ -574,6 +574,93 @@ func TestProposeAlloyRoutes(t *testing.T) {
 	}
 }
 
+// TestProposeAlloySample: an unread stream on an Alloy pipeline with no
+// cold tier is sampled when tiers.sample_one_in is set (S10 item 4), and
+// skipped when it isn't. The claimed saving scales by 1 - 1/n, and check
+// passes the change.
+func TestProposeAlloySample(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := readLatest(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := report.Build(in, 0)
+	sel := `{app="shop", component="api", level="info"}`
+	r.Recommendations = append(r.Recommendations, report.Recommendation{ID: "reroute:loki:stream:" + sel, Action: report.ActionReroute,
+		Signal:  report.SignalRef{ID: "loki:stream:" + sel, Kind: "stream", Name: sel, Source: "loki"},
+		Savings: report.Savings{Monthly: 10, Currency: "USD"}, Expected: report.Expected{MonthlySaving: 10},
+		Pipeline: "alloy-apps", Proposable: true})
+	dir := t.TempDir()
+	rj := filepath.Join(dir, "report.json")
+	b, _ := json.Marshal(r)
+	if err := os.WriteFile(rj, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgSrc, err := os.ReadFile(filepath.Join(dirs[st.Name], "tvt-lab.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	run := func(t *testing.T, cfgText string) (string, string) {
+		cfg := filepath.Join(dirs[st.Name], "tvt-lab.sample-test.yaml")
+		if err := os.WriteFile(cfg, []byte(cfgText), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Remove(cfg) })
+		checkout := t.TempDir()
+		if err := os.CopyFS(checkout, os.DirFS(filepath.Join(dirs[st.Name], "checkout"))); err != nil {
+			t.Fatal(err)
+		}
+		pd := filepath.Join(t.TempDir(), "p")
+		var out strings.Builder
+		o := proposeOptions{DB: db, Config: cfg, Report: rj, Output: "patch", Dir: pd, Checkouts: checkoutFlag{repo: checkout}, Validate: "off"}
+		if err := runPropose(context.Background(), o, &out); err != nil {
+			t.Fatal(err)
+		}
+		patch, _ := os.ReadFile(filepath.Join(pd, report.ManifestDir(repo)+".patch"))
+		return out.String(), string(patch)
+	}
+	t.Run("off", func(t *testing.T) {
+		out, _ := run(t, string(cfgSrc))
+		if !strings.Contains(out, "skipped reroute:loki:stream:"+sel) || !strings.Contains(out, "tiers.sample_one_in is off") {
+			t.Errorf("not skipped with the reason:\n%s", out)
+		}
+	})
+	t.Run("on", func(t *testing.T) {
+		out, patch := run(t, string(cfgSrc)+"\ntiers:\n  sample_one_in: 10\n")
+		if strings.Contains(out, "skipped reroute:loki:stream:"+sel) {
+			t.Fatalf("the sample was skipped:\n%s", out)
+		}
+		for _, want := range []string{"+    stage.sampling {", "+      rate = 0.1", "sampled 1 in 10"} {
+			if !strings.Contains(patch, want) {
+				t.Errorf("patch lacks %q", want)
+			}
+		}
+		if strings.Contains(patch, "tvt_cold") {
+			t.Error("a sample patch routes to a cold tier")
+		}
+	})
+}
+
+func TestSampledRec(t *testing.T) {
+	rec := report.Recommendation{Signal: report.SignalRef{Name: `{app="x"}`}, Savings: report.Savings{Monthly: 10},
+		Expected: report.Expected{MonthlySaving: 10, HotBytesPerDayFall: 1000, SharePct: 20, Statements: []string{"moves to cold"}}}
+	got := sampledRec(rec, 4)
+	if got.Savings.Monthly != 7.5 || got.Expected.MonthlySaving != 7.5 || got.Expected.HotBytesPerDayFall != 750 || got.Expected.SharePct != 15 {
+		t.Errorf("%+v", got)
+	}
+	if strings.Contains(strings.Join(got.Expected.Statements, " "), "cold storage instead") || !strings.Contains(got.Expected.Statements[0], "1 line in 4") {
+		t.Errorf("statements %q", got.Expected.Statements)
+	}
+}
+
 // TestProposeFluentBitClassic: a fluentbit pipeline whose file is classic
 // .conf gets the rewrite_tag as a [FILTER] section.
 func TestProposeFluentBitClassic(t *testing.T) {

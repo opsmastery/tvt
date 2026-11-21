@@ -31,3 +31,7 @@ A drop is the most lossy action tvt can propose, and often not the best one. A m
 - Recommendations show the action and why the less lossy ones before it didn't work, so an owner sees "label removal would break panel 3" instead of only "drop".
 - Some savings are smaller than a drop would give. The report shows both numbers.
 - Each action is a template per pipeline kind. S10 builds them; an action with no template for a pipeline is skipped, and the next one in the order is tried.
+
+## Amendment: sampling after rerouting (Nov 21, 2026)
+
+Jason's decision: for an unread stream, rerouting to a cold tier stays the default, ahead of sampling, though the logs ladder above puts sampling first. A reroute keeps every line, so an owner who finds a reader later loses nothing. Sampling is written only where a reroute can't be: an Alloy pipeline with no cold component, and only when `tiers.sample_one_in` asks for it. Records are never sampled, and error-pattern lines are always kept.
