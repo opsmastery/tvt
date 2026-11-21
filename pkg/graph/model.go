@@ -233,10 +233,13 @@ type Cost struct {
 	// DistinctValues is a label's number of distinct values: what dropping
 	// it collapses. Zero for other kinds.
 	DistinctValues int64
-	BytesPerDay    int64   // log streams
-	SpansPerDay    int64   // span attributes
-	MonthlyCost    float64 // in the price card's currency
-	ObservedAt     time.Time
+	// Classes is how many distinct values a label keeps once bucketed to
+	// their class (S10 item 1); 0 when unknown.
+	Classes     int64
+	BytesPerDay int64   // log streams
+	SpansPerDay int64   // span attributes
+	MonthlyCost float64 // in the price card's currency
+	ObservedAt  time.Time
 	// Interval is the scrape (or rule evaluation) interval a metric's
 	// samples are counted at; IntervalAssumed says why when no API gave it.
 	Interval        time.Duration

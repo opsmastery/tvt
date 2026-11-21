@@ -171,6 +171,19 @@ type LabelCardinality struct {
 	// collide them. Both 0 when unknown (a source that gives counts only).
 	Series        int64
 	SeriesWithout int64
+	// Classes is how many distinct values remain once three-digit values
+	// are bucketed to their class (503 to 500, as tvt's bucket writer
+	// does; S10 item 1). 0 when unknown (a source that gives counts only).
+	Classes int64
+}
+
+// BucketValue is a label value bucketed as tvt's writer buckets it: a
+// three-digit value to its leading digit and "00", anything else as is.
+func BucketValue(v string) string {
+	if len(v) == 3 && v[0] >= '0' && v[0] <= '9' && v[1] >= '0' && v[1] <= '9' && v[2] >= '0' && v[2] <= '9' {
+		return v[:1] + "00"
+	}
+	return v
 }
 
 // RuleKind distinguishes alerting from recording rules.

@@ -139,9 +139,9 @@ func TestLabelCardinality(t *testing.T) {
 		// Dropping op merges (add,u2) and (view,u2); dropping user_id merges
 		// (add,u1) with (add,u2), and (view,u2) with the series that never had
 		// user_id; job has one value, so dropping it merges nothing.
-		{Metric: "cart", Label: "op", Values: 2, ActiveSeries: 4, Series: 4, SeriesWithout: 3},
-		{Metric: "cart", Label: "user_id", Values: 2, ActiveSeries: 3, Series: 4, SeriesWithout: 2},
-		{Metric: "cart", Label: "job", Values: 1, ActiveSeries: 4, Series: 4, SeriesWithout: 4},
+		{Metric: "cart", Label: "op", Values: 2, ActiveSeries: 4, Series: 4, SeriesWithout: 3, Classes: 2},
+		{Metric: "cart", Label: "user_id", Values: 2, ActiveSeries: 3, Series: 4, SeriesWithout: 2, Classes: 2},
+		{Metric: "cart", Label: "job", Values: 1, ActiveSeries: 4, Series: 4, SeriesWithout: 4, Classes: 1},
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("got  %v\nwant %v", got, want)
