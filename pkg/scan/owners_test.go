@@ -148,3 +148,16 @@ func TestClassifyOwned(t *testing.T) {
 		t.Errorf("payments: %+v", s)
 	}
 }
+
+// TestCODEOWNERSLongLine: a line past the scanner's limit is an error,
+// not a silent stop that drops every rule after it.
+func TestCODEOWNERSLongLine(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "CODEOWNERS")
+	long := "/docs/" + string(make([]byte, 70000)) + " @someone\n"
+	if err := os.WriteFile(p, []byte("/api/ @api-team\n"+long+"/billing/ @billing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readCODEOWNERS([]string{p}); err == nil {
+		t.Error("a CODEOWNERS line past the limit read without an error")
+	}
+}

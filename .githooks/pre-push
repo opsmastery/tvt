@@ -12,6 +12,11 @@ while read -r _local_ref local_sha _remote_ref _remote_sha; do
 done
 $pushes || exit 0
 
+# git runs hooks with GIT_DIR (and in a worktree GIT_INDEX_FILE) set: the
+# tests' own git commands in temp dirs would inherit them and commit
+# fixtures onto the branch being pushed. Clear them.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_PREFIX
+
 # cmd/tvt alone takes 6 minutes on a loaded laptop, past the old 5m cap.
 go test -timeout 15m ./... >/dev/null || {
 	echo "pre-push: go test ./... failed; run it to see why" >&2

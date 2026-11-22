@@ -98,6 +98,11 @@ func readCODEOWNERS(paths []string) (map[string]string, error) {
 			}
 			out[seg] = f[1]
 		}
+		// A line past the scanner's limit stops the scan: say so rather
+		// than silently drop every rule after it.
+		if err := sc.Err(); err != nil {
+			return nil, fmt.Errorf("ownership.codeowners: %s: %w", p, err)
+		}
 	}
 	return out, nil
 }
