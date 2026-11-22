@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/Opsmastery-Summit/tvt/internal/safe"
 )
 
 // Branch is a change to push as a branch: Patch (git apply format,
@@ -40,12 +42,14 @@ func Push(ctx context.Context, b Branch) (base string, err error) {
 		}
 		return strings.TrimSpace(out.String()), nil
 	}
-	if b.Name == "" {
-		return "", fmt.Errorf("vcs: bad branch name %q", b.Name)
-	}
-	for _, n := range []string{b.Name, b.Revert} {
-		if strings.ContainsAny(n, " \t\n") || strings.HasPrefix(n, "-") {
-			return "", fmt.Errorf("vcs: bad branch name %q", n)
+	// Every name reaches a git command line: one starting with "-" would
+	// be read as an option (git fetch --upload-pack= runs a command).
+	for i, n := range []string{b.Name, b.Revert, b.Base} {
+		if n == "" && i > 0 { // Revert and Base are optional
+			continue
+		}
+		if err := safe.Ref(n); err != nil {
+			return "", fmt.Errorf("vcs: bad branch name: %w", err)
 		}
 	}
 	if b.Revert == b.Name {
@@ -64,6 +68,9 @@ func Push(ctx context.Context, b Branch) (base string, err error) {
 		}
 		if base == "" {
 			return "", fmt.Errorf("vcs: origin has no default branch; set pipelines[].branch")
+		}
+		if err := safe.Ref(base); err != nil {
+			return "", fmt.Errorf("vcs: origin's default branch: %w", err)
 		}
 	}
 	if _, err := git(b.Checkout, "fetch", "--quiet", "origin", base); err != nil {
