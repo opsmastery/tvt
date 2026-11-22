@@ -120,26 +120,32 @@ func remoteWriteEffects(p report.PipelineDef, path string, root *yaml.Node, ix *
 	if rw == nil || rw.Kind != yaml.SequenceNode {
 		return nil, nil
 	}
-	var tiers [][]relabelRule
-	type target struct {
-		name  string
-		rules []relabelRule
-	}
-	var others []target
+	var targets []writeTarget
 	for i, e := range rw.Content {
 		rules, err := yamlRules(field(e, "write_relabel_configs"), false)
 		if err != nil {
 			return nil, fmt.Errorf("remote_write %d: %w", i, err)
 		}
-		if ix.dormantTenant != "" && scalar(field(e, "headers"), "X-Scope-OrgID") == ix.dormantTenant {
-			tiers = append(tiers, rules)
-			continue
-		}
-		others = append(others, target{name: cmpOr(scalar(e, "name"), scalar(e, "url")), rules: rules})
+		targets = append(targets, writeTarget{name: "remote_write " + cmpOr(scalar(e, "name"), scalar(e, "url")), rules: rules,
+			tier: ix.dormantTenant != "" && scalar(field(e, "headers"), "X-Scope-OrgID") == ix.dormantTenant})
 	}
+	return writeTargetEffects(p, path, targets, ix, blocks), nil
+}
+
+// writeTarget is one remote write destination and its write relabeling;
+// tier marks the retention tier's tenant.
+type writeTarget struct {
+	name  string
+	rules []relabelRule
+	tier  bool
+}
+
+// writeTargetEffects judges each non-tier target's write relabeling as a
+// drop, except that a dormant metric the tier keeps may leave the others.
+func writeTargetEffects(p report.PipelineDef, path string, targets []writeTarget, ix *index, blocks []blockSpan) []effect {
 	tiered := func(metric string) bool {
-		for _, rs := range tiers {
-			if evalRelabel(rs, metric, "", "").dropped == parse.False {
+		for _, t := range targets {
+			if t.tier && evalRelabel(t.rules, metric, "", "").dropped == parse.False {
 				return true
 			}
 		}
@@ -150,15 +156,18 @@ func remoteWriteEffects(p report.PipelineDef, path string, root *yaml.Node, ix *
 		byID[s.ID] = s
 	}
 	var out []effect
-	for _, o := range others {
-		for _, e := range relabelEffects(p, path, "remote_write "+o.name, o.rules, nil, ix, blocks) {
+	for _, t := range targets {
+		if t.tier {
+			continue
+		}
+		for _, e := range relabelEffects(p, path, t.name, t.rules, nil, ix, blocks) {
 			if s, ok := byID[e.signal]; ok && s.Class == "dormant" && s.Record == "" && tiered(s.Name) {
 				continue // the retention tier keeps it, in its own tenant
 			}
 			out = append(out, e)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // operatorEffects reads ServiceMonitor and PodMonitor metricRelabelings
