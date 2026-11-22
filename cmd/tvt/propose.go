@@ -559,9 +559,10 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 	recs = slices.DeleteFunc(slices.Clone(recs), func(rec report.Recommendation) bool {
 		if rec.Action == report.ActionRetentionTier {
 			// Retention tiers (S10 item 2): a route to the tier tenant in
-			// a Prometheus pipeline's remote_write.
-			if p.Kind != "prometheus" {
-				skipped = append(skipped, proposal{Rec: rec, Note: "the Mimir tenant tier is written in a Prometheus pipeline's remote_write; none for " + p.Kind + " pipelines yet"})
+			// a Prometheus pipeline's remote_write, or an Alloy pipeline's
+			// prometheus.remote_write endpoint.
+			if p.Kind != "prometheus" && p.Kind != "alloy" {
+				skipped = append(skipped, proposal{Rec: rec, Note: "the Mimir tenant tier is written in a Prometheus remote_write or an Alloy prometheus.remote_write; none for " + p.Kind + " pipelines yet"})
 			} else {
 				tenantRecs = append(tenantRecs, rec)
 			}
@@ -806,7 +807,8 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 	var ivWritten []proposal
 	for _, f := range p.Files {
 		byJob := plan[f]
-		hasRW := tenantTier != nil && !tenantDone && p.Kind == "prometheus" && strings.Contains(string(srcs[f]), "remote_write:")
+		hasRW := tenantTier != nil && !tenantDone && (p.Kind == "prometheus" && strings.Contains(string(srcs[f]), "remote_write:") ||
+			p.Kind == "alloy" && strings.Contains(string(srcs[f]), "prometheus.remote_write"))
 		if len(byJob) == 0 && len(ivPlan[f]) == 0 && !hasRW {
 			continue
 		}
@@ -857,7 +859,11 @@ func proposePipeline(p config.Pipeline, recs []report.Recommendation, ivs []repo
 		}
 		if err == nil && hasRW {
 			var tout []byte
-			if tout, err = propose.PrometheusTenantTier(out, tenantTier); err == nil {
+			tierWriter := propose.PrometheusTenantTier
+			if p.Kind == "alloy" {
+				tierWriter = propose.AlloyTenantTier
+			}
+			if tout, err = tierWriter(out, tenantTier); err == nil {
 				out, tenantDone = tout, true
 			} else if len(byJob) == 0 && len(ivPlan[f]) == 0 {
 				tenantFailure = f + ": " + err.Error()
