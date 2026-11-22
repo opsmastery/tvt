@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 )
 
 // GitHub opens and updates draft pull requests through the REST API. Its
@@ -129,7 +131,9 @@ func (g GitHub) do(ctx context.Context, method, path string, in, out any) error 
 	}
 	c := g.HTTP
 	if c == nil {
-		c = &http.Client{Timeout: 30 * time.Second}
+		// The token rides every request: never follow a redirect from
+		// https to plain http (Go keeps Authorization on a same-host one).
+		c = &http.Client{Timeout: 30 * time.Second, CheckRedirect: httpx.CheckRedirect}
 	}
 	resp, err := c.Do(req)
 	if err != nil {

@@ -310,6 +310,45 @@ func TestCheckCLI(t *testing.T) {
 	}
 }
 
+// TestCheckManifestPaths: the manifest is committed in the repo a change
+// comes from, so a pipeline path that escapes the repo is refused before
+// --patch copies it (the copy would write outside its temp directory).
+func TestCheckManifestPaths(t *testing.T) {
+	for _, bad := range []string{"../../outside.yml", "/etc/hosts", "a/../../x.yml"} {
+		m := labManifest(t)
+		m.GeneratedAt = time.Now()
+		m.PipelineDefs = append(m.PipelineDefs, report.PipelineDef{Name: "evil", Kind: "prometheus", Files: []string{bad}})
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".tvt"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(m)
+		if err := os.WriteFile(filepath.Join(dir, ".tvt", "protect.json"), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var out, errb strings.Builder
+		code := run([]string{"check", "--repo", dir, "--patch", filepath.Join(dir, "none.patch")}, &out, &errb)
+		if code != exitError || !strings.Contains(errb.String(), "isn't inside the repo") {
+			t.Errorf("%s: exit %d, want %d with a path error: %s%s", bad, code, exitError, out.String(), errb.String())
+		}
+	}
+	// A --base that reads as a git option never reaches git show.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".tvt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := labManifest(t)
+	m.GeneratedAt = time.Now()
+	b, _ := json.Marshal(m)
+	if err := os.WriteFile(filepath.Join(dir, ".tvt", "protect.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb strings.Builder
+	if code := run([]string{"check", "--repo", dir, "--base=--output=x"}, &out, &errb); code != exitError || !strings.Contains(errb.String(), "starts with -") {
+		t.Errorf("--base starting with -: exit %d: %s%s", code, out.String(), errb.String())
+	}
+}
+
 // TestCheckOwnerConfirmation is S9 item 2 on the lab's scrape config: a
 // tvt block's drop needs its owner's confirmation at the evidence the
 // manifest has now, and a new reader since makes the confirmation stale.
