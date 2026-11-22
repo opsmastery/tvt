@@ -10,9 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/Opsmastery-Summit/tvt/internal/safe"
 	"github.com/Opsmastery-Summit/tvt/pkg/check"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"go.yaml.in/yaml/v3"
@@ -108,6 +110,15 @@ func runCheck(o checkOptions) (check.Result, error) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return check.Result{}, fmt.Errorf("%s: %w", o.Manifest, err)
 	}
+	// The manifest is committed in the repo the change comes from: its
+	// paths are joined to the checkout and a temporary copy, so one that
+	// escapes the repo is refused before anything reads or writes it.
+	if err := manifestPaths(m); err != nil {
+		return check.Result{}, fmt.Errorf("%s: %w", o.Manifest, err)
+	}
+	if strings.HasPrefix(o.Base, "-") {
+		return check.Result{}, fmt.Errorf("--base %q starts with -", o.Base)
+	}
 	tree := dirFiles(o.Repo)
 	in := check.Input{Manifest: m, Now: o.Now, MaxAge: o.MaxAge, SkipConfirmation: o.Unconfirmed}
 	if o.Patch != "" {
@@ -141,6 +152,29 @@ func runCheck(o checkOptions) (check.Result, error) {
 		return check.Result{}, err
 	}
 	return check.Run(in), nil
+}
+
+// manifestPaths: every pipeline file the manifest names is inside the
+// repo.
+func manifestPaths(m report.Manifest) error {
+	for _, p := range m.PipelineDefs {
+		paths := slices.Clone(p.Files)
+		if p.HelmValues != nil {
+			paths = append(paths, p.HelmValues.File)
+			if p.HelmValues.Defaults != "" {
+				paths = append(paths, p.HelmValues.Defaults)
+			}
+		}
+		if p.Build != "" {
+			paths = append(paths, p.Build)
+		}
+		for _, f := range paths {
+			if err := safe.RepoPath(f); err != nil {
+				return fmt.Errorf("pipeline %q: %w", p.Name, err)
+			}
+		}
+	}
+	return nil
 }
 
 // dirFiles reads files under a directory.

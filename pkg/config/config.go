@@ -21,6 +21,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/Opsmastery-Summit/tvt/internal/safe"
 	"github.com/Opsmastery-Summit/tvt/pkg/parse"
 	"github.com/prometheus/common/model"
 )
@@ -164,6 +165,33 @@ type Records struct {
 	// outcome fields of one. Agent tool calls are built in.
 	Spans     []string `yaml:"spans"`
 	LogEvents []string `yaml:"log_events"`
+}
+
+// checkPaths: every file a pipeline names stays inside its repo (tvt
+// joins them to the checkout and to temporary copies of it), and its
+// branch can't read as a git option.
+func (p Pipeline) checkPaths() error {
+	paths := slices.Clone(p.Files)
+	if p.HelmValues != nil {
+		paths = append(paths, p.HelmValues.File)
+		if p.HelmValues.Defaults != "" {
+			paths = append(paths, p.HelmValues.Defaults)
+		}
+	}
+	if p.Build != "" {
+		paths = append(paths, p.Build)
+	}
+	for _, f := range paths {
+		if err := safe.RepoPath(f); err != nil {
+			return err
+		}
+	}
+	if p.Branch != "" {
+		if err := safe.Ref(p.Branch); err != nil {
+			return fmt.Errorf("branch: %w", err)
+		}
+	}
+	return nil
 }
 
 // HelmValues points at the Helm values key a pipeline's config renders from.
@@ -529,6 +557,9 @@ func (c *Config) validate() error {
 		// helm_values is where tvt writes.
 		if p.HelmValues != nil && len(p.Files) > 0 && p.Kind != "prometheus-operator" {
 			return fmt.Errorf("pipeline %q: files or helm_values, not both (only a prometheus-operator pipeline lists both: the rendered monitors and the values)", p.Name)
+		}
+		if err := p.checkPaths(); err != nil {
+			return fmt.Errorf("pipeline %q: %w", p.Name, err)
 		}
 	}
 	for i, p := range c.Postmortems.Paths {
