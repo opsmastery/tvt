@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -44,6 +45,14 @@ func forbidden(r *http.Request) bool {
 	if strings.HasSuffix(path, "/loki/api/v1/query") && !strings.Contains(path, "/api/datasources/proxy/") &&
 		collect.IsLokiLevelQuery(r.URL.Query().Get("query")) && r.Header.Get("X-Query-Tags") == collect.LevelTag {
 		return false
+	}
+	// An attribute sample of one stream (S10 item 7): a plain selector, at
+	// most collect.AttrLineLimit lines, tagged as tvt's.
+	if strings.HasSuffix(path, "/loki/api/v1/query_range") && !strings.Contains(path, "/api/datasources/proxy/") &&
+		collect.IsLokiAttrQuery(r.URL.Query().Get("query")) && r.Header.Get("X-Query-Tags") == collect.AttrTag {
+		if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= collect.AttrLineLimit {
+			return false
+		}
 	}
 	// Usage Insights (Grafana Cloud's view events) is read through the
 	// data source proxy, tagged as tvt's own; nothing else may be.

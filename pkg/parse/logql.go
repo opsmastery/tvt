@@ -824,3 +824,24 @@ func logFallback(query string, perr error) []Ref {
 	}
 	return refs
 }
+
+// LogQLReturnsLines reports whether a LogQL query returns log lines rather
+// than a metric: some log query in it has no range, so whoever reads the
+// result sees every key in the lines (S10 item 7). A query that doesn't
+// parse is assumed to return lines.
+func LogQLReturnsLines(query string) bool {
+	if !utf8.ValidString(query) {
+		return true
+	}
+	text, vars := substituteGrafanaVars(query)
+	_, logs, err := rewriteLogQueries(text, vars)
+	if err != nil {
+		return true
+	}
+	for _, lq := range logs {
+		if !lq.hasRange {
+			return true
+		}
+	}
+	return false
+}

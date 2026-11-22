@@ -433,6 +433,8 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			in.Patterns, msg = streamPatterns(ctx, lc, in.StreamVolumes)
 			fmt.Fprintf(out, "%-12s %s\n", "patterns", msg)
 			fmt.Fprintf(out, "%-12s %s\n", "levels", streamLevels(ctx, lc, in.StreamVolumes))
+			in.StreamAttrs, msg = streamAttrs(ctx, lc, in.StreamVolumes)
+			fmt.Fprintf(out, "%-12s %s\n", "attributes", msg)
 		}
 	}
 
@@ -725,6 +727,31 @@ const patternWindow = 3 * time.Hour
 // gave no detected_level stays unmeasured. Levels are an input to level
 // tiers, not protection: a failed query leaves the rest unmeasured and
 // says why.
+// attrWindow is how far back a stream's attribute sample reaches.
+const attrWindow = time.Hour
+
+// streamAttrs samples the largest streams' recent lines for key sizes (S10
+// item 7), one tagged query each. A failure keeps what was measured and
+// says so: sizes are a finding, never protection.
+func streamAttrs(ctx context.Context, lc *loki.Client, vols []collect.StreamVolume) (map[string]collect.StreamAttrs, string) {
+	top := slices.Clone(vols)
+	sort.SliceStable(top, func(i, j int) bool { return top[i].Bytes > top[j].Bytes })
+	top = top[:min(len(top), scan.AttrStreams)]
+	names := streamLabelNames(vols)
+	out := map[string]collect.StreamAttrs{}
+	keys := 0
+	for _, v := range top {
+		a, err := lc.StreamAttrs(ctx, loki.ExactStreamSelector(v.Labels, names), attrWindow)
+		if err != nil {
+			return out, fmt.Sprintf("sampled %d of %d streams, then: %v", len(out), len(top), err)
+		}
+		out[loki.StreamSelector(v.Labels)] = a
+		keys += len(a.Keys)
+	}
+	return out, fmt.Sprintf("%s in the %d largest streams, from up to %d lines each over the last %s (names and sizes only)",
+		plural(keys, "key", "keys"), len(top), collect.AttrLineLimit, attrWindow)
+}
+
 func streamLevels(ctx context.Context, lc *loki.Client, vols []collect.StreamVolume) string {
 	var idx []int
 	for i, v := range vols {
@@ -947,6 +974,11 @@ func write(ctx context.Context, sc *store.Scan, g scan.Output) error {
 	}
 	for _, f := range g.LineFindings {
 		if err := sc.PutLineFinding(ctx, f); err != nil {
+			return err
+		}
+	}
+	for _, a := range g.StreamAttrs {
+		if err := sc.PutStreamAttr(ctx, a); err != nil {
 			return err
 		}
 	}

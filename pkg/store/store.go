@@ -30,7 +30,7 @@ import (
 )
 
 // SchemaVersion is the version of graph.Schema this package writes.
-const SchemaVersion = 30
+const SchemaVersion = 31
 
 // ErrNoScan means the database holds no completed scan yet.
 var ErrNoScan = errors.New("store: no completed scan")
@@ -518,6 +518,12 @@ func (s *Store) upgrade(ctx context.Context, from int) error {
 	if from < 30 {
 		// collector_sent, likewise.
 		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = '30' WHERE key = 'schema_version'`); err != nil {
+			return err
+		}
+	}
+	if from < 31 {
+		// stream_attrs, likewise.
+		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value = '31' WHERE key = 'schema_version'`); err != nil {
 			return err
 		}
 	}
@@ -1082,6 +1088,7 @@ type Scan struct {
 	overflow    *sql.Stmt
 	merge       *sql.Stmt
 	sent        *sql.Stmt
+	attr        *sql.Stmt
 }
 
 // BeginScan starts a scan that began at startedAt with an observation
@@ -1190,6 +1197,8 @@ func (s *Store) BeginScan(ctx context.Context, startedAt time.Time, windowDays i
 		{&sc.queryCost, `INSERT INTO query_costs (scan_id, consumer_id, queries, samples, bytes) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.sloFinding, `INSERT INTO slo_findings (scan_id, kind, subject, name, detail, fix) VALUES (?, ?, ?, ?, ?, ?)`},
 		{&sc.pipeline, `INSERT INTO pipeline_targets (scan_id, subject, pipeline, note, jobs) VALUES (?, ?, ?, ?, ?)`},
+		{&sc.attr, `INSERT INTO stream_attrs (scan_id, stream, key, sampled_lines, lines, value_bytes, over_cap, max_bytes, distinct_values,
+			bytes_per_day, cap_bytes_per_day, cap_monthly, read, reader) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`},
 		{&sc.sent, `INSERT INTO collector_sent (scan_id, pipeline, exporter, signal, sent) VALUES (?, ?, ?, ?, ?)`},
 		{&sc.merge, `INSERT OR IGNORE INTO merges (repo, proposal_scan, recommendation, signal_id, merged_at, first_scan, expected)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`},
@@ -1416,6 +1425,39 @@ func (sc *Scan) PutMerge(ctx context.Context, m graph.Merge) error {
 	}
 	_, err := sc.merge.ExecContext(ctx, m.Repo, m.ProposalScan, m.Recommendation, m.SignalID, millis(m.MergedAt), sc.ID, m.Expected)
 	return wrap("merge", m.Recommendation, err)
+}
+
+// PutStreamAttr records one key's size in a stream's sample (S10 item 7).
+func (sc *Scan) PutStreamAttr(ctx context.Context, a graph.StreamAttr) error {
+	if err := sc.check(); err != nil {
+		return err
+	}
+	if a.Stream == "" || a.Key == "" {
+		return errors.New("store: stream attr: Stream and Key are required")
+	}
+	_, err := sc.attr.ExecContext(ctx, sc.ID, a.Stream, a.Key, a.SampledLines, a.Lines, a.ValueBytes, a.OverCap, a.MaxBytes, a.Distinct,
+		a.BytesPerDay, a.CapBytesPerDay, a.CapMonthly, a.Read, a.Reader)
+	return wrap("stream attr", a.Stream+" "+a.Key, err)
+}
+
+// StreamAttrs returns one scan's stream key sizes, largest first.
+func (s *Store) StreamAttrs(ctx context.Context, scanID int64) ([]graph.StreamAttr, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT stream, key, sampled_lines, lines, value_bytes, over_cap, max_bytes, distinct_values,
+		bytes_per_day, cap_bytes_per_day, cap_monthly, read, reader FROM stream_attrs WHERE scan_id = ? ORDER BY bytes_per_day DESC, stream, key`, scanID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []graph.StreamAttr
+	for rows.Next() {
+		var a graph.StreamAttr
+		if err := rows.Scan(&a.Stream, &a.Key, &a.SampledLines, &a.Lines, &a.ValueBytes, &a.OverCap, &a.MaxBytes, &a.Distinct,
+			&a.BytesPerDay, &a.CapBytesPerDay, &a.CapMonthly, &a.Read, &a.Reader); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 // PutCollectorSent records one Collector exporter's sent counter (S11 item
