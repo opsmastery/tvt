@@ -1147,7 +1147,8 @@ func (o scanOptions) checkTokenTransport(getenv func(string) string) error {
 		if err != nil || u.Scheme != "http" || isLoopback(u.Hostname()) {
 			continue
 		}
-		return fmt.Errorf("--%s: %s is set but %q is plain http: the token would be sent unencrypted; use https or pass --allow-insecure-token", b.flag, b.tokenEnv, b.url)
+		// Redacted: a URL with user:password in it never reaches the output.
+		return fmt.Errorf("--%s: %s is set but %q is plain http: the token would be sent unencrypted; use https or pass --allow-insecure-token", b.flag, b.tokenEnv, u.Redacted())
 	}
 	return nil
 }

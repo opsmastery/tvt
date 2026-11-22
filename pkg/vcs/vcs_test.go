@@ -101,6 +101,21 @@ func TestPush(t *testing.T) {
 	if _, err := Push(ctx, Branch{Checkout: clone, Name: "tvt/propose", Revert: "tvt/propose", Patch: patch, Message: "m"}); err == nil {
 		t.Error("a revert branch named like the change was accepted")
 	}
+	// A base or branch that reads as a git option never reaches git.
+	pwned := filepath.Join(t.TempDir(), "pwned")
+	for _, b := range []Branch{
+		{Checkout: clone, Name: "tvt/propose", Base: "--upload-pack=touch " + pwned, Patch: patch, Message: "m"},
+		{Checkout: clone, Name: "--force", Patch: patch, Message: "m"},
+		{Checkout: clone, Name: "tvt/propose", Revert: "-x", Patch: patch, Message: "m"},
+		{Checkout: clone, Name: "", Patch: patch, Message: "m"},
+	} {
+		if _, err := Push(ctx, b); err == nil || !strings.Contains(err.Error(), "bad branch name") {
+			t.Errorf("Push(base %q, name %q, revert %q) = %v, want a bad branch name", b.Base, b.Name, b.Revert, err)
+		}
+	}
+	if _, err := os.Stat(pwned); err == nil {
+		t.Error("a base branch ran a command through git")
+	}
 }
 
 // fakeGitHub records requests and answers like the pulls API.
