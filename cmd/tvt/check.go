@@ -130,6 +130,20 @@ func runCheck(o checkOptions) (check.Result, error) {
 		in.Base, in.Head = tree, head
 	} else {
 		in.Base, in.Head = gitFiles(o.Repo, o.Base), tree
+		// The base's own manifest: the change is judged against it too,
+		// so editing protect.json in the same PR can't lift a protection.
+		if b, err := in.Base(filepath.ToSlash(o.Manifest)); err == nil {
+			var bm report.Manifest
+			if err := json.Unmarshal(b, &bm); err != nil {
+				return check.Result{}, fmt.Errorf("%s at %s: %w", o.Manifest, o.Base, err)
+			}
+			if err := manifestPaths(bm); err != nil {
+				return check.Result{}, fmt.Errorf("%s at %s: %w", o.Manifest, o.Base, err)
+			}
+			in.BaseManifest = &bm
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return check.Result{}, err
+		}
 	}
 	// Owner decisions and the PR's proposal (S9 item 2), as the change
 	// leaves them.
