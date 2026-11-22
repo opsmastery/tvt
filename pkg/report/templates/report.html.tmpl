@@ -139,13 +139,13 @@ Risk if wrong: strongest reader evidence {{$r.RiskIfWrong.Evidence}}{{if $r.Risk
 
 {{with .Ledger}}
 <h2>Savings ledger</h2>
-<p class="muted">What merged tvt changes saved, each measured from the scan before its merge to the first scan after it. Measured: {{money .Saved .Currency}} a month (claimed {{money .Expected .Currency}}){{if .Pending}}; {{.Pending}} waiting for a scan after their merge{{end}}.{{with .Growth}} Since scan {{.BaselineScan}} the bill moved {{money .Total $.Scan.Currency}}: savings aside, it grew {{money .Growth $.Scan.Currency}}, {{money .NewSignals $.Scan.Currency}} from new signals and {{money .Existing $.Scan.Currency}} on signals already there.{{end}}{{if .DiskFreedBytes}} Disk freed: {{bytes .DiskFreedBytes}}, about {{printf "%.1f" .RetentionDaysGained}} more days of retention at today's rate.{{end}}</p>
+<p class="muted">What merged tvt changes saved, each measured from the scan before its merge to the first scan after it settles (3 hours for metrics and labels, as Prometheus and Mimir drop a series from the head block; 24 hours for streams, Loki's volume window). Measured: {{money .Saved .Currency}} a month (claimed {{money .Expected .Currency}}){{if .Settling}}; {{.Settling}} still settling, shown but not counted{{end}}{{if .Pending}}; {{.Pending}} waiting for a scan after their merge{{end}}.{{with .Growth}} Since scan {{.BaselineScan}} the bill moved {{money .Total $.Scan.Currency}}: savings aside, it grew {{money .Growth $.Scan.Currency}}, {{money .NewSignals $.Scan.Currency}} from new signals and {{money .Existing $.Scan.Currency}} on signals already there.{{end}}{{if .DiskFreedBytes}} Disk freed: {{bytes .DiskFreedBytes}}, about {{printf "%.1f" .RetentionDaysGained}} more days of retention at today's rate.{{end}}</p>
 <div class="table-wrap">
 <table>
 <thead><tr><th>Change</th><th>Merged</th><th>Status</th><th class="num">Before / month</th><th class="num">After / month</th><th class="num">Saved / month</th></tr></thead>
 <tbody>{{$cur := .Currency}}
-{{range .Rows}}<tr><td><code>{{.Recommendation}}</code><br><span class="muted">{{.Repo}}</span></td><td>{{when .MergedAt}}</td><td>{{.Status}}</td>
-<td class="num">{{money .Before.Monthly $cur}}</td><td class="num">{{if eq .Status "measured"}}{{money .After.Monthly $cur}}{{else}}<span class="muted">—</span>{{end}}</td>
+{{range .Rows}}<tr><td><code>{{.Recommendation}}</code><br><span class="muted">{{.Repo}}</span></td><td>{{when .MergedAt}}</td><td>{{.Status}}{{if eq .Status "settling"}}<br><span class="muted">until {{when .SettlesAt}}</span>{{end}}</td>
+<td class="num">{{money .Before.Monthly $cur}}</td><td class="num">{{if eq .Status "measured"}}{{money .After.Monthly $cur}}{{else if eq .Status "settling"}}<span class="muted">{{money .After.Monthly $cur}} so far</span>{{else}}<span class="muted">—</span>{{end}}</td>
 <td class="num">{{if eq .Status "measured"}}{{money .Saved $cur}}{{else}}<span class="muted">—</span>{{end}}</td></tr>
 {{end}}</tbody>
 </table>

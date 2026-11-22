@@ -186,6 +186,9 @@ func runReport(ctx context.Context, o reportOptions, out io.Writer) error {
 			}
 		}
 		fmt.Fprintf(out, "; ledger: %d merged changes measured, saving %.2f/month (claimed %.2f)", measured, l.Saved, l.Expected)
+		if l.Settling > 0 {
+			fmt.Fprintf(out, ", %d still settling (not counted)", l.Settling)
+		}
 		if l.Pending > 0 {
 			fmt.Fprintf(out, ", %d waiting for a scan after their merge", l.Pending)
 		}
