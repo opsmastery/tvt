@@ -95,6 +95,10 @@ type Input struct {
 	// when the change isn't tvt's: each of its recommendations needs a
 	// confirmation whose evidence hash still matches.
 	Proposal *report.Proposal
+	// BaseManifest is the manifest as the base commits it (tvt check
+	// --base), nil when the base has none: Run also judges the change
+	// against it.
+	BaseManifest *report.Manifest
 }
 
 // Run judges a change. It evaluates every pipeline file the manifest
@@ -102,7 +106,62 @@ type Input struct {
 // something protected needs, or what tvt can't tell), and refuses the
 // effects Head has that Base hasn't: a change is judged by what it adds,
 // so a problem already merged doesn't block an unrelated PR.
+//
+// With BaseManifest, the change is also judged against the protections
+// the repo had before it: the manifest is committed in the repo the
+// change comes from, so a PR that edits it (removes a protected signal,
+// or a whole pipeline so its files aren't read) can't use the edit to
+// pass. That second judgement is safety only: no owner confirmations, no
+// gap or age rules, which belong to the manifest the change brings.
 func Run(in Input) Result {
+	r := run(in)
+	bm := in.BaseManifest
+	if bm == nil || bm.Version < 2 {
+		return r
+	}
+	sub := in
+	sub.BaseManifest = nil
+	sub.SkipConfirmation = true
+	sub.Manifest = *bm
+	sub.Manifest.Gaps = nil
+	sub.Manifest.GeneratedAt = in.Now
+	// Keyed without the reason: the two manifests can word the same
+	// finding differently (reader counts change between scans).
+	key := func(f Finding) string {
+		return strings.Join([]string{f.Rule, f.Pipeline, f.File, f.Component, f.Signal}, "\x00")
+	}
+	have := map[string]bool{}
+	for _, f := range r.Findings {
+		have[key(f)] = true
+	}
+	added := 0
+	for _, f := range run(sub).Findings {
+		if have[key(f)] {
+			continue
+		}
+		have[key(f)] = true
+		f.Reason += " (protected in the manifest before this change)"
+		r.Findings = append(r.Findings, f)
+		added++
+	}
+	if added > 0 {
+		sortFindings(r.Findings)
+		r.Notes = append(r.Notes, fmt.Sprintf("the change edits the protection manifest: %d findings come from the base's manifest (scan %d)", added, bm.Scan))
+	}
+	return r
+}
+
+func sortFindings(fs []Finding) {
+	sort.SliceStable(fs, func(i, j int) bool {
+		a, b := fs[i], fs[j]
+		if a.Rule != b.Rule {
+			return a.Rule < b.Rule
+		}
+		return a.String() < b.String()
+	})
+}
+
+func run(in Input) Result {
 	var r Result
 	if in.MaxAge == 0 {
 		in.MaxAge = 7 * 24 * time.Hour
@@ -155,13 +214,7 @@ func Run(in Input) Result {
 			r.Findings = append(r.Findings, confirmations(m, in, drops)...)
 		}
 	}
-	sort.SliceStable(r.Findings, func(i, j int) bool {
-		a, b := r.Findings[i], r.Findings[j]
-		if a.Rule != b.Rule {
-			return a.Rule < b.Rule
-		}
-		return a.String() < b.String()
-	})
+	sortFindings(r.Findings)
 	r.Notes = append(r.Notes, fmt.Sprintf("manifest scan %d (%s), %d protected signals, %d pipelines", m.Scan, m.GeneratedAt.Format(time.RFC3339), len(m.Signals), len(m.PipelineDefs)))
 	for _, c := range changed {
 		r.Notes = append(r.Notes, "changed: "+c)

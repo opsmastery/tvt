@@ -274,6 +274,36 @@ func TestCheckHardKeepDrop(t *testing.T) {
 			t.Errorf("%s not refused: %v", want, r.Findings)
 		}
 	}
+
+	// The same PR also edits protect.json: no protected signals, no
+	// pipelines. Alone it would pass; judged against the base's manifest
+	// too, the drops are still refused.
+	stripped := m
+	stripped.Signals = nil
+	stripped.PipelineDefs = nil
+	alone := check.Run(check.Input{Manifest: stripped, Base: dirFiles(checkout), Head: head, Now: time.Now(), SkipConfirmation: true})
+	for _, f := range alone.Findings {
+		if f.Rule == check.RuleProtected {
+			t.Fatalf("the stripped manifest still protects: %v (the test no longer shows the edit)", f)
+		}
+	}
+	both := check.Run(check.Input{Manifest: stripped, BaseManifest: &m, Base: dirFiles(checkout), Head: head, Now: time.Now(), SkipConfirmation: true})
+	got = map[string]bool{}
+	for _, f := range both.Findings {
+		if f.Rule == check.RuleProtected && strings.Contains(f.Reason, "before this change") {
+			got[f.Signal] = true
+		}
+	}
+	for _, want := range []string{"prom:metric:shop_http_requests_total", "prom:metric:shop_payment_queue_depth"} {
+		if !got[want] {
+			t.Errorf("%s passed by editing the manifest: %v", want, both.Findings)
+		}
+	}
+	// An unchanged manifest adds nothing.
+	same := check.Run(check.Input{Manifest: m, BaseManifest: &m, Base: dirFiles(checkout), Head: head, Now: time.Now(), SkipConfirmation: true})
+	if len(same.Findings) != len(r.Findings) {
+		t.Errorf("the base's identical manifest changed the findings: %d, want %d", len(same.Findings), len(r.Findings))
+	}
 }
 
 // TestCheckCLI runs tvt check end to end on a copy of the lab with its

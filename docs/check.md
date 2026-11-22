@@ -15,6 +15,8 @@ Exit 0: pass. Exit 4: refused, with one line per finding. Exit 1: an error (no m
 
 check reads every pipeline file the manifest names (`pipeline_defs`) twice, before and after the change, and evaluates each into effects: what a step removes that something protected needs, and what tvt can't tell. It refuses the effects the change adds. A problem already merged doesn't block an unrelated PR; a PR that edits a file tvt can't read is refused.
 
+The manifest is committed in the repo the change comes from, so with `--base` check also judges the change against the manifest the base commits. A PR that removes a protected signal or a pipeline from `protect.json` while dropping it is refused, with "protected in the manifest before this change" on the finding. That second pass is safety only: owner confirmations, evidence gaps and the manifest's age come from the manifest the change brings. A manifest whose pipeline paths leave the repo (absolute, or with `..`) is an error.
+
 It evaluates configs, not intent:
 
 | Pipeline | What it evaluates |
