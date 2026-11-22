@@ -18,8 +18,8 @@ type ScanCosts struct {
 }
 
 // Ledger is what merged tvt changes saved (S11): each change measured from
-// the scan before its merge to the first scan after it, apart from what
-// the bill did meanwhile.
+// the scan before its merge to the first scan after it settled
+// (LedgerSettle), apart from what the bill did meanwhile.
 type Ledger struct {
 	Rows []LedgerRow `json:"rows"`
 	// Saved is the measured monthly saving of the measured rows, and
@@ -28,6 +28,9 @@ type Ledger struct {
 	Expected float64 `json:"expected_monthly"`
 	Currency string  `json:"currency,omitempty"`
 	Pending  int     `json:"pending"`
+	// Settling counts rows whose only scans after the merge came before
+	// the backend's measurement caught up (LedgerSettle).
+	Settling int `json:"settling,omitempty"`
 	// Growth is the bill apart from the savings, from the earliest scan
 	// before a merge to this scan.
 	Growth *Growth `json:"growth,omitempty"`
@@ -63,10 +66,13 @@ type LedgerRow struct {
 	Action         string    `json:"action"`
 	Signal         string    `json:"signal"`
 	MergedAt       time.Time `json:"merged_at"`
-	// Status: measured (a scan before and after the merge), pending (no
-	// scan after it yet) or unmeasured (no scan before it in this
+	// Status: measured (a scan before the merge and one after it has
+	// settled), settling (scans after the merge, but none past SettlesAt
+	// yet: the After figures are provisional and not counted), pending
+	// (no scan after it yet) or unmeasured (no scan before it in this
 	// database).
 	Status     string      `json:"status"`
+	SettlesAt  time.Time   `json:"settles_at,omitempty"`
 	BeforeScan int64       `json:"before_scan,omitempty"`
 	AfterScan  int64       `json:"after_scan,omitempty"`
 	Before     LedgerPoint `json:"before"`
@@ -104,7 +110,21 @@ const (
 	LedgerMeasured   = "measured"
 	LedgerPending    = "pending"
 	LedgerUnmeasured = "unmeasured"
+	LedgerSettling   = "settling"
 )
+
+// LedgerSettle is how long after a merge a scan still sees the old volume
+// (found in the S11 rehearsal, Nov 21: 40 minutes after the merge, dropped
+// metrics still counted every series and a rerouted stream 97% of its
+// bytes). Prometheus and Mimir keep a series in the head block until head
+// compaction, up to about 3 hours; Loki's volume API sums the last 24
+// hours. A label is measured from series, so it settles as metrics do.
+func LedgerSettle(signal string) time.Duration {
+	if strings.HasPrefix(signal, "loki:") {
+		return 24 * time.Hour
+	}
+	return 3 * time.Hour
+}
 
 // buildLedger measures each merge against the stored scans. nil when
 // nothing has merged.
@@ -137,15 +157,26 @@ func buildLedger(merges []graph.Merge, scans map[int64]ScanCosts, current int64,
 				}
 			}
 		}
+		row.SettlesAt = m.MergedAt.Add(LedgerSettle(m.SignalID))
+		var early int64 // the last scan after the merge but before it settled
 		for _, id := range ids {
-			if scans[id].StartedAt.After(m.MergedAt) {
+			at := scans[id].StartedAt
+			if at.After(row.SettlesAt) {
 				row.AfterScan = id
 				break
+			}
+			if at.After(m.MergedAt) {
+				early = id
 			}
 		}
 		switch {
 		case row.BeforeScan == 0:
 			row.Status = LedgerUnmeasured
+		case row.AfterScan == 0 && early != 0:
+			row.Status = LedgerSettling
+			row.AfterScan = early
+			row.Before, row.After = point(row.BeforeScan, m.SignalID), point(early, m.SignalID)
+			l.Settling++
 		case row.AfterScan == 0:
 			row.Status = LedgerPending
 			row.Before = point(row.BeforeScan, m.SignalID)
