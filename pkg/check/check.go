@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -99,6 +100,10 @@ type Input struct {
 	// --base), nil when the base has none: Run also judges the change
 	// against it.
 	BaseManifest *report.Manifest
+
+	// headPipelines is set on the judgement against BaseManifest: the
+	// pipelines the change's own manifest defines.
+	headPipelines map[string]bool
 }
 
 // Run judges a change. It evaluates every pipeline file the manifest
@@ -123,6 +128,11 @@ func Run(in Input) Result {
 	sub.BaseManifest = nil
 	sub.SkipConfirmation = true
 	sub.Manifest = *bm
+	sub.Manifest.PipelineDefs = withHeadPaths(bm.PipelineDefs, in.Manifest.PipelineDefs)
+	sub.headPipelines = map[string]bool{}
+	for _, p := range in.Manifest.PipelineDefs {
+		sub.headPipelines[p.Name] = true
+	}
 	sub.Manifest.Gaps = nil
 	sub.Manifest.GeneratedAt = in.Now
 	// Keyed without the reason: the two manifests can word the same
@@ -151,6 +161,31 @@ func Run(in Input) Result {
 	return r
 }
 
+// withHeadPaths is base's pipelines, each also reading the files head
+// gives the same pipeline: a file a change moves is read at both paths.
+func withHeadPaths(base, head []report.PipelineDef) []report.PipelineDef {
+	byName := map[string]report.PipelineDef{}
+	for _, p := range head {
+		byName[p.Name] = p
+	}
+	out := make([]report.PipelineDef, 0, len(base))
+	for _, p := range base {
+		if h, ok := byName[p.Name]; ok {
+			p.Files = slices.Clone(p.Files)
+			for _, f := range h.Files {
+				if !slices.Contains(p.Files, f) {
+					p.Files = append(p.Files, f)
+				}
+			}
+			if p.HelmValues == nil && h.HelmValues != nil {
+				p.HelmValues = h.HelmValues
+			}
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func sortFindings(fs []Finding) {
 	sort.SliceStable(fs, func(i, j int) bool {
 		a, b := fs[i], fs[j]
@@ -175,8 +210,14 @@ func run(in Input) Result {
 		r.Findings = append(r.Findings, Finding{Rule: RuleStaleManifest, Reason: fmt.Sprintf("the manifest is from %s, %s old (max %s): rerun tvt scan and tvt report --manifest-dir", m.GeneratedAt.Format(time.RFC3339), age.Round(time.Hour), in.MaxAge)})
 	}
 	idx := newIndex(m)
-	base, _ := evaluate(m, idx, in.Base, in.Objectives, nil)
-	head, changed := evaluate(m, idx, in.Head, in.Objectives, in.Base)
+	// Base is read at the base manifest's paths too, so a config the
+	// change moves is judged against its own old effects.
+	bm := m
+	if in.BaseManifest != nil {
+		bm.PipelineDefs = withHeadPaths(m.PipelineDefs, in.BaseManifest.PipelineDefs)
+	}
+	base, _ := evaluate(bm, idx, in.Base, in.Objectives, nil, nil)
+	head, changed := evaluate(m, idx, in.Head, in.Objectives, in.Base, in.headPipelines)
 	seen := map[string]bool{}
 	for _, e := range base {
 		seen[e.key()] = true
@@ -336,8 +377,12 @@ type effect struct {
 // evidence gap.
 const ruleDropMarker = "drop"
 
+// key identifies an effect across Base and Head. It leaves out the file:
+// a config the change moves (and its manifest follows) keeps its old
+// effects, and only what the move adds is new. A file the change deletes
+// is its own effect, keyed by its path in the reason.
 func (e effect) key() string {
-	return strings.Join([]string{e.rule, e.pipeline, e.file, e.component, e.signal, e.reason}, "\x00")
+	return strings.Join([]string{e.rule, e.pipeline, e.component, e.signal, e.reason}, "\x00")
 }
 
 func (e effect) finding() Finding {
@@ -354,7 +399,12 @@ func (e effect) finding() Finding {
 // evaluate turns one version of the repo into effects, pipeline by
 // pipeline. With other set (Head against Base), it also lists the files
 // that differ.
-func evaluate(m report.Manifest, idx *index, files Files, objectives map[string]time.Duration, other Files) ([]effect, []string) {
+//
+// A file other has and files hasn't was deleted or moved by the change.
+// covered, set only for the judgement against the base's manifest, names
+// the pipelines the change's own manifest still defines: their moves are
+// judged there, at the paths that manifest gives.
+func evaluate(m report.Manifest, idx *index, files Files, objectives map[string]time.Duration, other Files, covered map[string]bool) ([]effect, []string) {
 	var out []effect
 	var changed []string
 	for _, p := range m.PipelineDefs {
@@ -365,6 +415,15 @@ func evaluate(m report.Manifest, idx *index, files Files, objectives map[string]
 		for _, path := range paths {
 			src, err := files(path)
 			if errors.Is(err, fs.ErrNotExist) {
+				// Deleting or moving a file check judges would take
+				// everything in it out of judgement (a renamed config with
+				// a drop in it was never read): refused.
+				if other != nil && !covered[p.Name] {
+					if _, berr := other(path); berr == nil {
+						changed = append(changed, p.Name+" "+path)
+						out = append(out, effect{rule: RuleUnreadable, pipeline: p.Name, file: path, reason: path + ": the change deletes or moves this pipeline file, so check can't judge what it did; update the pipeline's files in tvt.yaml and rerun tvt report --manifest-dir first"})
+					}
+				}
 				continue
 			}
 			edited := false

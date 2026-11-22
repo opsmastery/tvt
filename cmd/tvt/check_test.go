@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -303,6 +304,83 @@ func TestCheckHardKeepDrop(t *testing.T) {
 	same := check.Run(check.Input{Manifest: m, BaseManifest: &m, Base: dirFiles(checkout), Head: head, Now: time.Now(), SkipConfirmation: true})
 	if len(same.Findings) != len(r.Findings) {
 		t.Errorf("the base's identical manifest changed the findings: %d, want %d", len(same.Findings), len(r.Findings))
+	}
+}
+
+// TestCheckMovedFile: a change that moves a pipeline file out from under
+// the manifest (here with a drop of protected metrics in it) is refused,
+// and a move the change's manifest follows is judged at the new path,
+// against the base's protections too.
+func TestCheckMovedFile(t *testing.T) {
+	m := labManifest(t)
+	m.GeneratedAt = time.Now()
+	_, dirs := loadBenchmark(t)
+	checkout := filepath.Join(dirs["writers-2"], "checkout")
+	const from, to = "alloy/config.alloy", "alloy/main.alloy"
+	src, err := os.ReadFile(filepath.Join(checkout, from))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropped := strings.Replace(string(src), `prometheus.relabel "apps" {`, `prometheus.relabel "apps" {
+  rule {
+    source_labels = ["__name__"]
+    regex         = "shop_http_requests_total"
+    action        = "drop"
+  }`, 1)
+	moved := func(content string) check.Files {
+		return func(p string) ([]byte, error) {
+			switch p {
+			case from:
+				return nil, os.ErrNotExist
+			case to:
+				return []byte(content), nil
+			}
+			return dirFiles(checkout)(p)
+		}
+	}
+	rules := func(r check.Result) map[string]bool {
+		got := map[string]bool{}
+		for _, f := range r.Findings {
+			got[f.Rule+" "+f.File] = true
+		}
+		return got
+	}
+	// The manifest still names the old path: refused, with or without
+	// the base's manifest.
+	for _, bm := range []*report.Manifest{nil, &m} {
+		r := check.Run(check.Input{Manifest: m, BaseManifest: bm, Base: dirFiles(checkout), Head: moved(dropped), Now: time.Now(), SkipConfirmation: true})
+		if !rules(r)[check.RuleUnreadable+" "+from] {
+			t.Errorf("a moved file passed (base manifest %v): %v", bm != nil, r.Findings)
+		}
+	}
+	// The change's manifest follows the move: judged at the new path.
+	followed := m
+	followed.PipelineDefs = slices.Clone(m.PipelineDefs)
+	found := false
+	for i, p := range followed.PipelineDefs {
+		if j := slices.Index(p.Files, from); j >= 0 {
+			p.Files = slices.Clone(p.Files)
+			p.Files[j] = to
+			found = true
+		}
+		followed.PipelineDefs[i] = p
+	}
+	if !found {
+		t.Fatalf("no pipeline in the lab manifest names %s", from)
+	}
+	clean := check.Run(check.Input{Manifest: followed, BaseManifest: &m, Base: dirFiles(checkout), Head: moved(string(src)), Now: time.Now(), SkipConfirmation: true})
+	for _, f := range clean.Findings {
+		if f.File == from || f.File == to {
+			t.Errorf("a plain move the manifest follows was refused: %v", f)
+		}
+	}
+	// The same, stripped of protections, with the drop: the base's
+	// manifest still refuses it at the new path.
+	stripped := followed
+	stripped.Signals = nil
+	r := check.Run(check.Input{Manifest: stripped, BaseManifest: &m, Base: dirFiles(checkout), Head: moved(dropped), Now: time.Now(), SkipConfirmation: true})
+	if !rules(r)[check.RuleProtected+" "+to] {
+		t.Errorf("a moved file with a drop passed by stripping the manifest: %v", r.Findings)
 	}
 }
 
