@@ -318,3 +318,21 @@ func TestReportPriceCardMatchesRescan(t *testing.T) {
 		t.Error("an unknown price card didn't fail")
 	}
 }
+
+// TestWriteFileAtomicDevice: --json /dev/null works (the temporary file
+// went into /dev, which can't take one).
+func TestWriteFileAtomicDevice(t *testing.T) {
+	if _, err := os.Stat(os.DevNull); err != nil {
+		t.Skip("no", os.DevNull)
+	}
+	if err := writeFileAtomic(os.DevNull, []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "r.json")
+	if err := writeFileAtomic(p, []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "{}" {
+		t.Errorf("wrote %q", b)
+	}
+}
