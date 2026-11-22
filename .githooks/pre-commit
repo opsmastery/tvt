@@ -74,6 +74,8 @@ if [ "$schema_changed" -eq 1 ]; then
 	git checkout-index --all --prefix="$snapshot/"
 	(
 		cd "$snapshot"
+		# Tests must not inherit the hook's GIT_DIR or GIT_INDEX_FILE.
+		unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
 		go test -count=1 -run 'Schema|Upgrade' ./pkg/store >/dev/null
 	) || fail "store schema tests failed (go test -run 'Schema|Upgrade' ./pkg/store)"
 fi
