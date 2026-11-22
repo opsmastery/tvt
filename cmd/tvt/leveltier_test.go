@@ -198,6 +198,51 @@ func TestProposeTenantTier(t *testing.T) {
 	}
 }
 
+// TestProposeAlloyTenantTier: in an Alloy pipeline the tier goes into the
+// one prometheus.remote_write's endpoint, and check passes it.
+func TestProposeAlloyTenantTier(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	in, _, err := readLatest(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := report.Build(in, 0)
+	r.Recommendations = []report.Recommendation{{ID: "retention_tier:prom:metric:shop_cache_evictions_total", Action: report.ActionRetentionTier,
+		Signal:   report.SignalRef{ID: "prom:metric:shop_cache_evictions_total", Kind: "metric", Name: "shop_cache_evictions_total", Source: "prom"},
+		Pipeline: "alloy-apps", Proposable: true, EvidenceHash: "abc", KeepDays: 7}}
+	dir := t.TempDir()
+	rj := filepath.Join(dir, "report.json")
+	b, _ := json.Marshal(r)
+	os.WriteFile(rj, b, 0o644)
+	checkout := filepath.Join(dir, "checkout")
+	if err := copyTree(filepath.Join(dirs[st.Name], "checkout"), checkout); err != nil {
+		t.Fatal(err)
+	}
+	cfgSrc, _ := os.ReadFile(filepath.Join(dirs[st.Name], "tvt-lab.yaml"))
+	cfg := filepath.Join(dir, "tvt-lab.yaml")
+	os.WriteFile(cfg, []byte(string(cfgSrc)+"\ntiers:\n  dormant_tenant: tvt-dormant\n"), 0o644)
+	var out strings.Builder
+	pd := filepath.Join(dir, "p")
+	o := proposeOptions{DB: db, Config: cfg, Report: rj, Output: "patch", Dir: pd,
+		Checkouts: checkoutFlag{"github.com/Opsmastery-Summit/tvt-lab": checkout}, Validate: "off"}
+	if err := runPropose(context.Background(), o, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	patch, _ := os.ReadFile(filepath.Join(pd, report.ManifestDir("github.com/Opsmastery-Summit/tvt-lab")+".patch"))
+	for _, want := range []string{`+    name    = "tvt-dormant"`, `+      "X-Scope-OrgID" = "tvt-dormant",`, `+      action        = "drop"`, `+      action        = "keep"`} {
+		if !strings.Contains(string(patch), want) {
+			t.Errorf("patch lacks %q\n%s\n%s", want, patch, out.String())
+		}
+	}
+}
+
 // TestProposeSkipsReadDrops: a drop of a metric something reads ad hoc
 // isn't written, since check refuses it (least_lossy, ADR 0010); the S10
 // done-when run found propose writing them.

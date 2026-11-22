@@ -25,7 +25,7 @@ It evaluates configs, not intent:
 |---|---|
 | Prometheus | each job's `metric_relabel_configs`, in Prometheus' semantics (anchored regex, `;` separator, rule order, renames), against every protected metric and label, scoped to the jobs the manifest records for it |
 | prometheus-operator | `ServiceMonitor` and `PodMonitor` `metricRelabelings` |
-| Alloy | `prometheus.relabel` rules (as Prometheus), `loki.relabel` drop rules and keeps in front of a `loki.write`, `loki.process` `stage.drop`, `stage.sampling` and `stage.match` with `action = "drop"`, and `otelcol.processor` samplers and filters (any of which may drop record spans) |
+| Alloy | `prometheus.relabel` rules (as Prometheus), `prometheus.remote_write` endpoints' `write_relabel_config` (an endpoint to the retention tier's tenant may keep dormant metrics the others drop), `loki.relabel` drop rules and keeps in front of a `loki.write`, `loki.process` `stage.drop`, `stage.sampling` and `stage.match` with `action = "drop"`, and `otelcol.processor` samplers and filters (any of which may drop record spans) |
 | OTel Collector | every pipeline's processors in order: `filter` conditions, `transform` statements, `attributes` actions, `probabilistic_sampler`, `tail_sampling`, `log_dedup` (or its deprecated name `logdedup`, with or without settings), and the `routing`, `count`, `sum` and `signal_to_metrics` connectors |
 | Fluent Bit (YAML) | `grep` excludes and `rewrite_tag` against the pipeline's protected streams; `lua` and `wasm` fail closed |
 
