@@ -37,6 +37,14 @@ func Reprice(in Input, card cost.PriceCard, tsdb *collect.Storage) (Input, error
 	if st != nil {
 		out.Retention = st.Retention
 	}
+	out.StreamAttrs = make([]graph.StreamAttr, len(in.StreamAttrs))
+	for i, a := range in.StreamAttrs {
+		a.CapMonthly = 0
+		if a.CapBytesPerDay > 0 {
+			a.CapMonthly = card.LogMonthly(a.CapBytesPerDay)
+		}
+		out.StreamAttrs[i] = a
+	}
 	out.LineFindings = make([]graph.LineFinding, len(in.LineFindings))
 	for i, f := range in.LineFindings {
 		f.MonthlyCost = card.LogMonthly(f.BytesPerDay)

@@ -346,3 +346,23 @@ CREATE TABLE IF NOT EXISTS collector_sent (
     sent     REAL NOT NULL,
     PRIMARY KEY (scan_id, pipeline, exporter, signal)
 );
+
+-- Key sizes in each of the largest streams' sampled lines
+-- (graph.StreamAttr, S10 item 7): names and sizes only, never values.
+CREATE TABLE IF NOT EXISTS stream_attrs (
+    scan_id          INTEGER NOT NULL REFERENCES scans (id) DEFERRABLE INITIALLY DEFERRED,
+    stream           TEXT NOT NULL,
+    key              TEXT NOT NULL,
+    sampled_lines    INTEGER NOT NULL,
+    lines            INTEGER NOT NULL,
+    value_bytes      INTEGER NOT NULL,
+    over_cap         INTEGER NOT NULL,
+    max_bytes        INTEGER NOT NULL,
+    distinct_values  INTEGER NOT NULL,
+    bytes_per_day    INTEGER NOT NULL,
+    cap_bytes_per_day INTEGER NOT NULL,
+    cap_monthly      REAL NOT NULL,
+    read             TEXT NOT NULL,
+    reader           TEXT NOT NULL,
+    PRIMARY KEY (scan_id, stream, key)
+);

@@ -79,6 +79,9 @@ type Report struct {
 	// items 3-4, version 5): reported with an estimated saving and handed
 	// to zeroreads, never acted on (ADR 0006).
 	LineFindings []LineFinding `json:"line_findings"`
+	// Attributes are the largest keys in the largest streams' lines, and
+	// the cap saving for those nothing reads (S10 item 7).
+	Attributes []AttrRow `json:"attributes,omitempty"`
 	// Ledger is what merged tvt changes saved (S11); absent when nothing
 	// has merged.
 	Ledger *Ledger `json:"ledger,omitempty"`
@@ -345,6 +348,8 @@ type Input struct {
 	Scores     []graph.Score
 	// LineFindings are the scan's line findings (store.LineFindings).
 	LineFindings []graph.LineFinding
+	// StreamAttrs are the scan's stream key sizes (store.StreamAttrs).
+	StreamAttrs []graph.StreamAttr
 	// Merges are the merged tvt changes so far, and History the stored
 	// scans' costs the ledger measures them with (S11).
 	Merges  []graph.Merge
@@ -572,6 +577,7 @@ func Build(in Input, limit int) Report {
 		r.Recommendations = r.Recommendations[:limit]
 	}
 	r.LineFindings = lineFindings(in.LineFindings, in.Scan.Currency)
+	r.Attributes = attrRows(in.StreamAttrs, in.Scan.Currency)
 	r.Ledger = buildLedger(in.Merges, in.History, in.Scan.ID, in.Scan.Currency)
 	if r.Ledger != nil {
 		r.Ledger.Collector = collectorRates(in.Merges, in.Collector, in.ScanTimes)

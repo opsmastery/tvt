@@ -275,3 +275,18 @@ func TestLogQLResultLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestLogQLReturnsLines(t *testing.T) {
+	for q, want := range map[string]bool{
+		`{app="shop"} | json`: true,
+		`{app="shop"} |= "x" | logfmt | line_format "{{.msg}}"`:      true,
+		`sum(count_over_time({app="shop"} | json [5m]))`:             false,
+		`rate({app="shop"}[1m])`:                                     false,
+		`sum by (level) (rate({app="$app"} | logfmt [$__interval]))`: false,
+		`{app="shop"`: true,
+	} {
+		if got := LogQLReturnsLines(q); got != want {
+			t.Errorf("%s: %v, want %v", q, got, want)
+		}
+	}
+}

@@ -244,6 +244,16 @@ No match, or more than one, is **unmapped**: reported with its savings, never pr
 
 The report (version 9): each recommendation and confirm row has `pipeline` (or `unmapped`), `pipeline_note`, and recommendations have `proposable`; an unmapped row carries a `pipelines` gap (kind `unmapped`, acknowledgeable). `pipelines` lists each pipeline's recommendations and savings (before `--top`), the unmapped ones, and `unmapped_streams` (selector, bytes per day, note). With no pipelines configured the section is empty and rows have no pipeline. The HTML report shows the pipeline in the owner cell and a "Pipelines" section. The scan prints a `pipelines` line. Golden: `TestPipelineTargets` on the benchmark's `pipelines` state against tvt-lab's `pipelines:` (examples and every metric of each pipeline's jobs map to it, metrics of jobs on both pipelines are claimed by several, the reconciler stream is unmapped, rule outputs are notes).
 
+## Large keys in log lines (S10 item 7)
+
+`attributes` lists the largest keys in the 10 largest streams, from a sample of up to 1,000 recent lines each (`Source=tvt-attrs`; `loki.MeasureAttrs` keeps names, sizes and distinct-value counts by hash, and drops the lines). JSON keys are flattened and named as Loki's `json` parser names them (`tool_input`); other lines are read as logfmt. Each row has the share of lines carrying the key, its bytes a day (its share of the sample's bytes times the stream's daily volume), its largest value, how it's read, and an action:
+
+- **Read through lines:** a reader whose query returns lines (a logs panel, a log query in Explore or a rule), or that tvt can't parse, shows every key, so all are kept.
+- **Read by name:** a metric query that names the key (a label filter, `unwrap`, a grouping, a template), or one whose labels all matter.
+- **Unread:** with values past 512 bytes, the row gets `cap`: the saving from cutting them to 512 bytes plus a marker, ADR 0010's first log action. tvt doesn't write caps yet, so they aren't recommendations.
+
+Keys whose names suggest prompts, bodies, emails or paths carry `sensitive`, as label rows do. A what-if price card reprices the cap savings.
+
 ## Sensitive content (S12 item 5)
 
 A recommendation for an unread label or span attribute whose name suggests sensitive content has `sensitive`: `prompt` (model prompts or completions: `gen_ai.prompt`, `llm.input.messages`), `response` (request or response bodies: `http.response.body`), `email` (`user_email`) or `host_path` (`log.file.path`, `filename`). The HTML shows "may hold …" under the row's saving. tvt reads names and sizes only, never values, so this is a prompt for the owner to look, not a finding about the data; it often makes the drop more worth doing. `report.SensitiveName` matches whole name tokens split on `.`, `_`, `-`, `/` and `:`, and a measurement token (`tokens`, `size`, `count`, `id`, `length`, `status`, `code` and the like) clears it, so `gen_ai.usage.prompt_tokens`, `http.request.body.size`, `http_response_status_code` and `url.path` aren't flagged. Metrics and streams aren't flagged: the flag is about a value-carrying key.
