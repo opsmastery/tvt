@@ -49,7 +49,7 @@ What a signal costs comes from the backends: series counts and per-label cardina
 
 A log that stopped being written looks exactly like a quiet one. So before collecting anything, each scan sends one marker query to every query log it can check (Prometheus `count(tvt_query_log_probe{nonce="..."})`, which selects nothing) and waits up to `--probe-wait` for it to appear. A log where it never shows is recorded as stale, its coverage is zero, and the signals it would have cleared stay held. Details in [query-logs.md](query-logs.md).
 
-Besides the probe, tvt runs one tagged Loki query per large unlabelled stream (`sum by (detected_level) (bytes_over_time(...[1h]))`, `X-Query-Tags: Source=tvt-levels`) and, on Grafana Cloud, the Usage Insights query. Each is dropped from usage by the readers.
+Besides the probe, tvt runs one tagged Loki query per large unlabelled stream (`sum by (detected_level) (bytes_over_time(...[1h]))`, `X-Query-Tags: Source=tvt-levels`), one attribute sample per large stream (the plain selector, up to 1,000 lines from the last hour, `Source=tvt-attrs`: only key names, sizes and distinct-value counts by hash are kept), and, on Grafana Cloud, the Usage Insights query. Each is dropped from usage by the readers.
 
 ## Coverage and gaps
 

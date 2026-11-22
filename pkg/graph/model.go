@@ -318,6 +318,39 @@ type LineFinding struct {
 	MonthlyCost float64
 }
 
+// StreamAttr is one key's size in a stream's sampled lines (S10 item 7),
+// from a tagged sample of its recent lines: names and sizes only.
+type StreamAttr struct {
+	Stream string // the stream's canonical selector
+	Key    string
+	// SampledLines is how many of the stream's lines were sampled; Lines
+	// how many carried the key.
+	SampledLines int
+	Lines        int
+	// ValueBytes and OverCap are the key's value bytes, and the bytes past
+	// the 512-byte cap, over the sample; MaxBytes the largest value.
+	ValueBytes int64
+	OverCap    int64
+	MaxBytes   int
+	Distinct   int
+	// BytesPerDay and CapBytesPerDay scale ValueBytes and OverCap to the
+	// stream's daily volume; CapMonthly prices CapBytesPerDay.
+	BytesPerDay    int64
+	CapBytesPerDay int64
+	CapMonthly     float64
+	// Read is how the key is read: AttrReadLines (a reader returns the
+	// stream's lines, so sees every key), AttrReadNamed (a reader names
+	// it), or empty (no reader uses it). Reader is one reader that does.
+	Read   string
+	Reader string
+}
+
+// How a stream attribute is read.
+const (
+	AttrReadLines = "lines"
+	AttrReadNamed = "named"
+)
+
 // PerSecond is the pattern's average line rate over its window.
 func (f LineFinding) PerSecond() float64 {
 	if f.Window <= 0 {
