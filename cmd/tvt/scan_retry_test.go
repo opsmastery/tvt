@@ -47,6 +47,44 @@ func TestScanFailsOnUnavailableBackend(t *testing.T) {
 		}
 	})
 
+	// A required endpoint refused (a token that lost a permission, a wrong
+	// URL) fails the scan too; an optional one (scrape intervals, a cost
+	// input) is a gap.
+	t.Run("required refused", func(t *testing.T) {
+		l := newLab(t, map[string]http.HandlerFunc{
+			"loki:/loki/api/v1/index/volume": func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "permission denied", http.StatusForbidden)
+			},
+		})
+		db := filepath.Join(t.TempDir(), "tvt.db")
+		o := labOptions(l, db)
+		o.Retry = retry
+		var out bytes.Buffer
+		err := runScan(context.Background(), o, env, &out)
+		if err == nil || !strings.Contains(err.Error(), "/loki/api/v1/index/volume refused: HTTP 403: permission denied") || !strings.Contains(err.Error(), "nothing was written") {
+			t.Fatalf("err = %v, want the scan to fail on the refusal\n%s", err, out.String())
+		}
+		if _, err := os.Stat(db); !os.IsNotExist(err) {
+			t.Errorf("the database was written (stat err %v)", err)
+		}
+	})
+
+	t.Run("optional refused", func(t *testing.T) {
+		l := newLab(t, map[string]http.HandlerFunc{
+			"/api/v1/targets": func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) },
+		})
+		db := filepath.Join(t.TempDir(), "tvt.db")
+		o := labOptions(l, db)
+		o.Retry = retry
+		var out bytes.Buffer
+		if err := runScan(context.Background(), o, env, &out); err != nil {
+			t.Fatalf("an optional 404 failed the scan: %v\n%s", err, out.String())
+		}
+		if !strings.Contains(out.String(), "scrape intervals unavailable") {
+			t.Errorf("no gap recorded for the scrape intervals:\n%s", out.String())
+		}
+	})
+
 	t.Run("recovers", func(t *testing.T) {
 		var calls atomic.Int32
 		volume, err := os.ReadFile(filepath.Join(lab, "loki/volume_by_stream.json"))

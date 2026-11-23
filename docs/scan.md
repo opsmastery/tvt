@@ -62,7 +62,19 @@ Every evidence source is stored with its coverage: the share of the window its d
 
 A backend that fails mid-scan fails the scan. A failure is a network error, a timeout, or an HTTP 429, 500, 502, 503 or 504. tvt retries the request with exponential backoff (`--retries`, `--retry-backoff`, `--retry-max`); each attempt has its own 60-second limit. If the backend still fails, later requests to it fail at once, and the scan exits 1 without writing anything. A partial scan could read a source it couldn't reach as "no reader", so tvt never writes one.
 
-An answer that says a feature isn't there (a 404 from Loki's pattern API, a 403 for an endpoint your token can't read) is not a failure: it's recorded as an evidence gap, as before.
+A refusal (any 4xx other than 429) from an endpoint the scan needs also fails it, without retries: an expired token, a missing permission or a wrong base URL. The error names the endpoint and the backend's answer.
+
+A few endpoints may legitimately be missing, and a refusal there is recorded as an evidence gap instead:
+
+| Endpoint | Why it may be missing |
+| --- | --- |
+| Prometheus `/api/v1/targets`, TSDB stats on `/metrics` | Cost inputs only; Mimir and Grafana Cloud don't serve them. tvt assumes a 1m interval and default storage values |
+| Loki `/loki/api/v1/patterns` | The pattern ingester is off. Line findings are skipped |
+| Loki `/loki/api/v1/series` | Older Loki. Volume keeps its first pass |
+| Loki attribute sample (`Source=tvt-attrs`) | Enrichment only (attribute names and sizes) |
+| The query-log probe | The log is recorded as unproven: coverage 0, and its signals stay held |
+| Grafana `/api/datasources` (403), a deleted library panel (404) | Handled as before: a query that needs the list fails with an actionable error |
+| A selector or quoted label name the backend rejects (400) | Treated as reading every metric, the conservative reading |
 
 ## Exit codes
 

@@ -111,7 +111,9 @@ func (c *Client) getTagged(ctx context.Context, path string, q url.Values, accep
 // from usage.
 func (c *Client) Probe(ctx context.Context, nonce string) error {
 	q := url.Values{"query": {collect.LokiProbeQuery(nonce)}}
-	body, err := c.getTagged(ctx, "/loki/api/v1/query", q, "application/json", collect.ProbeTag)
+	// Optional: a refused probe leaves the log unproven (coverage 0), which
+	// holds its signals; that is the safe outcome, not a scan failure.
+	body, err := c.getTagged(httpx.Optional(ctx), "/loki/api/v1/query", q, "application/json", collect.ProbeTag)
 	if err != nil {
 		return err
 	}

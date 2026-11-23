@@ -378,7 +378,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	in.DefaultInterval = time.Minute
 	if in.MetricsSource == "prom" {
 		in.DefaultIntervalReason = "the targets API gave no interval; Prometheus's default 1m"
-		if s, err := pc.Scrape(ctx); err != nil {
+		if s, err := pc.Scrape(httpx.Optional(ctx)); err != nil {
 			fmt.Fprintf(out, "%-12s scrape intervals unavailable (%v): assuming 1m\n", "prom", err)
 		} else {
 			in.Scrape = &s
@@ -392,7 +392,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 	// footprint lives in object storage tvt doesn't read, so a self-hosted
 	// card for it must give the retention.
 	if in.MetricsSource == "prom" {
-		if st, err := pc.Storage(ctx); err != nil {
+		if st, err := pc.Storage(httpx.Optional(ctx)); err != nil {
 			fmt.Fprintf(out, "%-12s TSDB storage unavailable (%v): a self-hosted card uses its own and default values\n", "prom", err)
 		} else {
 			in.Storage = &st
@@ -651,6 +651,13 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		}
 		return fmt.Errorf("backend unavailable, nothing was written: %s (raise --retries or --retry-max, or rerun when it's back)", strings.Join(msgs, "; "))
 	}
+	if rej := httpx.Rejections(); len(rej) > 0 {
+		var msgs []string
+		for _, r := range rej {
+			msgs = append(msgs, r.Error())
+		}
+		return fmt.Errorf("a backend refused a required request, nothing was written: %s (check the URL and the token's permissions)", strings.Join(msgs, "; "))
+	}
 	id, err := save(ctx, o.DB, start, o.Window, g)
 	if err != nil {
 		return err
@@ -881,7 +888,7 @@ func streamPatterns(ctx context.Context, lc *loki.Client, vols []collect.StreamV
 	var lines int
 	for _, v := range top {
 		sel := loki.StreamSelector(v.Labels)
-		ps, err := lc.Patterns(ctx, loki.ExactStreamSelector(v.Labels, names), patternWindow)
+		ps, err := lc.Patterns(httpx.Optional(ctx), loki.ExactStreamSelector(v.Labels, names), patternWindow)
 		switch {
 		case errors.Is(err, loki.ErrNotFound):
 			return nil, "unavailable: Loki's pattern API answered 404 (enable pattern_ingester for line findings)"

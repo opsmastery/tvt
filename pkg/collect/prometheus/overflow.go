@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"net/url"
 	"slices"
 	"strconv"
@@ -38,7 +39,11 @@ func (c *Client) Overflow(ctx context.Context) ([]collect.Overflow, error) {
 			match = fmt.Sprintf(`{%q="true"}`, l)
 		}
 		var series []map[string]string
-		warnings, err := getJSON(ctx, c, "/api/v1/series", window(match), &series)
+		qctx := ctx
+		if i > 0 {
+			qctx = httpx.Optional(ctx) // a backend that rejects the quoted label name answers 400
+		}
+		warnings, err := getJSON(qctx, c, "/api/v1/series", window(match), &series)
 		if i > 0 && errors.Is(err, ErrBadRequest) {
 			continue
 		}

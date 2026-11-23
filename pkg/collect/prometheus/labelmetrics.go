@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"net/url"
 	"slices"
 	"strconv"
@@ -83,7 +84,8 @@ func (c *Client) SelectorMetrics(ctx context.Context, selectors []string) (map[s
 	for _, s := range selectors {
 		q := url.Values{"match[]": {s}, "start": {strconv.FormatInt(end.Add(-lookback).Unix(), 10)}, "end": {strconv.FormatInt(end.Unix(), 10)}}
 		var names []string
-		if _, err := getJSON(ctx, c, "/api/v1/label/__name__/values", q, &names); err != nil {
+		// Optional: a 400 (a selector the backend won't take) is read below.
+		if _, err := getJSON(httpx.Optional(ctx), c, "/api/v1/label/__name__/values", q, &names); err != nil {
 			if errors.Is(err, ErrBadRequest) {
 				continue
 			}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"hash/fnv"
 	"net/url"
 	"sort"
@@ -35,7 +36,7 @@ func (c *Client) StreamAttrs(ctx context.Context, selector string, window time.D
 		"limit":     {strconv.Itoa(collect.AttrLineLimit)},
 		"direction": {"backward"},
 	}
-	body, err := c.getTagged(ctx, "/loki/api/v1/query_range", q, "application/json", collect.AttrTag)
+	body, err := c.getTagged(httpx.Optional(ctx), "/loki/api/v1/query_range", q, "application/json", collect.AttrTag)
 	if err != nil {
 		return collect.StreamAttrs{}, err
 	}
