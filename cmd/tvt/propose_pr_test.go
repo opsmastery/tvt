@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/Opsmastery-Summit/tvt/pkg/vcs"
 )
 
 // TestProposePR runs tvt propose --output pr on the writers state against
@@ -60,6 +61,16 @@ func TestProposePR(t *testing.T) {
 	git(seed, "commit", "--quiet", "-m", "seed")
 	git(seed, "push", "--quiet", origin, "main")
 	git(tmp, "clone", "--quiet", origin, clone)
+	// The proposal's branches are named by scan (vcs.ChangeBranch).
+	changeBranch := func() string {
+		for _, b := range strings.Fields(git(origin, "for-each-ref", "--format=%(refname:short)", "refs/heads/tvt/")) {
+			if !strings.HasSuffix(b, vcs.RevertSuffix) {
+				return b
+			}
+		}
+		t.Fatal("no tvt change branch pushed")
+		return ""
+	}
 
 	var mu sync.Mutex
 	var reqs []string
@@ -102,7 +113,7 @@ func TestProposePR(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The pushed branch carries the patch's change.
-		if got := git(origin, "show", prBranch+":prometheus/scrape/lab.yml"); !strings.Contains(got, "tvt:begin prometheus-scrape/") {
+		if got := git(origin, "show", changeBranch()+":prometheus/scrape/lab.yml"); !strings.Contains(got, "tvt:begin prometheus-scrape/") {
 			t.Errorf("pushed scrape config has no tvt block:\n%s", got)
 		}
 		if !strings.Contains(string(patch), "tvt:begin prometheus-scrape/") {
@@ -115,9 +126,9 @@ func TestProposePR(t *testing.T) {
 		t.Errorf("no PR opened:\n%s", out)
 	}
 	all := strings.Join(reqs, "\n")
-	for _, want := range []string{"POST /repos/Opsmastery-Summit/tvt-lab/pulls", `"draft":true`, `"head":"tvt/propose"`, `"base":"main"`, "tvt:begin", "stays a draft",
+	for _, want := range []string{"POST /repos/Opsmastery-Summit/tvt-lab/pulls", `"draft":true`, `"head":"tvt/propose-scan-`, `"base":"main"`, "tvt:begin", "stays a draft",
 		// The revert PR (S10 item 6), based on the change's branch.
-		`"head":"tvt/propose-revert"`, `"base":"tvt/propose"`, "Undoes tvt's telemetry changes"} {
+		`-revert"`, `"base":"tvt/propose-scan-`, "Undoes tvt's telemetry changes"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("no %q in the API requests:\n%s", want, all)
 		}
@@ -125,14 +136,14 @@ func TestProposePR(t *testing.T) {
 	if !strings.Contains(out, "revert PR opened for "+repo) {
 		t.Errorf("no revert PR opened:\n%s", out)
 	}
-	if got := git(origin, "show", revertBranch+":prometheus/scrape/lab.yml"); strings.Contains(got, "tvt:begin") {
+	if got := git(origin, "show", changeBranch()+vcs.RevertSuffix+":prometheus/scrape/lab.yml"); strings.Contains(got, "tvt:begin") {
 		t.Errorf("the revert branch still has tvt's block:\n%s", got)
 	}
 	out = run()
 	if !strings.Contains(out, "draft PR updated for "+repo) || !strings.Contains(out, "revert PR updated for "+repo) || strings.Count(strings.Join(reqs, "\n"), "POST /repos/Opsmastery-Summit/tvt-lab/pulls ") != 2 {
 		t.Errorf("rerun didn't update the PR:\n%s\n%s", out, strings.Join(reqs, "\n"))
 	}
-	if n := git(origin, "rev-list", "--count", "main.."+prBranch); n != "1" {
+	if n := git(origin, "rev-list", "--count", "main.."+changeBranch()); n != "1" {
 		t.Errorf("rerun stacked %s commits", n)
 	}
 }

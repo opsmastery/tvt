@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # S7's "done when" on the live lab (tvt test plan, manual test M4): scan the
 # running tvt-lab, then tvt propose --output pr opens (or updates) one draft
-# pull request in tvt-lab from the branch tvt/propose. Run it on the Mac
+# pull request in tvt-lab from the branch tvt/propose-scan-N. Run it on the Mac
 # that runs the lab.
 #
 # Tokens come from the login Keychain (service tvt-lab), never flags; this
