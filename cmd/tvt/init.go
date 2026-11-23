@@ -376,5 +376,13 @@ func isTerminal(r io.Reader) bool {
 		return false
 	}
 	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
+	if err != nil || st.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	// /dev/null is a character device too, and nobody answers there
+	// (tvt init < /dev/null in a script printed its prompts).
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(st, null) {
+		return false
+	}
+	return true
 }

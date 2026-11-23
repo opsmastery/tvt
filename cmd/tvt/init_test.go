@@ -140,3 +140,16 @@ func TestInitGitHubFineGrained(t *testing.T) {
 		t.Fatalf("%+v", cs)
 	}
 }
+
+// TestIsTerminalDevNull: /dev/null is a character device but not a
+// terminal, so tvt init < /dev/null asks nothing.
+func TestIsTerminalDevNull(t *testing.T) {
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer f.Close()
+	if isTerminal(f) {
+		t.Error("/dev/null taken for a terminal")
+	}
+}

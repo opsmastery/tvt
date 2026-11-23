@@ -1,4 +1,5 @@
 # Example price card. Copy to ./pricecard.yaml (git-ignored) and enter your own prices.
+version: 1
 name: example
 currency: USD
 metrics:
