@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -123,9 +124,40 @@ func runCheck(o checkOptions) (check.Result, error) {
 	tree := dirFiles(o.Repo)
 	in := check.Input{Manifest: m, Now: o.Now, MaxAge: o.MaxAge, SkipConfirmation: o.Unconfirmed}
 	if o.Patch != "" {
-		head, cleanup, err := patched(o.Repo, o.Patch, m)
+		mpath := filepath.ToSlash(o.Manifest)
+		head, cleanup, err := patched(o.Repo, o.Patch, m, mpath)
 		if err != nil {
 			return check.Result{}, err
+		}
+		// A patch that also changes the manifest is judged as --base judges
+		// a PR: against the manifest it brings, and against the one before
+		// it, so regenerating protect.json with a move passes (S17) and
+		// editing it can't lift a protection (S15). The patch is applied
+		// again with the new manifest's paths too.
+		hb, herr := head(mpath)
+		switch {
+		case errors.Is(herr, fs.ErrNotExist):
+			cleanup()
+			return check.Result{}, fmt.Errorf("%s: the patch deletes the manifest", o.Manifest)
+		case herr != nil:
+			cleanup()
+			return check.Result{}, herr
+		case !bytes.Equal(hb, b):
+			var hm report.Manifest
+			if err := json.Unmarshal(hb, &hm); err != nil {
+				cleanup()
+				return check.Result{}, fmt.Errorf("%s after the patch: %w", o.Manifest, err)
+			}
+			if err := manifestPaths(hm); err != nil {
+				cleanup()
+				return check.Result{}, fmt.Errorf("%s after the patch: %w", o.Manifest, err)
+			}
+			cleanup()
+			if head, cleanup, err = patched(o.Repo, o.Patch, m, append(manifestFiles(hm), mpath)...); err != nil {
+				return check.Result{}, err
+			}
+			base := m
+			in.Manifest, in.BaseManifest = hm, &base
 		}
 		defer cleanup()
 		in.Base, in.Head = tree, head
@@ -216,15 +248,9 @@ func gitFiles(repo, ref string) check.Files {
 	}
 }
 
-// patched copies the manifest's pipeline files to a temp dir and applies
-// the patch there, so the checkout is never touched.
-func patched(repo, patch string, m report.Manifest) (check.Files, func(), error) {
-	dir, err := os.MkdirTemp("", "tvt-check-")
-	if err != nil {
-		return nil, nil, err
-	}
-	cleanup := func() { os.RemoveAll(dir) }
-	paths := []string{report.DecisionsPath, report.ProposalPath}
+// manifestFiles: the repo paths a manifest's pipelines read.
+func manifestFiles(m report.Manifest) []string {
+	var paths []string
 	for _, p := range m.PipelineDefs {
 		paths = append(paths, p.Files...)
 		if p.HelmValues != nil {
@@ -235,6 +261,29 @@ func patched(repo, patch string, m report.Manifest) (check.Files, func(), error)
 		}
 		if p.Build != "" {
 			paths = append(paths, p.Build)
+		}
+	}
+	return paths
+}
+
+// patched applies patch to a temporary copy of the files check reads (the
+// manifest's pipeline files, the owner decisions and proposal, and extra),
+// so the checkout is never touched.
+func patched(repo, patch string, m report.Manifest, extra ...string) (check.Files, func(), error) {
+	dir, err := os.MkdirTemp("", "tvt-check-")
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() { os.RemoveAll(dir) }
+	paths := append([]string{report.DecisionsPath, report.ProposalPath}, manifestFiles(m)...)
+	seen := map[string]bool{}
+	for _, p := range paths {
+		seen[p] = true
+	}
+	for _, p := range extra {
+		if !seen[p] {
+			seen[p] = true
+			paths = append(paths, p)
 		}
 	}
 	for _, p := range paths {
