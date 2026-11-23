@@ -21,14 +21,14 @@ var Testdata = func() string {
 // Lab is testdata/lab: recorded responses from tvt-lab.
 var Lab = filepath.Join(Testdata, "lab")
 
-// forbidden reports whether a request would run a query on a backend that
+// Forbidden reports whether a request would run a query on a backend that
 // logs queries as usage (invariant 4: tvt never runs PromQL or LogQL
 // there). It covers Prometheus and Mimir (any prefix), Loki, and Grafana's
 // query and datasource-proxy APIs, which forward to those backends. The
 // one exception is the query-log probe: an instant query whose text is a
 // marker selecting nothing, tagged collect.ProbeTag, to Prometheus or Mimir
 // (collect.ProbeQuery) or to Loki (collect.LokiProbeQuery, S5 item 5).
-func forbidden(r *http.Request) bool {
+func Forbidden(r *http.Request) bool {
 	path := r.URL.Path
 	if strings.HasSuffix(path, "/api/v1/query") && !strings.Contains(path, "/loki/") && !strings.Contains(path, "/api/datasources/proxy/") {
 		if _, ok := collect.ProbeNonce(r.URL.Query().Get("query")); ok && r.Header.Get("X-Query-Tags") == collect.ProbeTag {
@@ -86,7 +86,7 @@ func Serve(t testing.TB, h http.Handler) *httptest.Server {
 			http.Error(w, "tvt must only GET", http.StatusMethodNotAllowed)
 			return
 		}
-		if forbidden(r) {
+		if Forbidden(r) {
 			t.Errorf("GET %s: tvt must never run queries against a backend that logs them as usage", r.URL.Path)
 			http.Error(w, "query endpoints are off limits", http.StatusForbidden)
 			return

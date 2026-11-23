@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/Opsmastery-Summit/tvt/internal/httpx"
+	"github.com/Opsmastery-Summit/tvt/internal/testutil"
 	"github.com/Opsmastery-Summit/tvt/pkg/collect"
 	"github.com/Opsmastery-Summit/tvt/pkg/graph"
 	"github.com/Opsmastery-Summit/tvt/pkg/report"
@@ -185,18 +186,13 @@ func (r *readOnly) RoundTrip(req *http.Request) (*http.Response, error) {
 		r.t.Errorf("tvt sent %s %s: read-only tools only GET", req.Method, req.URL.Redacted())
 		return nil, fmt.Errorf("e2e: refused %s", req.Method)
 	}
-	p := req.URL.Path
-	if strings.HasSuffix(p, "/api/v1/query") || strings.HasSuffix(p, "/api/v1/query_range") ||
-		strings.HasPrefix(p, "/api/ds/query") || strings.Contains(p, "/api/datasources/proxy/") {
-		q := req.URL.Query().Get("query")
-		_, probe := collect.ProbeNonce(q)
-		if strings.HasPrefix(p, "/loki/") {
-			_, probe = collect.LokiProbeNonce(q) // S5 item 5
-		}
-		if !probe || !strings.HasSuffix(p, "/api/v1/query") || strings.Contains(p, "/api/datasources/proxy/") {
-			r.t.Errorf("tvt ran a query against %s: only the probe marker is allowed", req.URL.Redacted())
-			return nil, fmt.Errorf("e2e: refused query")
-		}
+	// The same rule the fake backends enforce (testutil.Forbidden): no
+	// query but tvt's own tagged ones (the probe, the level and attribute
+	// reads, Usage Insights). The suite had its own copy, which predated
+	// S10's tagged reads and refused them.
+	if testutil.Forbidden(req) {
+		r.t.Errorf("tvt ran a query against %s: only tvt's tagged queries are allowed", req.URL.Redacted())
+		return nil, fmt.Errorf("e2e: refused query")
 	}
 	if r.next != nil {
 		return r.next.RoundTrip(req)
@@ -272,7 +268,10 @@ func TestE2EScanPrometheus(t *testing.T) {
 		LokiQueryLogs: stringList{l.logs("loki.log")},
 		Config:        l.config(t),
 	})
-	for _, want := range []string{"probe found", "scan 1 written", "as sa-1-tvt"} {
+	// The lab's Viewer service account (TVT_E2E_SA when the token is
+	// another account's).
+	sa := envOr("TVT_E2E_SA", "sa-1-tvt")
+	for _, want := range []string{"probe found", "scan 1 written", "as " + sa} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q", want)
 		}
@@ -298,7 +297,7 @@ func TestE2EScanPrometheus(t *testing.T) {
 	assertDeclared(t, g, "prom", l.dir, gt)
 
 	for _, ld := range g.loads {
-		if ld.Login == "sa-1-tvt" {
+		if ld.Login == sa {
 			t.Errorf("load %+v by tvt itself should have been excluded", ld)
 		}
 	}
