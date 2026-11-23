@@ -71,7 +71,7 @@ type QueryLogSource interface {
 // (S10 item 3). It sends one metric query per stream, so callers ask for
 // the largest few only.
 type StreamLevelSource interface {
-	StreamLevels(ctx context.Context, selector string, window time.Duration) (map[string]int64, error)
+	StreamLevels(ctx context.Context, selector string, window time.Duration) (LevelStats, error)
 }
 
 // StreamVolumeSource reports ingested bytes per log stream (Loki volume API).
@@ -414,9 +414,12 @@ type StreamVolume struct {
 	Bytes  int64
 	Window time.Duration
 	// Levels are the stream's line bytes per level (StreamLevelSource),
-	// over their own window; only their shares count. nil when the stream
+	// over their own window; record events count under "record:" plus the
+	// level. LevelLines are the same groups' line counts (nil from an older
+	// scan: Levels' shares then stand for the volume's). nil when the stream
 	// wasn't measured (S10 item 3).
-	Levels map[string]int64
+	Levels     map[string]int64
+	LevelLines map[string]int64
 }
 
 // PatternSource lists the line patterns in one log stream (Loki's pattern

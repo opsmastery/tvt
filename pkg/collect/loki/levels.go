@@ -13,21 +13,36 @@ import (
 
 var _ collect.StreamLevelSource = (*Client)(nil)
 
-// StreamLevels measures the bytes of each line level in one stream over the
-// last window (S10 item 3): a metric query, sum by (detected_level) of
-// bytes_over_time (collect.LokiLevelQuery), tagged collect.LevelTag so the
-// query log reader leaves it out of usage. It is for streams whose level isn't a stream label, where the
-// volume API can't split by level: detected_level is structured metadata
-// Loki sets at ingest (discover_log_levels). The bytes are line bytes,
-// without structured metadata. Lines Loki gave no level come back under
-// "unknown"; a Loki that sets no detected_level at all returns one empty
-// key, which the caller treats as no level information.
-func (c *Client) StreamLevels(ctx context.Context, selector string, window time.Duration) (map[string]int64, error) {
+// StreamLevels measures one stream's lines per level and event over the
+// last window (S10 item 3): two metric queries, sum by (detected_level,
+// event_name) of bytes_over_time and of count_over_time
+// (collect.LokiLevelQuery, LokiLevelCountQuery), both tagged
+// collect.LevelTag so the query log reader leaves them out of usage. It is
+// for streams whose level isn't a stream label, where the volume API can't
+// split by level: detected_level is structured metadata Loki sets at
+// ingest (discover_log_levels). The bytes are line bytes, without
+// structured metadata; the counts let the caller share that out. Lines
+// Loki gave no level come back under "unknown"; a Loki that sets no
+// detected_level at all returns an empty level, which the caller treats as
+// no level information.
+func (c *Client) StreamLevels(ctx context.Context, selector string, window time.Duration) (collect.LevelStats, error) {
 	if window <= 0 {
-		return nil, fmt.Errorf("loki: levels window %v", window)
+		return collect.LevelStats{}, fmt.Errorf("loki: levels window %v", window)
 	}
+	bytes, err := c.levelQuery(ctx, selector, collect.LokiLevelQuery(selector, window))
+	if err != nil {
+		return collect.LevelStats{}, err
+	}
+	lines, err := c.levelQuery(ctx, selector, collect.LokiLevelCountQuery(selector, window))
+	if err != nil {
+		return collect.LevelStats{}, err
+	}
+	return collect.LevelStats{Bytes: bytes, Lines: lines}, nil
+}
+
+func (c *Client) levelQuery(ctx context.Context, selector, query string) (map[collect.LevelKey]int64, error) {
 	q := map[string][]string{
-		"query": {collect.LokiLevelQuery(selector, window)},
+		"query": {query},
 		"time":  {strconv.FormatInt(c.now().UnixNano(), 10)},
 	}
 	body, err := c.getTagged(ctx, "/loki/api/v1/query", q, "application/json", collect.LevelTag)
@@ -51,7 +66,7 @@ func (c *Client) StreamLevels(ctx context.Context, selector string, window time.
 	if resp.Status != "success" || resp.Data.ResultType != "vector" {
 		return nil, fmt.Errorf("loki: levels of %s: status %q, result type %q", selector, resp.Status, resp.Data.ResultType)
 	}
-	out := map[string]int64{}
+	out := map[collect.LevelKey]int64{}
 	for _, r := range resp.Data.Result {
 		s, ok := r.Value[1].(string)
 		if !ok {
@@ -61,7 +76,7 @@ func (c *Client) StreamLevels(ctx context.Context, selector string, window time.
 		if err != nil {
 			return nil, fmt.Errorf("loki: levels of %s: %w", selector, err)
 		}
-		out[strings.ToLower(r.Metric["detected_level"])] += int64(v)
+		out[collect.LevelKey{Level: strings.ToLower(r.Metric["detected_level"]), Event: r.Metric["event_name"]}] += int64(v)
 	}
 	return out, nil
 }
