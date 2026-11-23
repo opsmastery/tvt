@@ -51,7 +51,8 @@ func tracedScan(ctx context.Context, o scanOptions, run func(context.Context) er
 }
 
 // recordScanResult puts the built graph's shape on the scan span: counts,
-// and one evidence_gap event per source that can't vouch for the window.
+// and one evidence_gap event per source that can't vouch for the window
+// (source, configured, coverage; the gap's text at names detail only).
 // The signal counts by class also go on tvt.scan.signals, a gauge whose
 // only attribute is the class.
 func recordScanResult(ctx context.Context, g scan.Output, classes map[string]int) {
@@ -71,7 +72,9 @@ func recordScanResult(ctx context.Context, g scan.Output, classes map[string]int
 			attribute.Bool("tvt.configured", s.Configured),
 			attribute.Float64("tvt.coverage", s.Coverage),
 		}
-		if s.Gap != "" {
+		// The gap's text can name dashboards, panels, data sources and log
+		// files, or carry an error message: names detail only (S4).
+		if s.Gap != "" && telemetry.Names() {
 			attrs = append(attrs, telemetry.String("tvt.gap", s.Gap))
 		}
 		span.AddEvent("evidence_gap", trace.WithAttributes(attrs...))

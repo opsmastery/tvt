@@ -134,7 +134,7 @@ func TestScanTelemetryShape(t *testing.T) {
 // at the basic detail level no signal name, path or query text does.
 // At the names level, paths and queries appear, capped at 512 characters.
 func TestScanTelemetryNoSecrets(t *testing.T) {
-	check := func(spans tracetest.SpanStubs, forbidden []string) (paths, queries int) {
+	check := func(spans tracetest.SpanStubs, forbidden []string) (paths, queries, gaps int) {
 		for _, s := range spans {
 			kvs := slices.Clone(s.Attributes)
 			for _, e := range s.Events {
@@ -155,6 +155,8 @@ func TestScanTelemetryNoSecrets(t *testing.T) {
 					paths++
 				case "db.query.text":
 					queries++
+				case "tvt.gap":
+					gaps++
 				}
 			}
 		}
@@ -162,12 +164,12 @@ func TestScanTelemetryNoSecrets(t *testing.T) {
 	}
 	secrets := []string{"test-grafana-token", "Bearer", "Basic ", "Authorization"}
 	spans, _ := telemetryScan(t, telemetry.DetailBasic)
-	if p, q := check(spans, append(secrets, "shop_", "tvt_query_log_probe")); p+q != 0 {
-		t.Errorf("basic detail recorded %d paths and %d queries", p, q)
+	if p, q, g := check(spans, append(secrets, "shop_", "tvt_query_log_probe")); p+q+g != 0 {
+		t.Errorf("basic detail recorded %d paths, %d queries and %d gap texts", p, q, g)
 	}
 	spans, _ = telemetryScan(t, telemetry.DetailNames)
-	if p, q := check(spans, secrets); p == 0 || q == 0 {
-		t.Errorf("names detail recorded %d paths and %d queries, want both", p, q)
+	if p, q, g := check(spans, secrets); p == 0 || q == 0 || g == 0 {
+		t.Errorf("names detail recorded %d paths, %d queries and %d gap texts, want all three", p, q, g)
 	}
 }
 

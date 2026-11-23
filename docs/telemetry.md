@@ -27,7 +27,7 @@ OTEL_TRACES_EXPORTER=console tvt scan ...                        # spans to stde
 
 ## What it emits
 
-**Spans.** One `tvt.scan` root per run, with the window, the Grafana edition, the counts of signals, consumers and references, and log coverage. Each evidence source that can't vouch for the whole window is an `evidence_gap` event on it (source, configured, coverage, gap). Every backend request is a `tvt.collect.<backend>` client child (`grafana`, `prometheus`, `mimir`, `loki`, and `otelcol` for a Collector's `/metrics`) with the method, host, status code and route. A route keeps only API words and replaces every other path segment with `{}`: `/api/v1/label/{}/values`, `/api/dashboards/uid/{}`. A failure records the error's Go type, not its text, which often holds a URL or a name.
+**Spans.** One `tvt.scan` root per run, with the window, the Grafana edition, the counts of signals, consumers and references, and log coverage. Each evidence source that can't vouch for the whole window is an `evidence_gap` event on it (source, configured, coverage; at `names` detail also the gap's text, which can name dashboards, panels, data sources or log files). Every backend request is a `tvt.collect.<backend>` client child (`grafana`, `prometheus`, `mimir`, `loki`, and `otelcol` for a Collector's `/metrics`) with the method, host, status code and route. A route keeps only API words and replaces every other path segment with `{}`: `/api/v1/label/{}/values`, `/api/dashboards/uid/{}`. A failure records the error's Go type, not its text, which often holds a URL or a name.
 
 **Metrics.** Bounded attributes only, and nothing per scan or per signal:
 
@@ -42,7 +42,7 @@ OTEL_TRACES_EXPORTER=console tvt scan ...                        # spans to stde
 ## Detail levels
 
 - **`basic`** (default): counts, durations, outcomes and normalized routes. No signal name, URL path, query text or error message goes anywhere.
-- **`names`**: spans also get the raw `url.path`, the request's query text (`db.query.text`) and error messages. Metrics never do.
+- **`names`**: spans also get the raw `url.path`, the request's query text (`db.query.text`), error messages and each evidence gap's text (`tvt.gap`). Metrics never do.
 
 At either level, every string attribute is capped at 512 characters and a cut value ends with `…[truncated]`, so it can't pass for a whole one. Headers are never recorded, so no token reaches an exporter.
 
