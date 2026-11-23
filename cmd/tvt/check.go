@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -260,8 +261,17 @@ func patched(repo, patch string, m report.Manifest) (check.Files, func(), error)
 		cleanup()
 		return nil, nil, err
 	}
+	// A rename is applied only when both its paths are included: one that
+	// moves a pipeline file out of the manifest's paths would otherwise be
+	// skipped whole, and the file would look unchanged (S16). Including
+	// the new path applies it, so the old path is gone and check refuses.
+	moved, err := renamedTo(abs, paths)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
 	args := []string{"apply"}
-	for _, p := range paths {
+	for _, p := range append(paths, moved...) {
 		args = append(args, "--include="+p)
 	}
 	cmd := exec.Command("git", append(args, abs)...)
@@ -271,4 +281,45 @@ func patched(repo, patch string, m report.Manifest) (check.Files, func(), error)
 		return nil, nil, fmt.Errorf("git apply %s: %v: %s", patch, err, strings.TrimSpace(string(out)))
 	}
 	return dirFiles(dir), cleanup, nil
+}
+
+// renamedTo: the new paths of the patch's renames whose old path is one
+// of paths, read from each file's "rename from" and "rename to" headers
+// (git apply --numstat names only the new path of a pure rename). Paths
+// git quotes (C-style, for unusual characters) are unquoted.
+func renamedTo(patch string, paths []string) ([]string, error) {
+	b, err := os.ReadFile(patch)
+	if err != nil {
+		return nil, err
+	}
+	want := map[string]bool{}
+	for _, p := range paths {
+		want[p] = true
+	}
+	unquote := func(s string) string {
+		if strings.HasPrefix(s, `"`) {
+			if u, err := strconv.Unquote(s); err == nil {
+				return u
+			}
+		}
+		return s
+	}
+	var moved []string
+	from := ""
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			from = ""
+		case strings.HasPrefix(line, "rename from "):
+			from = unquote(strings.TrimPrefix(line, "rename from "))
+		case strings.HasPrefix(line, "rename to ") && from != "":
+			to := unquote(strings.TrimPrefix(line, "rename to "))
+			if want[from] && !want[to] {
+				moved = append(moved, to)
+			}
+			from = ""
+		}
+	}
+	return moved, nil
 }
