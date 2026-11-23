@@ -8,7 +8,7 @@
 
 Every signal tvt marks unread had no reader in your evidence window, and every gap is listed. If you find a reader we missed, that's a bug, and the benchmark gets a new case.
 
-> Status: release candidate (`v0.1.0-rc1`). Works on Prometheus, Mimir, Loki and Grafana (OSS and Cloud), and writes changes for Prometheus, Alloy, the OpenTelemetry Collector and Fluent Bit. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> Status: release candidate for v0.1.0 (see [releases](https://github.com/Opsmastery-Summit/tvt/releases) for the latest). Works on Prometheus, Mimir, Loki and Grafana (OSS and Cloud), and writes changes for Prometheus, Alloy, the OpenTelemetry Collector and Fluent Bit. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Install
 
