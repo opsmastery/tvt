@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -432,7 +433,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 			var msg string
 			in.Patterns, msg = streamPatterns(ctx, lc, in.StreamVolumes)
 			fmt.Fprintf(out, "%-12s %s\n", "patterns", msg)
-			fmt.Fprintf(out, "%-12s %s\n", "levels", streamLevels(ctx, lc, in.StreamVolumes))
+			fmt.Fprintf(out, "%-12s %s\n", "levels", streamLevels(ctx, lc, in.StreamVolumes, recordEvents(append(append([]string{}, report.BuiltinRecordMatches.LogEvents...), in.Records.LogEvents...))))
 			in.StreamAttrs, msg = streamAttrs(ctx, lc, in.StreamVolumes)
 			fmt.Fprintf(out, "%-12s %s\n", "attributes", msg)
 		}
@@ -752,7 +753,12 @@ func streamAttrs(ctx context.Context, lc *loki.Client, vols []collect.StreamVolu
 		plural(keys, "key", "keys"), len(top), collect.AttrLineLimit, attrWindow)
 }
 
-func streamLevels(ctx context.Context, lc *loki.Client, vols []collect.StreamVolume) string {
+// streamLevels measures the largest streams with no level label per level
+// (S10 item 3). Lines of a record event (records, the event names the
+// record conditions name) count under "record:" plus their level: a level
+// tier's writer keeps them hot whatever their level, so its claim mustn't
+// count them.
+func streamLevels(ctx context.Context, lc *loki.Client, vols []collect.StreamVolume, records map[string]bool) string {
 	var idx []int
 	for i, v := range vols {
 		if !hasLevelLabel(v.Labels) {
@@ -767,14 +773,21 @@ func streamLevels(ctx context.Context, lc *loki.Client, vols []collect.StreamVol
 	names := streamLabelNames(vols)
 	measured, below := 0, 0
 	for _, i := range idx {
-		lv, err := lc.StreamLevels(ctx, loki.ExactStreamSelector(vols[i].Labels, names), scan.LevelWindow)
+		st, err := lc.StreamLevels(ctx, loki.ExactStreamSelector(vols[i].Labels, names), scan.LevelWindow)
 		if err != nil {
 			return fmt.Sprintf("measured %d of %d streams with no level label, then: %v", measured, len(idx), err)
+		}
+		lv, lines := map[string]int64{}, map[string]int64{}
+		for k, b := range st.Bytes {
+			lv[levelGroup(k, records)] += b
+		}
+		for k, n := range st.Lines {
+			lines[levelGroup(k, records)] += n
 		}
 		if _, none := lv[""]; none || len(lv) == 0 {
 			continue // no detected_level: discover_log_levels is off
 		}
-		vols[i].Levels = lv
+		vols[i].Levels, vols[i].LevelLines = lv, lines
 		measured++
 		for l, b := range lv {
 			if r, ok := parse.LevelRank(l); ok && r < parse.RankWarn && b > 0 {
@@ -784,6 +797,31 @@ func streamLevels(ctx context.Context, lc *loki.Client, vols []collect.StreamVol
 		}
 	}
 	return fmt.Sprintf("%d of the %d largest streams with no level label measured per level over %s, %d with lines below warn", measured, len(idx), scan.LevelWindow, below)
+}
+
+// levelGroup is a level key's group in StreamVolume.Levels: its level, or
+// "record:" and its level for a record event.
+func levelGroup(k collect.LevelKey, records map[string]bool) string {
+	if k.Event != "" && records[k.Event] {
+		return "record:" + k.Level
+	}
+	return k.Level
+}
+
+// recordEventRe reads the event name out of a record condition of the
+// form log.attributes["event.name"] == "x" (the built-in agent records,
+// and the usual shape of records.log_events).
+var recordEventRe = regexp.MustCompile(`attributes\["event\.name"\]\s*==\s*"([^"\\]+)"`)
+
+// recordEvents are the event names record conditions name.
+func recordEvents(conds []string) map[string]bool {
+	out := map[string]bool{}
+	for _, c := range conds {
+		for _, m := range recordEventRe.FindAllStringSubmatch(c, -1) {
+			out[m[1]] = true
+		}
+	}
+	return out
 }
 
 func hasLevelLabel(labels map[string]string) bool {

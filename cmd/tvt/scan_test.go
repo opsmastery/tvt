@@ -1706,3 +1706,17 @@ func TestStreamPatternsExact(t *testing.T) {
 		t.Errorf("patterns %v, summary %q", got, summary)
 	}
 }
+
+// TestRecordEvents: the event names a level tier keeps hot, read from the
+// record conditions, built in and configured.
+func TestRecordEvents(t *testing.T) {
+	got := recordEvents([]string{`log.attributes["event.name"] == "tool_result"`, `log.attributes["event.name"] == "tool_decision"`,
+		`attributes["event.name"] == "deploy" and severity_number > 9`, `log.body == "x"`})
+	if len(got) != 3 || !got["tool_result"] || !got["tool_decision"] || !got["deploy"] {
+		t.Errorf("%v", got)
+	}
+	if levelGroup(collect.LevelKey{Level: "info", Event: "tool_result"}, got) != "record:info" ||
+		levelGroup(collect.LevelKey{Level: "debug", Event: "model_stream"}, got) != "debug" {
+		t.Error("levelGroup")
+	}
+}
