@@ -93,6 +93,9 @@ type scanOptions struct {
 	// GrafanaEdition is "oss" (the default) or "cloud". On Grafana Cloud,
 	// dashboard views come from Usage Insights instead of the router log.
 	GrafanaEdition string
+	// Retry is how a failed backend request is retried before the scan
+	// fails (S6).
+	Retry httpx.RetryPolicy
 }
 
 // stringList is a repeatable string flag.
@@ -119,6 +122,9 @@ func cmdScan(args []string, stdout, stderr io.Writer) int {
 	fs.IntVar(&o.LabelTop, "label-top", 50, "collect per-label cardinality for this many of the largest metrics")
 	fs.StringVar(&o.Config, "config", "", "tvt.yaml with external_consumers and ownership (optional)")
 	fs.BoolVar(&o.AllowInsecureToken, "allow-insecure-token", false, "send tokens over plain http to non-loopback hosts (not recommended)")
+	fs.IntVar(&o.Retry.Retries, "retries", httpx.DefaultRetry.Retries, "retry a failed backend request this many times before the scan fails")
+	fs.DurationVar(&o.Retry.Base, "retry-backoff", httpx.DefaultRetry.Base, "wait before the first retry; each later retry waits twice as long")
+	fs.DurationVar(&o.Retry.Max, "retry-max", httpx.DefaultRetry.Max, "longest wait between retries")
 	fs.StringVar(&o.GrafanaEdition, "grafana-edition", "oss", "oss, or cloud: dashboard views from Usage Insights, and TVT_PROM_USER/TVT_LOKI_USER sent with the tokens as basic auth")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -169,6 +175,10 @@ func cmdScan(args []string, stdout, stderr io.Writer) int {
 // interrupted scan leaves it untouched (or never creates it).
 func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out io.Writer) error {
 	start := scanNow().UTC()
+	if o.Retry != (httpx.RetryPolicy{}) {
+		httpx.SetRetry(o.Retry)
+	}
+	httpx.ResetFailures()
 	window := time.Duration(o.Window) * 24 * time.Hour
 	since := start.Add(-window)
 	in := scan.Inputs{Start: start, Window: window}
@@ -197,7 +207,7 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 				continue
 			}
 			telemetry.RegisterBackend(p.Telemetry, "otelcol")
-			sent, err := otelcol.Telemetry(ctx, &http.Client{Timeout: 10 * time.Second, Transport: telemetry.Transport(nil)}, p.Telemetry)
+			sent, err := otelcol.Telemetry(ctx, &http.Client{Transport: httpx.Retrying(telemetry.Transport(nil), 10*time.Second)}, p.Telemetry)
 			if err != nil {
 				fmt.Fprintf(out, "%-12s %s: %v\n", "collector", p.Name, err)
 				continue
@@ -631,6 +641,15 @@ func runScan(ctx context.Context, o scanOptions, getenv func(string) string, out
 		fmt.Fprintf(out, "%-12s %s\n", "lines", lineSummary(g.LineFindings))
 	}
 
+	// A backend that stayed unavailable after every retry fails the scan:
+	// a partial graph could read an unreachable source as "no reader" (S6).
+	if fails := httpx.Failures(); len(fails) > 0 {
+		var msgs []string
+		for _, f := range fails {
+			msgs = append(msgs, f.Error())
+		}
+		return fmt.Errorf("backend unavailable, nothing was written: %s (raise --retries or --retry-max, or rerun when it's back)", strings.Join(msgs, "; "))
+	}
 	id, err := save(ctx, o.DB, start, o.Window, g)
 	if err != nil {
 		return err
@@ -1106,6 +1125,12 @@ func (o scanOptions) validate() error {
 	}
 	if o.Prom != "" && o.Mimir != "" {
 		return errors.New("--prom and --mimir are mutually exclusive")
+	}
+	if o.Retry.Retries < 0 || o.Retry.Retries > 10 {
+		return errors.New("--retries must be between 0 and 10")
+	}
+	if o.Retry.Base < 0 || o.Retry.Max < 0 || (o.Retry.Max > 0 && o.Retry.Base > o.Retry.Max) {
+		return errors.New("--retry-backoff and --retry-max must not be negative, and --retry-backoff must not exceed --retry-max")
 	}
 	for name, v := range map[string]string{"grafana": o.Grafana, "prom": o.Prom, "mimir": o.Mimir, "loki": o.Loki} {
 		if v == "" {

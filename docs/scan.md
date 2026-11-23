@@ -29,6 +29,9 @@ tvt scan --grafana https://grafana.example.com \
 | `--window` | `30` | The evidence window in days. Recommendations wait until a scan's logs cover it |
 | `--config` | | `tvt.yaml` ([example](../examples/tvt.example.yaml)): external consumers, records, SLOs, runbooks and postmortems, ownership, pipelines (a Collector pipeline with `telemetry:` has its exporter rates read), and merged tvt PRs for the savings ledger |
 | `--db` | `tvt.db` | The usage graph database. Created on the first scan; each run adds a scan |
+| `--retries` | `3` | Retry a failed backend request this many times (0 to 10) before the scan fails |
+| `--retry-backoff` | `1s` | Wait before the first retry; each later retry waits twice as long, with jitter |
+| `--retry-max` | `30s` | The longest wait between retries. A `Retry-After` up to this long is honored |
 | `--allow-insecure-token` | off | Send tokens over plain http to a host that isn't loopback. Don't |
 
 Every log flag is repeatable and takes globs, and `.gz` files are read. Credentials come only from the environment: `TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `TVT_LOKI_TOKEN` (and `TVT_PROM_USER`, `TVT_LOKI_USER` for Grafana Cloud).
@@ -55,12 +58,18 @@ Besides the probe, tvt runs one tagged Loki query per large unlabelled stream (`
 
 Every evidence source is stored with its coverage: the share of the window its data spans. A source you didn't configure is stored at zero, so the report can say what it couldn't see. `tvt report` and `tvt why` list these as evidence gaps. A signal is only called unread when the sources that could have shown a read cover the window.
 
+## Backend failures
+
+A backend that fails mid-scan fails the scan. A failure is a network error, a timeout, or an HTTP 429, 500, 502, 503 or 504. tvt retries the request with exponential backoff (`--retries`, `--retry-backoff`, `--retry-max`); each attempt has its own 60-second limit. If the backend still fails, later requests to it fail at once, and the scan exits 1 without writing anything. A partial scan could read a source it couldn't reach as "no reader", so tvt never writes one.
+
+An answer that says a feature isn't there (a 404 from Loki's pattern API, a 403 for an endpoint your token can't read) is not a failure: it's recorded as an evidence gap, as before.
+
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | 0 | The scan was written |
-| 1 | The scan failed. Nothing was written: each run is one transaction, and collection finishes before the database is opened |
+| 1 | The scan failed, including a backend that stayed unavailable after its retries. Nothing was written: each run is one transaction, and collection finishes before the database is opened |
 | 2 | Bad flags |
 
 ## Next
