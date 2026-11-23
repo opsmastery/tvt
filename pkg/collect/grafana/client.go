@@ -17,7 +17,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/internal/httpx"
+	"github.com/opsmastery/tvt/internal/httpx"
 )
 
 // Client reads from one Grafana organization's HTTP API.

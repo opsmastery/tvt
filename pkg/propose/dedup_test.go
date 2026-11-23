@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/validate"
+	"github.com/opsmastery/tvt/pkg/validate"
 )
 
 var dedup = Dedup{ID: "dedup:otelcol-agent", Scan: 9, Reason: "the reconciler logs one line every 30s; nothing reads its stream",

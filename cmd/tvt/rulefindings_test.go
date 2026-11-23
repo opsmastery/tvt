@@ -9,9 +9,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
-	"github.com/Opsmastery-Summit/tvt/pkg/store"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/store"
 )
 
 // TestRuleFindings (S6 item 1) scans the rule-efficiency state and checks

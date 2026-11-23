@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/scan"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/scan"
 )
 
 var at = time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/parse"
 )
 
 // ManifestVersion is the protection manifest's format (ADR 0003, amended by

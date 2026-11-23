@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/score"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/score"
 )
 
 // Usage-log evidence sources, as stored in scan_sources.

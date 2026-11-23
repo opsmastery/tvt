@@ -10,7 +10,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // Datasource is a datasource as Grafana's provisioning files declare it

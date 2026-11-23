@@ -37,9 +37,9 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 var updateBench = flag.Bool("update-bench", false, "re-record testdata/bench/baseline.json from this run")

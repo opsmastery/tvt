@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 func TestManifests(t *testing.T) {

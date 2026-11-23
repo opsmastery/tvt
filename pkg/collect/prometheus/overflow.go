@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Opsmastery-Summit/tvt/internal/httpx"
+	"github.com/opsmastery/tvt/internal/httpx"
 	"net/url"
 	"slices"
 	"strconv"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // Overflow lists metrics with OpenTelemetry overflow series (S6 item 5):

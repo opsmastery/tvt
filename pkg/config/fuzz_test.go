@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/internal/testutil"
 )
 
 // FuzzParse: any bytes parse or fail without a panic, and a config that

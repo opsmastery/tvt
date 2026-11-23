@@ -21,8 +21,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/Opsmastery-Summit/tvt/internal/safe"
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
+	"github.com/opsmastery/tvt/internal/safe"
+	"github.com/opsmastery/tvt/pkg/parse"
 	"github.com/prometheus/common/model"
 )
 

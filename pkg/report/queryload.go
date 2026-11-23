@@ -3,7 +3,7 @@ package report
 import (
 	"sort"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // QueryLoad is the measured query load in the scan's window, by client

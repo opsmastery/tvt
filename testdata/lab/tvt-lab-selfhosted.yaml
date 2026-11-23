@@ -10,5 +10,5 @@ postmortems:
 runbooks:
   fetch: false
   mirrors:
-    - url_prefix: https://github.com/Opsmastery-Summit/tvt-lab/blob/main/
+    - url_prefix: https://github.com/opsmastery/tvt-lab/blob/main/
       path: .

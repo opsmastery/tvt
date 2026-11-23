@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/validate"
+	"github.com/opsmastery/tvt/pkg/validate"
 )
 
 var tier = Tier{ID: "tier:otelcol-agent", Scan: 11, Reason: "99.9% of the coding agent's stream is below warn and nothing reads it",

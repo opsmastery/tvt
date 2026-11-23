@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/scan"
-	"github.com/Opsmastery-Summit/tvt/pkg/store"
+	"github.com/opsmastery/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/scan"
+	"github.com/opsmastery/tvt/pkg/store"
 )
 
 // cloudEnv is env plus Grafana Cloud's basic-auth users.

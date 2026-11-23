@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // TestScrapeLimits: a scrape interval past the longest its readers allow

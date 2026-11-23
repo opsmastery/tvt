@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // Sprint 2 item 19: a panel or Grafana-managed rule on a datasource tvt

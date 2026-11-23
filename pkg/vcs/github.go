@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/httpx"
+	"github.com/opsmastery/tvt/internal/httpx"
 )
 
 // GitHub opens and updates draft pull requests through the REST API. Its

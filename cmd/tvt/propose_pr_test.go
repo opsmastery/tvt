@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
-	"github.com/Opsmastery-Summit/tvt/pkg/vcs"
+	"github.com/opsmastery/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/vcs"
 )
 
 // TestProposePR runs tvt propose --output pr on the writers state against
@@ -37,7 +37,7 @@ func TestProposePR(t *testing.T) {
 	}
 	db := benchDB(t, st, dirs[st.Name])
 	cfg := filepath.Join(dirs[st.Name], "tvt-lab.yaml")
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 
 	// A Git origin holding the vendored checkout, and a clone of it.
 	git := func(dir string, args ...string) string {
@@ -84,17 +84,17 @@ func TestProposePR(t *testing.T) {
 		reqs = append(reqs, r.Method+" "+r.URL.Path+" "+string(b))
 		switch {
 		case r.Method == "GET":
-			if open[strings.TrimPrefix(r.URL.Query().Get("head"), "Opsmastery-Summit:")] {
-				w.Write([]byte(`[{"number":1,"html_url":"https://github.com/Opsmastery-Summit/tvt-lab/pull/1"}]`))
+			if open[strings.TrimPrefix(r.URL.Query().Get("head"), "opsmastery:")] {
+				w.Write([]byte(`[{"number":1,"html_url":"https://github.com/opsmastery/tvt-lab/pull/1"}]`))
 				return
 			}
 			w.Write([]byte(`[]`))
 		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/pulls"):
 			open[body["head"].(string)] = true
 			w.WriteHeader(201)
-			w.Write([]byte(`{"number":1,"html_url":"https://github.com/Opsmastery-Summit/tvt-lab/pull/1"}`))
+			w.Write([]byte(`{"number":1,"html_url":"https://github.com/opsmastery/tvt-lab/pull/1"}`))
 		default:
-			w.Write([]byte(`{"html_url":"https://github.com/Opsmastery-Summit/tvt-lab/pull/1"}`))
+			w.Write([]byte(`{"html_url":"https://github.com/opsmastery/tvt-lab/pull/1"}`))
 		}
 	}))
 	defer srv.Close()
@@ -126,7 +126,7 @@ func TestProposePR(t *testing.T) {
 		t.Errorf("no PR opened:\n%s", out)
 	}
 	all := strings.Join(reqs, "\n")
-	for _, want := range []string{"POST /repos/Opsmastery-Summit/tvt-lab/pulls", `"draft":true`, `"head":"tvt/propose-scan-`, `"base":"main"`, "tvt:begin", "stays a draft",
+	for _, want := range []string{"POST /repos/opsmastery/tvt-lab/pulls", `"draft":true`, `"head":"tvt/propose-scan-`, `"base":"main"`, "tvt:begin", "stays a draft",
 		// The revert PR (S10 item 6), based on the change's branch.
 		`-revert"`, `"base":"tvt/propose-scan-`, "Undoes tvt's telemetry changes"} {
 		if !strings.Contains(all, want) {
@@ -140,7 +140,7 @@ func TestProposePR(t *testing.T) {
 		t.Errorf("the revert branch still has tvt's block:\n%s", got)
 	}
 	out = run()
-	if !strings.Contains(out, "draft PR updated for "+repo) || !strings.Contains(out, "revert PR updated for "+repo) || strings.Count(strings.Join(reqs, "\n"), "POST /repos/Opsmastery-Summit/tvt-lab/pulls ") != 2 {
+	if !strings.Contains(out, "draft PR updated for "+repo) || !strings.Contains(out, "revert PR updated for "+repo) || strings.Count(strings.Join(reqs, "\n"), "POST /repos/opsmastery/tvt-lab/pulls ") != 2 {
 		t.Errorf("rerun didn't update the PR:\n%s\n%s", out, strings.Join(reqs, "\n"))
 	}
 	if n := git(origin, "rev-list", "--count", "main.."+changeBranch()); n != "1" {

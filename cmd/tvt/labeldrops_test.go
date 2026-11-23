@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/internal/testutil"
 )
 
 // TestBenchmarkLabelDrops (S6 item 7): shop_cart_operations_total's

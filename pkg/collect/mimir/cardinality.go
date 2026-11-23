@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 func mapFiles(m map[string]string) Files {

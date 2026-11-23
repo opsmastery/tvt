@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
-	"github.com/Opsmastery-Summit/tvt/pkg/scan"
-	"github.com/Opsmastery-Summit/tvt/pkg/store"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/scan"
+	"github.com/opsmastery/tvt/pkg/store"
 )
 
 // TestOverflow (S6 item 5) scans the overflow state and checks the

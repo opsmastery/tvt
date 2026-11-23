@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // The lab: five shop streams; the debug stream is most of the bytes.

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // TestBenchmarkDistractors (S5 item 2): the three distractors tvt-lab #15

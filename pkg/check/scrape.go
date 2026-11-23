@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/grafana/alloy/syntax/ast"
 	"github.com/grafana/alloy/syntax/parser"
+	"github.com/opsmastery/tvt/pkg/report"
 	"github.com/prometheus/common/model"
 )
 

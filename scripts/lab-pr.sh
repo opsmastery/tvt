@@ -52,7 +52,7 @@ if [[ -z "$CONFIG" ]]; then
   if [[ -f "$LAB/tvt.yaml" ]]; then CONFIG="$LAB/tvt.yaml"; else CONFIG="$HERE/testdata/bench/writers-2/tvt-lab.yaml"; fi
 fi
 OUT="${TVT_LAB_OUT:-$HOME/tvt-lab-pr/$(date -u +%Y%m%dT%H%M%SZ)}"
-REPO=github.com/Opsmastery-Summit/tvt-lab
+REPO=github.com/opsmastery/tvt-lab
 export PATH="/opt/podman/bin:/usr/local/go/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 
 token() { security find-generic-password -s tvt-lab -a "$1" -w 2>/dev/null; }

@@ -3,7 +3,7 @@ package check
 import (
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
+	"github.com/opsmastery/tvt/pkg/parse"
 )
 
 func mustRule(t *testing.T, src []string, regex, action, target, repl string) relabelRule {

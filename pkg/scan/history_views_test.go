@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // A dashboard view an earlier scan saw still counts once its log line has

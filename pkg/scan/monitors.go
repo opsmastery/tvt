@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect/kube"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/collect/kube"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // SourceMonitors says which ServiceMonitors and PodMonitors the

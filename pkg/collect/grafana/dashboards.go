@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Opsmastery-Summit/tvt/internal/httpx"
+	"github.com/opsmastery/tvt/internal/httpx"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 var _ collect.DashboardSource = (*Client)(nil)

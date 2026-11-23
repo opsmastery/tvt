@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
-	"github.com/Opsmastery-Summit/tvt/pkg/store"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/store"
 )
 
 // TestScanStreamAttrs: the scan samples the largest streams with the

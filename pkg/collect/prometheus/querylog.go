@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/logfile"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/internal/logfile"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // QueryLog reads Prometheus query log files (query_log_file): JSON lines,

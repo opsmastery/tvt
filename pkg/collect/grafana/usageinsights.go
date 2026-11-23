@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/logfmt"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/internal/logfmt"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // UsageInsightsUID is the uid Grafana Cloud gives every stack's Usage

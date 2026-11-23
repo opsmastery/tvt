@@ -276,7 +276,7 @@ A manifest lists every hard keep, keep_high and dormant signal that one of the r
 ```json
 {
   "version": 1,
-  "repo": "github.com/Opsmastery-Summit/tvt-lab",
+  "repo": "github.com/opsmastery/tvt-lab",
   "pipelines": ["alloy-apps", "fluentbit-shop-debug", "otelcol-agent", "prometheus-scrape"],
   "generated_at": "2026-11-17T07:06:36Z",
   "scan": 1,

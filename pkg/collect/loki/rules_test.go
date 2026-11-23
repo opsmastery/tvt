@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // server answers every request with h, after checking it is tagged as

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // The lab's coding-agent stream over the hour to Nov 21 20:00 UTC (the

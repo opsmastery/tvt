@@ -5,7 +5,7 @@ import (
 	"hash/fnv"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // ZeroreadsURL is where a line-level cut is proven and generated: tvt

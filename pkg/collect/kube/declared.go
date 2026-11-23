@@ -9,8 +9,8 @@ import (
 
 	"github.com/prometheus/common/model"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect/grafana"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect/grafana"
 )
 
 // Labels kube-prometheus-stack's Grafana sidecars look for (the chart's

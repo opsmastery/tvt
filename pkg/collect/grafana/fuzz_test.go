@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/internal/testutil"
 )
 
 // FuzzLogLine: the Grafana log line parser never panics, and accepts a line

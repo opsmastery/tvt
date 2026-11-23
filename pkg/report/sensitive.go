@@ -3,7 +3,7 @@ package report
 import (
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // Sensitive-content kinds (S12 item 5): what an unread label or attribute's

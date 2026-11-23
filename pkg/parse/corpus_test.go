@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/parse/internal/corpus"
+	"github.com/opsmastery/tvt/pkg/parse/internal/corpus"
 )
 
 // TestPromQLCorpus parses every expression in the corpus (kube-prometheus

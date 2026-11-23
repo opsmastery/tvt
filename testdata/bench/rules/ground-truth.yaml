@@ -400,7 +400,7 @@ slos:
     file: slos/shop-checkout.sloth.yml
     reads: [shop_checkout_attempts_total]
 runbooks:
-  https://github.com/Opsmastery-Summit/tvt-lab/blob/main/runbooks/payment-queue-backlog.md:
+  https://github.com/opsmastery/tvt-lab/blob/main/runbooks/payment-queue-backlog.md:
     alerts: [prometheus/ShopPaymentQueueBacklog]
     reads: [shop_payment_gateway_retries_total]
 

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // S3 item 6: a query over every metric name, or most of the series, is a

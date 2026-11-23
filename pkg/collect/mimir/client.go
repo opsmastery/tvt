@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/httpx"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/internal/httpx"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // Client reads from one Mimir tenant's cardinality API.

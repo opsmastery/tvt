@@ -4,13 +4,13 @@ tvt is one static binary for Linux, macOS and Windows (amd64 and arm64). Downloa
 
 ## 1. Download
 
-Pick the archive for your machine from the [releases page](https://github.com/Opsmastery-Summit/tvt/releases), or use `gh` (it works while the repository is private, with your own GitHub login):
+Pick the archive for your machine from the [releases page](https://github.com/opsmastery/tvt/releases), or use `gh` (it works while the repository is private, with your own GitHub login):
 
 ```sh
 VERSION=0.1.0-rc1          # the tag without its leading v
 OS=darwin                  # or linux
 ARCH=arm64                 # or amd64
-gh release download "v$VERSION" --repo Opsmastery-Summit/tvt \
+gh release download "v$VERSION" --repo opsmastery/tvt \
   --pattern "tvt_${VERSION}_${OS}_${ARCH}.tar.gz" \
   --pattern 'checksums.txt*'
 ```
@@ -23,7 +23,7 @@ Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) (
 
 ```sh
 cosign verify-blob --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp 'https://github.com/Opsmastery-Summit/tvt/' \
+  --certificate-identity-regexp 'https://github.com/opsmastery/tvt/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt
 # Verified OK
@@ -54,7 +54,7 @@ xattr -d com.apple.quarantine tvt
 
 On Windows, unzip `tvt_${VERSION}_windows_amd64.zip` and run `tvt.exe version`. Verify with `cosign` the same way, and `Get-FileHash -Algorithm SHA256` for the archive.
 
-From source, with Go 1.27 or later: `go install github.com/Opsmastery-Summit/tvt/cmd/tvt@latest` (the version shows as `dev`).
+From source, with Go 1.27 or later: `go install github.com/opsmastery/tvt/cmd/tvt@latest` (the version shows as `dev`).
 
 ## 4. First run
 
@@ -70,7 +70,7 @@ open report.html                  # macOS; xdg-open on Linux
 
 The report is one self-contained HTML file with no scripts or external assets. See [scan.md](scan.md) for the evidence a scan reads and [report.md](report.md) for what the report shows.
 
-To try it without your own stack, run [tvt-lab](https://github.com/Opsmastery-Summit/tvt-lab), a local Grafana stack seeded with known waste and known readers.
+To try it without your own stack, run [tvt-lab](https://github.com/opsmastery/tvt-lab), a local Grafana stack seeded with known waste and known readers.
 
 ## Uninstall
 

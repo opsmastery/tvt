@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/logfile"
-	"github.com/Opsmastery-Summit/tvt/internal/logfmt"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/internal/logfile"
+	"github.com/opsmastery/tvt/internal/logfmt"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // QueryLog reads the query-frontend's `msg="query stats"` lines from

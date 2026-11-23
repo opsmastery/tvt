@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/parse"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // relabelRule is one metric relabel rule, from Prometheus YAML, a

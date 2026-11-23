@@ -1,6 +1,6 @@
 package report
 
-import "github.com/Opsmastery-Summit/tvt/pkg/graph"
+import "github.com/opsmastery/tvt/pkg/graph"
 
 // SLOCoverage is the SLO coverage report (S6 item 3, version 8): services
 // with no SLO, paging alerts that aren't burn-rate alerts, and SLOs with

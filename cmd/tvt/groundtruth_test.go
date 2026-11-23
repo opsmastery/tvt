@@ -14,12 +14,12 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
-	"github.com/Opsmastery-Summit/tvt/pkg/scan"
-	"github.com/Opsmastery-Summit/tvt/pkg/score"
-	"github.com/Opsmastery-Summit/tvt/pkg/store"
+	"github.com/opsmastery/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/parse"
+	"github.com/opsmastery/tvt/pkg/scan"
+	"github.com/opsmastery/tvt/pkg/score"
+	"github.com/opsmastery/tvt/pkg/store"
 )
 
 // groundTruth is the part of tvt-lab's ground-truth.yaml (vendored by

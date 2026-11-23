@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 func TestWhyLab(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/internal/testutil"
 )
 
 var scrapeFixtures = map[string]string{

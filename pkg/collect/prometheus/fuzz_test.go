@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/internal/testutil"
 )
 
 // FuzzQueryLogLine: the line parser never panics, and accepts a line only

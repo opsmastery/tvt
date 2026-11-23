@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // TestApplyDecisions is S9 items 3 and 4: a decision sets its row's status

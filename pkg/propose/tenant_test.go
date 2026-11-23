@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/validate"
+	"github.com/opsmastery/tvt/pkg/validate"
 )
 
 var tenantTier = TenantTier{ID: "tenant:prometheus-scrape", Scan: 7, Reason: "2 dormant metrics keep a week", Metrics: []string{"shop_cache_evictions_total", "node_disk_io_errs_total"},

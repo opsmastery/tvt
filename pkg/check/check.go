@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // Rules: what a finding is about. Each finding carries one, so a test or a

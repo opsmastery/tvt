@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/config"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/config"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // TestPropose runs tvt propose on the writers state (S7 item 3): drops go
@@ -42,7 +42,7 @@ func testPropose(t *testing.T, validation string) {
 	}
 	db := benchDB(t, st, dirs[st.Name])
 	cfg := filepath.Join(dirs[st.Name], "tvt-lab.yaml")
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	checkout := filepath.Join(dirs[st.Name], "checkout")
 
 	run := func() (string, []byte) {
@@ -117,7 +117,7 @@ func TestProposeValidationFails(t *testing.T) {
 		}
 	}
 	db := benchDB(t, st, dirs[st.Name])
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	dir := t.TempDir()
 	var out strings.Builder
 	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Output: "patch", Dir: dir,
@@ -156,7 +156,7 @@ func TestProposeBuildManifest(t *testing.T) {
 		}
 	}
 	db := benchDB(t, st, dirs[st.Name])
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	checkout := t.TempDir()
 	if err := os.CopyFS(checkout, os.DirFS(filepath.Join(dirs[st.Name], "checkout"))); err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestProposeFluentBit(t *testing.T) {
 	if err := os.WriteFile(rj, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	cfg := filepath.Join(dir, "tvt.yaml")
 	if err := os.WriteFile(cfg, []byte(`pipelines:
   - name: fluentbit-shop-debug
@@ -408,7 +408,7 @@ func TestProposeDeltaLabels(t *testing.T) {
 	if err := os.WriteFile(rj, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	var out strings.Builder
 	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
 		Checkouts: checkoutFlag{repo: filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}
@@ -488,7 +488,7 @@ func TestProposeLabelDrops(t *testing.T) {
 	if err := os.WriteFile(rj, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	var out strings.Builder
 	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
 		Checkouts: checkoutFlag{repo: filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}
@@ -554,7 +554,7 @@ func TestProposeAlloyRoutes(t *testing.T) {
 	if err := os.WriteFile(ap, a, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	var out strings.Builder
 	o := proposeOptions{DB: db, Config: cfg, Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"), Checkouts: checkoutFlag{repo: checkout}, Validate: "off"}
 	if err := runPropose(context.Background(), o, &out); err != nil {
@@ -607,7 +607,7 @@ func TestProposeAlloySample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	run := func(t *testing.T, cfgText string) (string, string) {
 		cfg := filepath.Join(dirs[st.Name], "tvt-lab.sample-test.yaml")
 		if err := os.WriteFile(cfg, []byte(cfgText), 0o644); err != nil {
@@ -850,7 +850,7 @@ func TestProposeBucket(t *testing.T) {
 	if err := os.WriteFile(rj, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	var out strings.Builder
 	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
 		Checkouts: checkoutFlag{repo: filepath.Join(dirs[st.Name], "checkout")}, Validate: validation}
@@ -915,7 +915,7 @@ func TestProposeIntervals(t *testing.T) {
 	if err := os.WriteFile(rj, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	var out strings.Builder
 	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
 		Checkouts: checkoutFlag{repo: filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}

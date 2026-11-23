@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/cost"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/cost"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 func lineFixture() Input {

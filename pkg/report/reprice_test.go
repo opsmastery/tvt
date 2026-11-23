@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/cost"
+	"github.com/opsmastery/tvt/pkg/cost"
 )
 
 func TestReprice(t *testing.T) {

@@ -16,7 +16,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 
-	"github.com/Opsmastery-Summit/tvt/internal/httpx"
+	"github.com/opsmastery/tvt/internal/httpx"
 )
 
 // maxTelemetryBytes caps the /metrics page read.

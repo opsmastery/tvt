@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // TestAlertForUpgrade: a version 24 database gains for_ms and severity;

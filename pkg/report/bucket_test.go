@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // TestBucketRows is S10 item 1: a read label whose readers all match it by

@@ -15,7 +15,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/Opsmastery-Summit/tvt/internal/telemetry"
+	"github.com/opsmastery/tvt/internal/telemetry"
 )
 
 // telemetryScan runs the lab scan with in-memory trace and metric

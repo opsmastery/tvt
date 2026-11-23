@@ -1,7 +1,7 @@
 package testutil
 
 import (
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 	"net/http"
 	"net/http/httptest"
 	"os"

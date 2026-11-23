@@ -20,7 +20,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/parse/internal/corpus"
+	"github.com/opsmastery/tvt/pkg/parse/internal/corpus"
 )
 
 const usage = `usage:

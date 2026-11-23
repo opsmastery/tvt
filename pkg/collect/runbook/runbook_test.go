@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
+	"github.com/opsmastery/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/parse"
 )
 
 func TestLinks(t *testing.T) {

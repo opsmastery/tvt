@@ -3,8 +3,8 @@ package scan
 import (
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // Sprint 2 item 18: an absent() alert is a hard keep for its metric and

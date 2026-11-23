@@ -33,14 +33,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/httpx"
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
-	"github.com/Opsmastery-Summit/tvt/pkg/scan"
-	"github.com/Opsmastery-Summit/tvt/pkg/score"
-	"github.com/Opsmastery-Summit/tvt/pkg/store"
+	"github.com/opsmastery/tvt/internal/httpx"
+	"github.com/opsmastery/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/scan"
+	"github.com/opsmastery/tvt/pkg/score"
+	"github.com/opsmastery/tvt/pkg/store"
 )
 
 type liveLab struct {
@@ -111,7 +111,7 @@ postmortems:
 runbooks:
   fetch: false
   mirrors:
-    - url_prefix: https://github.com/Opsmastery-Summit/tvt-lab/blob/main/
+    - url_prefix: https://github.com/opsmastery/tvt-lab/blob/main/
       path: %q
 `, filepath.Join(l.dir, "slos"), filepath.Join(l.dir, "postmortems"), l.dir)
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {

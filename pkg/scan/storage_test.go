@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // S5 item 6: a Prometheus with no retention.size, or one above 85% of a

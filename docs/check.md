@@ -91,7 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - uses: Opsmastery-Summit/tvt@main
+      - uses: opsmastery/tvt@main
 ```
 
 ## Property tests

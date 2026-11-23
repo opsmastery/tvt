@@ -22,16 +22,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect/loki"
-	"github.com/Opsmastery-Summit/tvt/pkg/cost"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
-	"github.com/Opsmastery-Summit/tvt/pkg/scan"
-	"github.com/Opsmastery-Summit/tvt/pkg/score"
-	"github.com/Opsmastery-Summit/tvt/pkg/store"
+	"github.com/opsmastery/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect/loki"
+	"github.com/opsmastery/tvt/pkg/cost"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/parse"
+	"github.com/opsmastery/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/scan"
+	"github.com/opsmastery/tvt/pkg/score"
+	"github.com/opsmastery/tvt/pkg/store"
 )
 
 var lab = testutil.Lab

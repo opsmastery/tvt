@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/config"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/config"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // rangeRe matches a range or subquery selector: Grafana resolves

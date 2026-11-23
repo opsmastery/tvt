@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // TestUnknownProcessorFailsClosed: a processor type check doesn't model

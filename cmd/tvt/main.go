@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/Opsmastery-Summit/tvt/internal/version"
+	"github.com/opsmastery/tvt/internal/version"
 )
 
 // Exit codes.
