@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"io"
 	"net/http"
 	"sort"
@@ -54,7 +55,9 @@ type ruleGroup struct {
 // skipped: a rule tvt can't classify might be an alert, and silently
 // dropping it could leave a hard keep unprotected.
 func (c *Client) Rules(ctx context.Context) ([]collect.Rule, error) {
-	body, err := c.get(ctx, rulesPath, nil, "application/yaml")
+	// Optional: a 404 here is read below (no rule groups is zero rules), and
+	// any other refusal is returned and fails the scan.
+	body, err := c.get(httpx.Optional(ctx), rulesPath, nil, "application/yaml")
 	if err != nil {
 		var he *httpError
 		if errors.As(err, &he) && he.Status == http.StatusNotFound && strings.Contains(he.Body, "no rule groups found") {
