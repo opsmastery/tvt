@@ -36,7 +36,7 @@ tvt propose --config tvt.yaml --checkout github.com/acme/pipes=../pipes
 tvt check --base origin/main                            # in the pipeline repo's CI
 ```
 
-Credentials come from the environment (`TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `TVT_LOKI_TOKEN`, `GITHUB_TOKEN`), never from flags, and only go over https or to a loopback host. tvt never writes to a backend: its only writes are Git branches and draft PRs in the repos you map. See [SECURITY.md](SECURITY.md).
+Credentials come from the environment (`TVT_GRAFANA_TOKEN`, `TVT_PROM_TOKEN`, `TVT_LOKI_TOKEN`, `GITHUB_TOKEN`), never from flags, and only go over https or to a loopback host. tvt never writes to a backend: its only writes are Git branches and draft PRs in the repos you map (GITHUB_TOKEN: contents and pull requests write on those repos, see [docs/propose.md](docs/propose.md)). See [SECURITY.md](SECURITY.md).
 
 ## Develop
 

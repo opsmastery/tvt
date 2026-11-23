@@ -49,15 +49,11 @@ type proposeOptions struct {
 	replay     replayer // tests
 }
 
-// prBranch is the branch tvt pushes in each pipeline repo. It's stable,
-// so a rerun updates the same draft PR: tvt regenerates its own blocks
-// (S7 item 10), and the branch is tvt's.
-const prBranch = "tvt/propose"
-
-// revertBranch holds the commit that undoes prBranch's (S10 item 6): its
-// PR is based on prBranch, so GitHub retargets it to the base branch
-// once the change merges and its branch is deleted.
-const revertBranch = "tvt/propose-revert"
+// Each proposal pushes its own branch pair, named by scan
+// (vcs.ChangeBranch, vcs.RevertBranch): a rerun from the same scan
+// updates its draft PR (tvt regenerates its own blocks, S7 item 10), and
+// a later scan's proposal never rewrites an earlier one, so a merged
+// change keeps its revert PR. vcs.Tidy settles the earlier ones.
 
 // checkoutFlag is --checkout repo=path, repeatable: where each pipeline
 // repo is checked out. tvt reads the files there and writes patches; it
@@ -346,10 +342,20 @@ func openPRs(ctx context.Context, o proposeOptions, pipes []config.Pipeline, git
 			if !ok {
 				return fmt.Errorf("no --checkout for %s", repo)
 			}
+			prBranch, revertBranch := vcs.ChangeBranch(scan), vcs.RevertBranch(scan)
 			used, err := vcs.Push(ctx, vcs.Branch{Checkout: checkout, Base: base, Name: prBranch, Revert: revertBranch, Patch: patches[repo].String(),
 				Message: fmt.Sprintf("tvt propose: changes from scan %d", scan)})
 			if err != nil {
 				return err
+			}
+			// Earlier proposals: close the superseded, point a merged
+			// change's revert PR at the base branch.
+			notes, err := o.GitHub.Tidy(ctx, owner, name, prBranch, used)
+			for _, n := range notes {
+				fmt.Fprintf(out, "%s: %s\n", repo, n)
+			}
+			if err != nil {
+				return fmt.Errorf("settling earlier tvt PRs: %w", err)
 			}
 			res, err := o.GitHub.OpenOrUpdate(ctx, vcs.PR{Owner: owner, Repo: name, Head: prBranch, Base: used, Reviewers: reviewers,
 				Title: fmt.Sprintf("tvt: telemetry changes from scan %d", scan),

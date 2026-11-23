@@ -15,7 +15,8 @@ import (
 )
 
 // GitHub opens and updates draft pull requests through the REST API. Its
-// only writes are pull requests and review requests in the repos tvt.yaml
+// only writes are pull requests (its own: opened, updated, closed or
+// retargeted, see Tidy) and review requests in the repos tvt.yaml
 // maps; every backend stays read-only.
 type GitHub struct {
 	// BaseURL is the API root (default https://api.github.com; GitHub
