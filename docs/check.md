@@ -9,7 +9,7 @@ tvt check --base origin/main
 tvt check --patch proposals/github.com_acme_pipes.patch
 ```
 
-Exit 0: pass. Exit 4: refused, with one line per finding. Exit 1: an error (no manifest, a patch that doesn't apply). `--json` prints the result; `--skip-confirmation` judges safety alone, without the owner-confirmation rule; `--max-age` (default 7 days) is how old the manifest may be.
+Exit 0: pass. Exit 4: refused, with one line per finding. Exit 1: an error (no manifest, a patch that doesn't apply). `--json` prints the result; `--skip-confirmation` judges safety alone, without the owner-confirmation rule; `--max-age` (default 7 days) is how old the manifest may be. `--repo` is the pipeline repo's checkout (default the current directory) and `--manifest` the manifest's path inside it (default `.tvt/protect.json`).
 
 ## How it judges
 
