@@ -411,7 +411,13 @@ func readLedger(ctx context.Context, st *store.Store, info store.ScanInfo, in *r
 
 // writeFileAtomic writes b to path through a temporary file in the same
 // directory, so a failed write never leaves half a report.
+// A path that isn't a regular file (/dev/null, /dev/stdout, a named pipe)
+// is written directly: there's nothing to replace, and its directory
+// usually can't take a temporary file.
 func writeFileAtomic(path string, b []byte) error {
+	if fi, err := os.Stat(path); err == nil && !fi.Mode().IsRegular() && !fi.IsDir() {
+		return os.WriteFile(path, b, 0o644)
+	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".tvt-report-*")
 	if err != nil {
 		return err

@@ -116,3 +116,15 @@ func TestBillable(t *testing.T) {
 		t.Errorf("logs: %v, want 15", got)
 	}
 }
+
+// TestExampleCardLoads: the example card the docs point at loads as
+// shipped (it lacked version: 1, so copying it failed).
+func TestExampleCardLoads(t *testing.T) {
+	p, err := Load(filepath.Join("..", "..", "examples", "pricecard.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "example" || p.Currency != "USD" {
+		t.Errorf("%+v", p)
+	}
+}

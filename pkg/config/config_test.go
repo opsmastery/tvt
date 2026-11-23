@@ -207,3 +207,10 @@ func TestPipelines(t *testing.T) {
 		}
 	}
 }
+
+// TestCloudExampleLoads: every example config the docs point at loads.
+func TestCloudExampleLoads(t *testing.T) {
+	if _, err := Load(filepath.Join("..", "..", "examples", "tvt.cloud.yaml")); err != nil {
+		t.Fatal(err)
+	}
+}
