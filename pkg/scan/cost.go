@@ -97,7 +97,7 @@ func streamCosts(vols []collect.StreamVolume, signals []graph.Signal, at time.Ti
 		for k, val := range v.Labels {
 			ms = append(ms, parse.Matcher{Label: k, Op: parse.MatchEqual, Value: val})
 		}
-		out[i] = graph.StreamVolume{Selector: parse.CanonicalSelector(ms), BytesPerDay: perDay[i], Levels: levelsPerDay(v.Levels, perDay[i])}
+		out[i] = graph.StreamVolume{Selector: parse.CanonicalSelector(ms), BytesPerDay: perDay[i], Levels: levelsPerDay(v.Levels, v.LevelLines, perDay[i], LevelWindow)}
 	}
 	var costs []graph.Cost
 	for _, s := range signals {
@@ -221,21 +221,44 @@ func unreadStreams(vols []collect.StreamVolume, signals []graph.Signal) []graph.
 	return out
 }
 
-// levelsPerDay scales a stream's measured line bytes per level to its
-// bytes per day, so the levels sum to the volume (S10 item 3). The level
-// query counts line bytes only; structured metadata is assumed to split
-// the same way. nil when nothing was measured.
-func levelsPerDay(levels map[string]int64, perDay int64) map[string]int64 {
-	var total int64
+// levelsPerDay shares a stream's bytes per day (the volume API's, which
+// count structured metadata) out to its level groups (S10 item 3). The
+// level query counts line bytes only, so each group also carries its lines'
+// share of the metadata: the volume over the level window less the line
+// bytes, spread evenly per line. A stream whose metadata outweighs its
+// lines (OTLP events with many attributes) is split mostly by line count,
+// not by line bytes: the S11 rehearsal's coding-agent stream had about 800
+// bytes of metadata a line, and splitting by line bytes alone claimed three
+// times what its level tier saved. Without line counts (a scan from before
+// they were measured) the line bytes' shares stand for the volume's. nil
+// when nothing was measured.
+func levelsPerDay(levels, lines map[string]int64, perDay int64, window time.Duration) map[string]int64 {
+	var total, count int64
 	for _, b := range levels {
 		total += b
+	}
+	for _, n := range lines {
+		count += n
 	}
 	if total <= 0 {
 		return nil
 	}
-	out := make(map[string]int64, len(levels))
+	weight := make(map[string]float64, len(levels))
+	var sum float64
+	perLine := 0.0
+	if count > 0 && window > 0 {
+		inWindow := float64(perDay) * window.Hours() / 24
+		if meta := inWindow - float64(total); meta > 0 {
+			perLine = meta / float64(count)
+		}
+	}
 	for l, b := range levels {
-		out[l] = int64(float64(perDay) * float64(b) / float64(total))
+		weight[l] = float64(b) + float64(lines[l])*perLine
+		sum += weight[l]
+	}
+	out := make(map[string]int64, len(levels))
+	for l, w := range weight {
+		out[l] = int64(float64(perDay) * w / sum)
 	}
 	return out
 }
