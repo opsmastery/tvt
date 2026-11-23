@@ -32,9 +32,11 @@ const (
 // ErrTooLarge means a response body exceeded the size cap.
 var ErrTooLarge = errors.New("response body too large")
 
-// DefaultClient returns the client collectors use when none is set.
+// DefaultClient returns the client collectors use when none is set. It
+// retries failed requests (RetryPolicy), each attempt bounded by
+// DefaultTimeout, and records a backend that stays unavailable.
 func DefaultClient() *http.Client {
-	return &http.Client{Timeout: DefaultTimeout, CheckRedirect: CheckRedirect, Transport: telemetry.Transport(nil)}
+	return &http.Client{CheckRedirect: CheckRedirect, Transport: Retrying(telemetry.Transport(nil), DefaultTimeout)}
 }
 
 // CheckRedirect refuses a redirect from https to plain http. Go strips
