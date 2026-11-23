@@ -4,3 +4,17 @@
 
 # List prices for Grafana Cloud Pro, pay as you go (pkg/cost/presets).
 pricecard: grafana-cloud
+
+# Evidence gaps every Grafana Cloud stack has, each with its reason. An
+# acknowledged gap leaves the report's rows, and tvt check no longer fails a
+# drop on its account: acknowledge only what you accept. Direct API
+# clients (scripts, agents) are the readers these gaps can hide; list the
+# ones you know under external_consumers.
+gaps:
+  acknowledge:
+    - source: grafana cloud direct queries
+      reason: Grafana Cloud logs queries sent straight to its Mimir and Loki APIs without their text
+    - source: mimir query log
+      reason: Grafana Cloud doesn't expose the query-frontend log; dashboard views come from Usage Insights
+    - source: loki query log
+      reason: Grafana Cloud doesn't expose Loki's own log; dashboard views come from Usage Insights

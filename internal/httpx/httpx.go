@@ -29,6 +29,10 @@ const (
 	DefaultTimeout = 60 * time.Second
 )
 
+// DefaultTag is the X-Query-Tags value every request carries unless the
+// caller sets its own.
+const DefaultTag = "Source=tvt"
+
 // ErrTooLarge means a response body exceeded the size cap.
 var ErrTooLarge = errors.New("response body too large")
 
@@ -55,9 +59,9 @@ func CheckRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-// NewRequest builds a GET for path under baseURL with tvt's User-Agent, a
-// JSON Accept header and, when token is not empty, a bearer token. Errors
-// never include the token.
+// NewRequest builds a GET for path under baseURL with tvt's User-Agent,
+// X-Query-Tags: Source=tvt, a JSON Accept header and, when token is not
+// empty, a bearer token. Errors never include the token.
 func NewRequest(ctx context.Context, baseURL, path string, q url.Values, token string) (*http.Request, error) {
 	u, err := url.Parse(baseURL)
 	if err != nil {
@@ -72,6 +76,11 @@ func NewRequest(ctx context.Context, baseURL, path string, q url.Values, token s
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "tvt/"+version.Version)
+	// Every request is tagged, so a backend's own logs (Grafana Cloud's
+	// Usage Insights, Loki's and Mimir's query logs) show what tvt read.
+	// A caller with a narrower tag (Source=tvt-probe, -levels, -attrs)
+	// replaces it.
+	req.Header.Set("X-Query-Tags", DefaultTag)
 	switch {
 	case strings.HasPrefix(token, basicPrefix):
 		req.Header.Set("Authorization", token)
