@@ -181,7 +181,9 @@ func truncated(warnings []string) bool {
 // it selects no series, and query log readers drop it from usage.
 func (c *Client) Probe(ctx context.Context, nonce string) error {
 	q := url.Values{"query": {collect.ProbeQuery(nonce)}}
-	body, err := c.getWith(ctx, "/api/v1/query", q, http.Header{"X-Query-Tags": {collect.ProbeTag}})
+	// Optional: a refused probe leaves the log unproven (coverage 0), which
+	// holds its signals; that is the safe outcome, not a scan failure.
+	body, err := c.getWith(httpx.Optional(ctx), "/api/v1/query", q, http.Header{"X-Query-Tags": {collect.ProbeTag}})
 	if err != nil {
 		return err
 	}

@@ -152,3 +152,35 @@ func TestRetryInterrupted(t *testing.T) {
 		t.Errorf("an interrupted request was recorded: %v", Failures())
 	}
 }
+
+// TestRejected: a required request's 4xx is recorded with its body, and
+// the caller still reads that body; an Optional one isn't recorded, and
+// neither is a 429.
+func TestRejected(t *testing.T) {
+	withPolicy(t, RetryPolicy{})
+	f := &fakeRT{answers: []any{404}}
+	resp, err := get(t, Retrying(f, 0), "grafana:3000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(b) != "x" {
+		t.Errorf("the caller read %q, want the body", b)
+	}
+	rs := Rejections()
+	if len(rs) != 1 || rs[0].Host != "grafana:3000" || rs[0].Path != "/api" || rs[0].Last != "HTTP 404: x" {
+		t.Errorf("rejections = %+v", rs)
+	}
+
+	ResetFailures()
+	req, _ := http.NewRequestWithContext(Optional(context.Background()), http.MethodGet, "http://loki:3100/loki/api/v1/patterns", nil)
+	resp, err = (&http.Client{Transport: Retrying(&fakeRT{answers: []any{404}}, 0)}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if len(Rejections()) != 0 {
+		t.Errorf("an optional 404 was recorded: %v", Rejections())
+	}
+}

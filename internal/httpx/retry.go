@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ var (
 	mu       sync.Mutex
 	policy   = DefaultRetry
 	failures = map[string]*UnavailableError{} // by host
+	rejected = map[string]*RejectedError{}    // by host and path
 	sleep    = func(ctx context.Context, d time.Duration) error {
 		t := time.NewTimer(d)
 		defer t.Stop()
@@ -72,7 +74,11 @@ func Failures() []*UnavailableError {
 }
 
 // ResetFailures forgets recorded failures; a scan calls it at its start.
-func ResetFailures() { mu.Lock(); failures = map[string]*UnavailableError{}; mu.Unlock() }
+func ResetFailures() {
+	mu.Lock()
+	failures, rejected = map[string]*UnavailableError{}, map[string]*RejectedError{}
+	mu.Unlock()
+}
 
 // Retrying wraps next so a failed request is retried with exponential
 // backoff, each attempt bounded by perAttempt (0: no bound). Once a host
@@ -146,6 +152,9 @@ func (r *retrying) RoundTrip(req *http.Request) (*http.Response, error) {
 			resp.Body.Close()
 			cancel()
 		default:
+			if resp.StatusCode >= 400 && resp.StatusCode < 500 && !isOptional(req.Context()) {
+				reject(req, resp)
+			}
 			resp.Body = &cancelBody{ReadCloser: resp.Body, cancel: cancel}
 			return resp, nil
 		}
@@ -186,4 +195,60 @@ func (b *cancelBody) Close() error { err := b.ReadCloser.Close(); b.cancel(); re
 func IsUnavailable(err error) bool {
 	var u *UnavailableError
 	return errors.As(err, &u)
+}
+
+// RejectedError: a backend answered a required request with a 4xx (other
+// than 429). An unexpected refusal, say an expired token or a wrong URL,
+// fails the scan like an unavailable backend; an endpoint that may
+// legitimately be missing is requested with Optional (S6).
+type RejectedError struct {
+	Host, Path string
+	Last       string // status and body
+}
+
+func (e *RejectedError) Error() string {
+	return fmt.Sprintf("%s%s refused: %s", e.Host, e.Path, e.Last)
+}
+
+type optionalKey struct{}
+
+// Optional marks requests made with ctx as ones a backend may refuse with
+// a 4xx without failing the scan: features that may be off or missing
+// (Loki's pattern API, Prometheus TSDB stats on Grafana Cloud). The
+// caller records the refusal as an evidence gap.
+func Optional(ctx context.Context) context.Context {
+	return context.WithValue(ctx, optionalKey{}, true)
+}
+
+func isOptional(ctx context.Context) bool { v, _ := ctx.Value(optionalKey{}).(bool); return v }
+
+// Rejections returns the required requests refused since the last
+// ResetFailures, sorted.
+func Rejections() []*RejectedError {
+	mu.Lock()
+	defer mu.Unlock()
+	out := make([]*RejectedError, 0, len(rejected))
+	for _, r := range rejected {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Host+out[i].Path < out[j].Host+out[j].Path })
+	return out
+}
+
+// reject records a required request's 4xx answer, keeping the body for
+// the caller: the response is returned unchanged.
+func reject(req *http.Request, resp *http.Response) {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, MaxErrorBytes))
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(body), resp.Body), resp.Body}
+	last := fmt.Sprintf("HTTP %d", resp.StatusCode)
+	if b := strings.TrimSpace(string(body)); b != "" {
+		last += ": " + b
+	}
+	r := &RejectedError{Host: req.URL.Host, Path: req.URL.Path, Last: last}
+	mu.Lock()
+	rejected[r.Host+r.Path] = r
+	mu.Unlock()
 }
