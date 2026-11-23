@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -157,7 +158,7 @@ func (c *Client) search(ctx context.Context) ([]searchHit, error) {
 // name an explicit UID and type still resolve, and any query that needs the
 // list fails the dashboard with an actionable error.
 func (c *Client) datasources(ctx context.Context) (dss []datasource, listed bool, err error) {
-	err = c.getJSON(ctx, "/api/datasources", nil, &dss)
+	err = c.getJSON(httpx.Optional(ctx), "/api/datasources", nil, &dss) // a 403 is read below
 	var he *httpError
 	if errors.As(err, &he) && (he.Status == http.StatusForbidden || he.Status == http.StatusUnauthorized) {
 		return nil, false, nil
@@ -180,7 +181,7 @@ func (c *Client) libraryPanel(ctx context.Context, uid string, cache map[string]
 			Model rawPanel `json:"model"`
 		} `json:"result"`
 	}
-	err := c.getJSON(ctx, "/api/library-elements/"+url.PathEscape(uid), nil, &resp)
+	err := c.getJSON(httpx.Optional(ctx), "/api/library-elements/"+url.PathEscape(uid), nil, &resp) // a 404 is read below
 	var he *httpError
 	if errors.As(err, &he) && he.Status == http.StatusNotFound {
 		cache[uid] = nil

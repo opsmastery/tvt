@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Opsmastery-Summit/tvt/internal/httpx"
 	"slices"
 	"sort"
 	"strconv"
@@ -80,7 +81,7 @@ func (c *Client) StreamVolumes(ctx context.Context, window time.Duration) ([]col
 	// every stream's label names; each other set of names gets its own
 	// request, the other names pinned to "" so nothing larger joins in. A
 	// Loki without the series API keeps the first pass.
-	sets, err := c.labelSets(ctx, rangeQ(), names)
+	sets, err := c.labelSets(httpx.Optional(ctx), rangeQ(), names) // a Loki without the series API keeps the first pass
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
