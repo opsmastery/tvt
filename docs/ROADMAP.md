@@ -2,7 +2,7 @@
 
 `tvt` finds telemetry that costs money but nobody uses, and opens a reviewed pull request to drop, downsample or reroute it. This roadmap shows what is built, what comes next, and the principles that won't change. Dates are targets, not promises.
 
-Last updated: November 12, 2026.
+Last updated: November 23, 2026.
 
 ## Principles
 
@@ -17,9 +17,9 @@ Last updated: November 12, 2026.
 - **A claim you can disprove.** Every signal `tvt` marks unread had no reader in your evidence window, and every gap is listed. If you find a reader we missed, that's a bug, and the benchmark gets a new case.
 - **Open standards.** OpenTelemetry for `tvt`'s own traces, metrics and logs; OTel Collector, Alloy, Prometheus and Fluent Bit config for proposals.
 
-## Now: MVP (target: Q1 2027)
+## Done: MVP, v0.1.0 (stable target: week of November 30, 2026)
 
-The MVP covers the Grafana stack, self-hosted (OSS) and Grafana Cloud.
+The MVP covers the Grafana stack, self-hosted (OSS) and Grafana Cloud. Its code is complete: `v0.1.0-rc1` shipped November 21 and `v0.1.0-rc2` on November 23, after the full release test plan passed on the lab and on a Grafana Cloud stack. v0.1.0 is tagged once the clean-machine install checks pass on macOS and Linux.
 
 Status is Done, In progress or Planned, with the sprint from `docs/tasks/README.md`.
 
@@ -28,9 +28,10 @@ Status is Done, In progress or Planned, with the sprint from `docs/tasks/README.
 | `tvt scan` | Builds a usage graph from Prometheus/Mimir cardinality, Prometheus, Mimir, Loki and Grafana-managed rules, Grafana dashboards and dashboard views, query logs, SLOs and runbooks, and classifies every signal | Done (S1–S6); Grafana Cloud Adaptive Metrics counts open |
 | `tvt report` | Ranks recommendations by savings per minute of checking; HTML and JSON | Done (S4) |
 | `tvt why <signal>` | Every reader of a signal, with its source, first and last seen, and whether it's exact or inferred | Done (S4) |
-| `tvt init` | Asks for each backend, tests the URL, token scope and log settings, and writes `tvt.yaml` | Planned (by S12) |
-| `tvt propose` | Writes Prometheus `metric_relabel_configs`, Prometheus Operator `ServiceMonitor`/`PodMonitor` `metricRelabelings` (Helm overlays keep the chart's default drops), Alloy `prometheus.relabel`/`loki.process`, OTel Collector `filter`/`transform` or Fluent Bit filters into the pipeline's repo, one PR per repo | In progress (S7): Prometheus and Alloy drops as patches |
-| `tvt check` | CI gate: fails a config PR that would break an alert, SLO, viewed dashboard or record, or that lacks an acknowledged evidence gap | Planned (S8) |
+| `tvt init` | Asks for each backend, tests the URL, token scope and log settings, and writes `tvt.yaml` | Done (S12) |
+| `tvt propose` | Writes Prometheus `metric_relabel_configs`, Prometheus Operator `ServiceMonitor`/`PodMonitor` `metricRelabelings` (Helm overlays keep the chart's default drops), Alloy `prometheus.relabel`/`loki.process`, OTel Collector `filter`/`transform` or Fluent Bit filters into the pipeline's repo, one PR per repo | Done (S7, S10): every writer, as patches or draft PRs, with the revert on its own branch |
+| `tvt check` | CI gate: fails a config PR that would break an alert, SLO, viewed dashboard or record, or that lacks an acknowledged evidence gap | Done (S8, S9; hardened in rc2) |
+| `tvt confirm` | Records an owner's confirm, dismiss or keep in the pipeline repo, bound to the evidence they saw | Done (S9) |
 
 MVP scope in more detail:
 
@@ -49,9 +50,17 @@ MVP scope in more detail:
 - **Supply chain:** signed, reproducible releases; govulncheck and gitleaks in CI.
 - **Security review:** `SECURITY.md` documents what `tvt` reads, where data goes (only your backends and Git host) and what stays on disk.
 
-Some continuous-mode work lands right after the MVP's code is complete, before v0.1: alert-noise findings, the MCP server and point-in-time reports, and OpenTelemetry Collector checks.
+Still open from the MVP scope: Grafana Cloud Adaptive Metrics usage counts.
 
-## Next: continuous mode (target: Q1–Q2 2027)
+## Next: v0.2 (target: December 18, 2026)
+
+Four two-day sprints right after v0.1.0, each with a done-when on the lab (`docs/tasks/`):
+
+- Alert noise (S13, S14): static alert lint, thresholds against a baseline, firing-history classes, alerts per incident, and duplicate or overlapping alerts. Report only, with ready-to-apply snippets.
+- Agents and history (S15): a read-only MCP server over the usage graph, an agent skill, and point-in-time reports (`tvt report --as-of <scan>`).
+- Collector and conventions (S16): OpenTelemetry Collector checks and a rename-aware metric catalog for semantic-convention migrations.
+
+## Then: continuous mode (target: January to February 2027)
 
 - A server mode (`tvt serve`): one binary plus Postgres, with scheduled scans and trend history.
 - New waste flagged within 24 hours, and release-aware regressions ("release X added `user_id`, +5,000 series"). Readers broken by a release: a panel or rule whose metric, label or stream disappeared or was renamed between scans.
@@ -60,16 +69,14 @@ Some continuous-mode work lands right after the MVP's code is complete, before v
 - `tvt verify`: re-check sources on a schedule, fail on a new reader of dropped data or on config drift, and confirm each merged change reached its expected end state by querying the backend directly.
 - AI agent and MCP query logs as usage evidence, including the query arguments of telemetry-reading tool calls in agent telemetry, which tvt's own proposals cap rather than delete; agent skill files and alert-triggered workflows that run queries are declared readers.
 - Incident evidence: read incident timelines (PagerDuty, incident.io, Grafana IRM, Opsgenie) and postmortems, and promote anything queried during an incident into the protection manifest through a reviewed PR that links the postmortem. Protection doesn't expire. `check` holds a drop while an incident is open on the owning service or during a declared change freeze.
-- A read-only MCP server over the usage graph (`why_kept`, `consumers_of`, `savings_if_dropped`), an agent skill that teaches agents to use it, and a contract test that the CLI, report and MCP give the same answers.
-- Point-in-time reports (`tvt report --as-of <scan>`): what `tvt` knew when an owner approved a change.
-- Alert noise, report only with ready-to-apply snippets: static alert lint (runbook present and fresh, owner, severity, debounce), thresholds against a 14-day baseline, firing-history classes (transient, during maintenance, co-firing duplicates, silent for 90 days), alerts per incident, delivery failures, overlapping wildcard and specific alerts, and findings rolled up by alert template.
+- More alert noise, building on v0.2's findings: static alert lint (runbook present and fresh, owner, severity, debounce), thresholds against a 14-day baseline, firing-history classes (transient, during maintenance, co-firing duplicates, silent for 90 days), alerts per incident, delivery failures, overlapping wildcard and specific alerts, and findings rolled up by alert template.
 - Triage readiness: owner and deploy labels, `service.name`, version and environment coverage, and trace IDs in logs.
-- OpenTelemetry Collector checks: deprecated `batch` processor, debug exporter left on, `memory_limiter` placement, agent/gateway version skew, retired OTTL feature gates, risky OTTL statements, OTTL that depends on experimental or lambda functions or removed gates, and the component that created a high-cardinality label. A rename-aware metric catalog for semantic-convention migrations; logs read only by counts become count-connector metrics; spanmetrics span-name normalization and unread dimensions removed.
+- More OpenTelemetry Collector checks, beyond v0.2's: deprecated `batch` processor, debug exporter left on, `memory_limiter` placement, agent/gateway version skew, retired OTTL feature gates, risky OTTL statements, OTTL that depends on experimental or lambda functions or removed gates, and the component that created a high-cardinality label. A rename-aware metric catalog for semantic-convention migrations; logs read only by counts become count-connector metrics; spanmetrics span-name normalization and unread dimensions removed.
 - `tvt propose --dry-run`: run generated processors over a recorded sample and report records in and out before merge.
 - Storage follow-ups: local retention under remote write, series churn by label, double-shipped logs, and replicated bytes in self-hosted Loki.
 - Verification metrics in `tvt`'s own telemetry: time from draft PR to owner decision, and how often owners dismiss a recommendation.
 
-## Later: more backends and signals (target: Q2–Q3 2027)
+## Later: more backends and signals (target: March to May 2027)
 
 Backends are added where a cut saves users the most: high list price per unit, billed on volume, with usage evidence `tvt` can read.
 
@@ -90,7 +97,7 @@ Also planned:
 
 Then, driven by demand: New Relic, Sumo Logic, Google Cloud Logging, Dynatrace, Honeycomb and Elastic. Cheap per-GB OpenTelemetry-native backends are covered through OTel Collector proposals without a dedicated collector.
 
-## Further out: policy and governance
+## Further out: policy and governance (target: second half of 2027)
 
 - Telemetry budgets per team.
 - `tvt check` on instrumentation PRs, before new telemetry ships, including the series a new spanmetrics dimension would add.
