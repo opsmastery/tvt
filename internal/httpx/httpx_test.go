@@ -49,6 +49,9 @@ func TestNewRequest(t *testing.T) {
 	if got := req.Header.Get("Authorization"); got != "Bearer secret" {
 		t.Fatalf("Authorization = %q", got)
 	}
+	if got := req.Header.Get("X-Query-Tags"); got != "Source=tvt" {
+		t.Fatalf("X-Query-Tags = %q, want Source=tvt on every request", got)
+	}
 
 	req, err = NewRequest(context.Background(), "https://example.com", "/x", nil, "")
 	if err != nil {

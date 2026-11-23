@@ -51,6 +51,8 @@ Usage Insights is not on the free tier. A free stack has no view evidence, which
 
 Queries sent straight to Cloud's Mimir and Loki APIs (scripts, agents, other API clients) are logged with a `query_hash` and no text, so tvt can't see what they read. A Cloud scan stores this as the source `grafana cloud direct queries`, with the gap on every row it affects; it is left out of log coverage, since it is a gap rather than a log. Grafana-managed rules aren't affected: tvt reads their definitions.
 
+[`examples/tvt.cloud.yaml`](../examples/tvt.cloud.yaml) acknowledges this gap and the two query logs Cloud doesn't expose, each with its reason, so the report lists only what is specific to your stack. Acknowledging is a decision: an acknowledged gap leaves the report's rows and `tvt check` stops failing drops on its account. If scripts or agents query your stack directly, list them under `external_consumers` (or remove these acknowledgements) so what they read stays protected.
+
 ## Adaptive Metrics
 
 `/aggregations/recommendations` and `/aggregations/rules` on the Prometheus host answer the access policy token (HTTP 200), but a new stack returns empty lists: recommendations need days of usage. Per-metric usage counts from Adaptive Metrics as query evidence are still to do, once the test stack has recommendations.
