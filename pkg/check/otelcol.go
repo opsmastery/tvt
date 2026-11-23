@@ -61,6 +61,21 @@ func typeOf(id string) string { t, _, _ := strings.Cut(id, "/"); return t }
 // still accepts.
 func isLogDedup(typ string) bool { return typ == "log_dedup" || typ == "logdedup" }
 
+// modeledProcessors: the processor types otelcolEffects judges.
+var modeledProcessors = map[string]bool{
+	"filter": true, "transform": true, "probabilistic_sampler": true, "tail_sampling": true,
+	"attributes": true, "logdedup": true, "log_dedup": true,
+}
+
+// passThroughProcessors: types that neither drop nor remove anything a
+// reader uses. They buffer, refuse under memory pressure, add attributes
+// or change temporality and reporting interval, and check passes them.
+// Every other type fails closed (S8 item 8).
+var passThroughProcessors = map[string]bool{
+	"batch": true, "memory_limiter": true, "k8sattributes": true, "resourcedetection": true,
+	"interval": true, "delta_to_cumulative": true, "deltatocumulative": true, "cumulativetodelta": true,
+}
+
 // ottlEnv is what tvt knows about one item: some paths' values. Paths are
 // compared without a span., log. or datapoint. context prefix, so a match
 // written span.attributes["x"] answers a statement's attributes["x"].
@@ -245,6 +260,15 @@ func otelcolEffects(p report.PipelineDef, path string, src []byte, ix *index, fi
 			typ := typeOf(id)
 			at := fmt.Sprintf("line %d", lineOf(cfg))
 			comp := "processor " + id + " in " + pl.name
+			if !modeledProcessors[typ] && !passThroughProcessors[typ] {
+				// A processor check doesn't know could drop, sample or strip
+				// anything, with or without settings (S8 item 8): fail closed.
+				if cfg == nil {
+					at = fmt.Sprintf("line %d", pl.line)
+				}
+				add(effect{rule: RuleFailClosed, component: comp, reason: "a processor type check doesn't know (" + typ + "): it can't tell what it drops or changes", at: at})
+				continue
+			}
 			if cfg == nil && typ != "batch" && typ != "memory_limiter" && !isLogDedup(typ) {
 				// A log_dedup with every setting at its default is still a
 				// collapse (S10 item 4): only steps that do nothing without
