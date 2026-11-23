@@ -36,8 +36,9 @@ type LevelTier struct {
 	// ErrorGuard is the line pattern kept hot whatever its level.
 	ErrorGuard string `json:"error_guard"`
 	// Monthly is what the tier saves a month at the stream's price: the
-	// bytes below warn leave the hot tier. An upper bound: record lines
-	// and the guard's lines at those levels stay.
+	// bytes below warn leave the hot tier. Record events, which the
+	// writer keeps hot, count apart ("record:" levels, never below warn).
+	// Still an upper bound for the guard's lines at those levels.
 	Monthly float64 `json:"monthly_saving"`
 	Held    string  `json:"held,omitempty"`
 	// refs are the readers' consumer IDs, for the recommendation's
