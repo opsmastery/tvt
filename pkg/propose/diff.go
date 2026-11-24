@@ -125,9 +125,11 @@ func lineOps(a, b []string) []lineOp {
 	var lcs [][]int
 	n, m := len(am), len(bm)
 	if n < maxLCSSide && m < maxLCSSide && n*m <= maxLCSCells {
-		lcs = make([][]int, n+1)
+		// The guard above already rules out overflow; the int64 sizes say
+		// so to static analysis (CodeQL go/allocation-size-overflow).
+		lcs = make([][]int, int64(n)+1)
 		for i := range lcs {
-			lcs[i] = make([]int, m+1)
+			lcs[i] = make([]int, int64(m)+1)
 		}
 		for i := len(am) - 1; i >= 0; i-- {
 			for j := len(bm) - 1; j >= 0; j-- {
