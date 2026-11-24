@@ -95,6 +95,15 @@ func splitLines(b []byte) []string {
 	return out
 }
 
+// maxLCSCells bounds the LCS table in lineOps (4M cells, about 32 MB of
+// ints): tvt's config edits stay far below it, and a pathological input
+// can't exhaust memory.
+const maxLCSCells = 1 << 22
+
+// maxLCSSide bounds each side of the table on its own, so the product in
+// lineOps can't overflow before it is compared with maxLCSCells.
+const maxLCSSide = 1 << 20
+
 // lineOps aligns a and b: the common prefix and suffix, then a longest
 // common subsequence of the middle (config edits are small, so the middle
 // is too).
@@ -108,17 +117,27 @@ func lineOps(a, b []string) []lineOp {
 		s++
 	}
 	am, bm := a[p:len(a)-s], b[p:len(b)-s]
-	// lcs[i][j]: LCS length of am[i:] and bm[j:].
-	lcs := make([][]int, len(am)+1)
-	for i := range lcs {
-		lcs[i] = make([]int, len(bm)+1)
-	}
-	for i := len(am) - 1; i >= 0; i-- {
-		for j := len(bm) - 1; j >= 0; j-- {
-			if am[i] == bm[j] {
-				lcs[i][j] = lcs[i+1][j+1] + 1
-			} else {
-				lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
+	// lcs[i][j]: LCS length of am[i:] and bm[j:]. The table is n*m cells,
+	// so a middle past the bounds skips it and is written as one
+	// replacement: every old line removed, then every new line added. That
+	// is still a correct diff, only a longer one. Each side is checked
+	// against maxLCSSide first, so n*m and the +1s can't overflow.
+	var lcs [][]int
+	n, m := len(am), len(bm)
+	if n < maxLCSSide && m < maxLCSSide && n*m <= maxLCSCells {
+		// The guard above already rules out overflow; the int64 sizes say
+		// so to static analysis (CodeQL go/allocation-size-overflow).
+		lcs = make([][]int, int64(n)+1)
+		for i := range lcs {
+			lcs[i] = make([]int, int64(m)+1)
+		}
+		for i := len(am) - 1; i >= 0; i-- {
+			for j := len(bm) - 1; j >= 0; j-- {
+				if am[i] == bm[j] {
+					lcs[i][j] = lcs[i+1][j+1] + 1
+				} else {
+					lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
+				}
 			}
 		}
 	}
@@ -131,10 +150,14 @@ func lineOps(a, b []string) []lineOp {
 	i, j := 0, 0
 	for i < len(am) || j < len(bm) {
 		switch {
-		case i < len(am) && j < len(bm) && am[i] == bm[j]:
+		case lcs != nil && i < len(am) && j < len(bm) && am[i] == bm[j]:
 			eq(am[i])
 			i, j = i+1, j+1
-		case j < len(bm) && (i == len(am) || lcs[i][j+1] >= lcs[i+1][j]):
+		case lcs == nil && i < len(am):
+			ops = append(ops, lineOp{'-', am[i], ai, bi})
+			ai++
+			i++
+		case j < len(bm) && (i == len(am) || lcs == nil || lcs[i][j+1] >= lcs[i+1][j]):
 			ops = append(ops, lineOp{'+', bm[j], ai, bi})
 			bi++
 			j++
