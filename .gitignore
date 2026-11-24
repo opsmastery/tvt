@@ -13,7 +13,7 @@
 /tvt.yaml
 *.db-shm
 *.db-wal
-# internal planning (schedules, partners, pricing) lives in claude.ai Docs, not the repo
+# internal planning (schedules, partners, pricing) stays out of the repo
 /docs/plan.md
 
 # local release-candidate download (checksums and signatures)

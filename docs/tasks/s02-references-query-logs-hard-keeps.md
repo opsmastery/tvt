@@ -4,7 +4,7 @@
 
 **Done when:** every dependency seeded in tvt-lab resolves to the right signal, no hard keep is misclassified (including the metric only a Grafana-managed alert reads and one only an SLO reads), and the Grafana Cloud adapters pass the same checks on the Cloud test stack.
 
-Written Nov 11, 2026 for a Claude Code session on the Mac (Go, module downloads and the live tvt-lab are there). Read `CLAUDE.md`, `docs/ROADMAP.md`, `docs/query-logs.md`, `docs/architecture.md` and ADRs 0005, 0007 and 0008 first.
+Written Nov 11, 2026 for a session on the Mac (Go, module downloads and the live tvt-lab are there). Read `CLAUDE.md`, `docs/ROADMAP.md`, `docs/query-logs.md`, `docs/architecture.md` and ADRs 0005, 0007 and 0008 first.
 
 **Rules for every item:** one branch and one PR per numbered item, `--base main`. Tests first or alongside. Keep the read-only guarantee (`internal/testutil` fails any non-GET). Update `testdata/lab/ground-truth.yaml` when a lab seed changes. Update the Status section of `CLAUDE.md` in each PR. Nothing from internal planning (pricing, partners, schedules) goes in the repo.
 

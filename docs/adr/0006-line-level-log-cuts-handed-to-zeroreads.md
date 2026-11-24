@@ -6,7 +6,7 @@ Date: 2026-11-09 · Status: accepted
 
 Some of the most expensive unread logs are not whole streams but patterns inside a stream that is otherwise used: successful health checks (`route=/healthz status=200`) mixed into an ingress or API stream, for example. The tvt-lab `/healthz` scenario seeds exactly this case. There, the success lines are about 64% of the info stream's bytes.
 
-Cutting them safely is a different problem from tvt's. It needs per-template proof that no alert, dashboard or query line filter can match the dropped lines, plus Loki regex-dialect handling and runtime tests of the generated filter. [zeroreads](https://github.com/Bisman-Singh/zeroreads) (Apache 2.0) already does this and is well tested (see the [comparison](https://claude.ai/artifact/7CHyVw2724T9u1PQSbfSGv)). ADR 0005's extractor deliberately skips line filters.
+Cutting them safely is a different problem from tvt's. It needs per-template proof that no alert, dashboard or query line filter can match the dropped lines, plus Loki regex-dialect handling and runtime tests of the generated filter. [zeroreads](https://github.com/Bisman-Singh/zeroreads) (Apache 2.0) already does this and is well tested. ADR 0005's extractor deliberately skips line filters.
 
 ## Decision
 
