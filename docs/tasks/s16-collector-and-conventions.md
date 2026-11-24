@@ -6,7 +6,7 @@
 
 ## Before you start
 
-Continuous-mode work pulled forward from the roadmap's "Next" section; it starts once the MVP's code is complete. All findings are report only with ready-to-apply snippets: tvt never edits a rule, and every signal an alert reads stays a hard keep. Read `CLAUDE.md`, `docs/tasks/README.md` and `docs/architecture.md` first.
+Continuous-mode work pulled forward from the roadmap's "Next" section; it starts once the MVP's code is complete. All findings are report only with ready-to-apply snippets: tvt never edits a rule, and every signal an alert reads stays a hard keep. Read `docs/tasks/README.md` and `docs/architecture.md` first.
 
 - ADR 0012's OTTL reading (S8 item 8).
 - tvt-lab's S16 seeds (`lab-backlog.md`).

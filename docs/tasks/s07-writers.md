@@ -6,7 +6,7 @@
 
 ## Before you start
 
-Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 0006 and 0007 first. The only writes tvt makes are Git branches and PRs in mapped pipeline repos; every backend stays read-only.
+Read `docs/tasks/README.md`, `docs/architecture.md` and ADRs 0003, 0006 and 0007 first. The only writes tvt makes are Git branches and PRs in mapped pipeline repos; every backend stays read-only.
 
 Part of the MVP (S7–S12). The MVP is done when `v0.1.0-rc1` is tagged; on the lab, `tvt propose` opens a draft PR for a seeded drop, `tvt check` passes it and fails a PR that would break any hard keep or record, the PR leaves draft only after a recorded owner confirmation, and the next `tvt scan` records the measured saving in the ledger.
 
@@ -18,7 +18,7 @@ Part of the MVP (S7–S12). The MVP is done when `v0.1.0-rc1` is tagged; on the 
 - Done Nov 16: ADR 0011, records as a protected class, approvals bound to an evidence hash, and the expected end state on recommendations.
 - ADR 0012, reading existing OTTL: accepted Nov 16 as a narrow extractor. Before S8, collect the OTTL corpus and prototype the extractor; below 95% of statements recognized, the ADR reopens. OTTL is v1 from opentelemetry-collector-contrib v0.164.0: the language reference (paths, literals, operators, function calls, `where` clauses), the standard functions and the Go API are frozen for 1.x. Decide between importing contrib's `pkg/ottl` parser (Apache 2.0; measure the dependency weight as spike 3 did for Loki) and a narrow extractor for paths and the editors that change them. Lambda functions, experimental `xottl` functions and `xprofile` are outside the guarantee.
 - Done Nov 17: tvt-lab's S7 seeds (tvt-lab #27–#30): Fluent Bit owns the shop's debug stream, Alloy renames `shop_search_queries_total` to `shop_search_requests_total` and has a `sys.env` rule on the span path, an OTel Collector (contrib 0.165.0) carries a synthetic coding agent's telemetry, and ground truth has `rewrites:`, `genai_agent:` and `records:`. The lab now has four pipeline kinds, all inside tvt-lab, so `propose` opens its draft PRs there.
-- Done Nov 17 (benchmark state `writers`; the older states stay as they are): first S7 step: recapture the lab fixtures and copy tvt-lab's `ground-truth.yaml` into `testdata/lab/`, and add the new pipelines (`fluentbit-shop-debug`, `otelcol-agent`) and `records:` selectors to the lab `tvt.yaml`. Any window covering Nov 16 07:00 to Nov 17 02:07 UTC has a hole: the lab VM's disk was full (tvt-lab `CLAUDE.md`).
+- Done Nov 17 (benchmark state `writers`; the older states stay as they are): first S7 step: recapture the lab fixtures and copy tvt-lab's `ground-truth.yaml` into `testdata/lab/`, and add the new pipelines (`fluentbit-shop-debug`, `otelcol-agent`) and `records:` selectors to the lab `tvt.yaml`. Any window covering Nov 16 07:00 to Nov 17 02:07 UTC has a hole: the lab VM's disk was full.
 - Collector templates use the current component names: contrib 0.165 warns on `otlphttp`, `prometheusremotewrite` and `deltatocumulative` (now `otlp_http`, `prometheus_remote_write`, `delta_to_cumulative`). Reading existing configs must accept both.
 
 ## Must have (in this order)

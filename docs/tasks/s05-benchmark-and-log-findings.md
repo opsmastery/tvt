@@ -4,7 +4,7 @@
 
 **Done when:** the benchmark baseline is recorded, and a deliberately broken parser change fails CI.
 
-Read `CLAUDE.md`, `docs/tasks/README.md`, `docs/architecture.md` and ADR 0006 first.
+Read `docs/tasks/README.md`, `docs/architecture.md` and ADR 0006 first.
 
 ## Before you start
 

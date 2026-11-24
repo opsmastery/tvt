@@ -18,3 +18,5 @@
 
 # local release-candidate download (checksums and signatures)
 /rc1/
+# local working notes for coding sessions, kept out of the repo
+CLAUDE.md

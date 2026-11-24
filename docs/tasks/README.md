@@ -29,12 +29,12 @@ Every task file follows the same shape, so status can be read the same way every
 - **Top of the file:** `# SNN: theme`, then a `**Status:**` line, then a `**Done when:**` line, before anything else.
 - **Status values:** Planned, Next, In progress, or Done with the date and the PRs. Open carry-overs are named on the same line ("Done Nov 16; open: items 8–10").
 - **Sections:** `## Before you start` (what to read and what must be merged first), `## Must have (in this order)`, `## Should have`, in that order. Sprint-specific sections (Grafana Cloud, groundwork for the next sprint) go after them.
-- **Items:** numbered, one bold sentence first, then a short done note when it applies ("Done Nov 17 for patches; open: PRs"), then the spec. What shipped in detail is recorded in `CLAUDE.md`'s Status section, not repeated here.
+- **Items:** numbered, one bold sentence first, then a short done note when it applies ("Done Nov 17 for patches; open: PRs"), then the spec. What shipped in detail is recorded in the PRs and release notes, not repeated here.
 - **No schedule.** Done dates are history and stay. Planned dates, partners and pricing stay out of the repo.
 - **The table above** is the index. Change a sprint's row in the same PR that changes its file's Status line.
 
 Lab seeds for every sprint are collected in [lab-backlog.md](lab-backlog.md), so tvt-lab and its `ground-truth.yaml` can run a sprint ahead of the code.
 
-**Rules for every item:** one branch and one PR per numbered item, `--base main`. Tests first or alongside. Keep the read-only guarantee against backends (`internal/testutil` fails any non-GET); the only writes are Git branches and PRs in mapped pipeline repos. Update `testdata/lab/ground-truth.yaml` when a lab seed changes. Update the Status section of `CLAUDE.md` in each PR. Nothing from internal planning (pricing, partners, schedules) goes in the repo.
+**Rules for every item:** one branch and one PR per numbered item, `--base main`. Tests first or alongside. Keep the read-only guarantee against backends (`internal/testutil` fails any non-GET); the only writes are Git branches and PRs in mapped pipeline repos. Update `testdata/lab/ground-truth.yaml` when a lab seed changes. Nothing from internal planning (pricing, partners, schedules) goes in the repo.
 
 **Never cut `check`.** It is the safety promise. When a sprint runs long, cut from its "should have" items, then push its last must-have to the next sprint.
