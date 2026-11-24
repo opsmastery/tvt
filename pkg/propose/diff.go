@@ -100,6 +100,10 @@ func splitLines(b []byte) []string {
 // can't exhaust memory.
 const maxLCSCells = 1 << 22
 
+// maxLCSSide bounds each side of the table on its own, so the product in
+// lineOps can't overflow before it is compared with maxLCSCells.
+const maxLCSSide = 1 << 20
+
 // lineOps aligns a and b: the common prefix and suffix, then a longest
 // common subsequence of the middle (config edits are small, so the middle
 // is too).
@@ -113,16 +117,17 @@ func lineOps(a, b []string) []lineOp {
 		s++
 	}
 	am, bm := a[p:len(a)-s], b[p:len(b)-s]
-	// lcs[i][j]: LCS length of am[i:] and bm[j:]. The table is
-	// len(am)*len(bm) cells, so a middle past maxLCSCells skips it and is
-	// written as one replacement: every old line removed, then every new
-	// line added. That is still a correct diff, only a longer one. The
-	// check divides rather than multiplies, so it can't overflow.
+	// lcs[i][j]: LCS length of am[i:] and bm[j:]. The table is n*m cells,
+	// so a middle past the bounds skips it and is written as one
+	// replacement: every old line removed, then every new line added. That
+	// is still a correct diff, only a longer one. Each side is checked
+	// against maxLCSSide first, so n*m and the +1s can't overflow.
 	var lcs [][]int
-	if len(am) == 0 || len(bm) == 0 || len(am) <= maxLCSCells/len(bm) {
-		lcs = make([][]int, len(am)+1)
+	n, m := len(am), len(bm)
+	if n < maxLCSSide && m < maxLCSSide && n*m <= maxLCSCells {
+		lcs = make([][]int, n+1)
 		for i := range lcs {
-			lcs[i] = make([]int, len(bm)+1)
+			lcs[i] = make([]int, m+1)
 		}
 		for i := len(am) - 1; i >= 0; i-- {
 			for j := len(bm) - 1; j >= 0; j-- {
