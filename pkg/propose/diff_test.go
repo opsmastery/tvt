@@ -1,6 +1,7 @@
 package propose
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,5 +60,29 @@ func TestDiff(t *testing.T) {
 	}
 	if d := Diff("f", []byte("same\n"), []byte("same\n")); d != "" {
 		t.Errorf("equal inputs: %q", d)
+	}
+}
+
+// A middle too large for the LCS table becomes one replacement hunk that
+// still applies: old lines out, new lines in, context kept.
+func TestDiffLargeMiddleIsBounded(t *testing.T) {
+	var old, new strings.Builder
+	old.WriteString("head\n")
+	new.WriteString("head\n")
+	for i := 0; i < 3000; i++ {
+		fmt.Fprintf(&old, "old %d\n", i)
+		fmt.Fprintf(&new, "new %d\n", i)
+	}
+	old.WriteString("tail\n")
+	new.WriteString("tail\n")
+	d := Diff("big.yaml", []byte(old.String()), []byte(new.String()))
+	if !strings.Contains(d, "@@ -1,3002 +1,3002 @@\n head\n-old 0\n") {
+		t.Fatalf("unexpected hunk header or start:\n%.200s", d)
+	}
+	if strings.Count(d, "\n-old ") != 3000 || strings.Count(d, "\n+new ") != 3000 {
+		t.Fatal("every old line should be removed and every new line added")
+	}
+	if !strings.HasSuffix(d, "+new 2999\n tail\n") {
+		t.Fatalf("diff should end with the last new line and the tail context:\n%s", d[len(d)-80:])
 	}
 }
