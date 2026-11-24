@@ -3,8 +3,8 @@ package report
 import (
 	"sort"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/score"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/score"
 )
 
 // Unowned names the service of signals no tvt.yaml owner claims.

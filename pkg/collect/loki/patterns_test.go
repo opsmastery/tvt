@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/internal/testutil"
 )
 
 // The lab's warn stream, recorded Nov 15 (testdata/bench/before): the

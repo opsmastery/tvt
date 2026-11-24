@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/check"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/check"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // TestPatchedMovesAndDeletes: in --patch mode, a patch that moves a

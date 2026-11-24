@@ -41,7 +41,7 @@ jobs:
         run: |
           ls -la dist/checksums.txt*
           cosign verify-blob --bundle dist/checksums.txt.sigstore.json \
-            --certificate-identity-regexp 'https://github.com/Opsmastery-Summit/tvt/' \
+            --certificate-identity-regexp 'https://github.com/opsmastery/tvt/' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             dist/checksums.txt
           (cd dist && sha256sum --ignore-missing -c checksums.txt)

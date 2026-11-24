@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/safe"
-	"github.com/Opsmastery-Summit/tvt/pkg/check"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/internal/safe"
+	"github.com/opsmastery/tvt/pkg/check"
+	"github.com/opsmastery/tvt/pkg/report"
 	"go.yaml.in/yaml/v3"
 )
 

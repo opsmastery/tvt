@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // ScanCosts is one stored scan's costs, for the ledger's before and after

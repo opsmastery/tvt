@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/propose"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/propose"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // TestTenantTier: check judges remote_write drops (it read only scrape

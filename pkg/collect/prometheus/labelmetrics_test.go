@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/internal/testutil"
 )
 
 // labelServer answers label values and, per match[]={l="v"}, metric names,

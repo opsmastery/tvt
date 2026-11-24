@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/scan"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/scan"
 )
 
 // Unmapped is a row's pipeline when no single pipeline claims its signal

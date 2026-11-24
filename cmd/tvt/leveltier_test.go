@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/config"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/config"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // TestProposeLevelTier: a level_tier recommendation (S10 item 3) goes
@@ -63,11 +63,11 @@ func TestProposeLevelTier(t *testing.T) {
 		pd := filepath.Join(dir, "p")
 		os.RemoveAll(pd)
 		o := proposeOptions{DB: db, Config: cfg, Report: rj, Output: "patch", Dir: pd,
-			Checkouts: checkoutFlag{"github.com/Opsmastery-Summit/tvt-lab": checkout}, Validate: "off"}
+			Checkouts: checkoutFlag{"github.com/opsmastery/tvt-lab": checkout}, Validate: "off"}
 		if err := runPropose(context.Background(), o, &out); err != nil {
 			t.Fatalf("%v\n%s", err, out.String())
 		}
-		patch, _ := os.ReadFile(filepath.Join(pd, report.ManifestDir("github.com/Opsmastery-Summit/tvt-lab")+".patch"))
+		patch, _ := os.ReadFile(filepath.Join(pd, report.ManifestDir("github.com/opsmastery/tvt-lab")+".patch"))
 		return out.String(), string(patch)
 	}
 	withCold := strings.Replace(string(cfgSrc), "    version: 0.165.0", "    cold: file/cold\n    version: 0.165.0", 1)
@@ -127,11 +127,11 @@ func TestProposeLevelTierAlloy(t *testing.T) {
 	}
 	var out strings.Builder
 	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
-		Checkouts: checkoutFlag{"github.com/Opsmastery-Summit/tvt-lab": filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}
+		Checkouts: checkoutFlag{"github.com/opsmastery/tvt-lab": filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}
 	if err := runPropose(context.Background(), o, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	patch, _ := os.ReadFile(filepath.Join(dir, "p", report.ManifestDir("github.com/Opsmastery-Summit/tvt-lab")+".patch"))
+	patch, _ := os.ReadFile(filepath.Join(dir, "p", report.ManifestDir("github.com/opsmastery/tvt-lab")+".patch"))
 	for _, want := range []string{`loki.process "tvt_hot"`, `|~ \"(?i)(?:^|`, `loki.relabel "tvt_cold"`} {
 		if !strings.Contains(string(patch), want) {
 			t.Errorf("patch lacks %s\n%s\n%s", want, patch, out.String())
@@ -174,11 +174,11 @@ func TestProposeTenantTier(t *testing.T) {
 		pd := filepath.Join(dir, "p")
 		os.RemoveAll(pd)
 		o := proposeOptions{DB: db, Config: cfg, Report: rj, Output: "patch", Dir: pd,
-			Checkouts: checkoutFlag{"github.com/Opsmastery-Summit/tvt-lab": checkout}, Validate: "off"}
+			Checkouts: checkoutFlag{"github.com/opsmastery/tvt-lab": checkout}, Validate: "off"}
 		if err := runPropose(context.Background(), o, &out); err != nil {
 			t.Fatalf("%v\n%s", err, out.String())
 		}
-		patch, _ := os.ReadFile(filepath.Join(pd, report.ManifestDir("github.com/Opsmastery-Summit/tvt-lab")+".patch"))
+		patch, _ := os.ReadFile(filepath.Join(pd, report.ManifestDir("github.com/opsmastery/tvt-lab")+".patch"))
 		return out.String(), string(patch)
 	}
 	withTenant := string(cfgSrc) + "\ntiers:\n  dormant_tenant: tvt-dormant\n"
@@ -231,11 +231,11 @@ func TestProposeAlloyTenantTier(t *testing.T) {
 	var out strings.Builder
 	pd := filepath.Join(dir, "p")
 	o := proposeOptions{DB: db, Config: cfg, Report: rj, Output: "patch", Dir: pd,
-		Checkouts: checkoutFlag{"github.com/Opsmastery-Summit/tvt-lab": checkout}, Validate: "off"}
+		Checkouts: checkoutFlag{"github.com/opsmastery/tvt-lab": checkout}, Validate: "off"}
 	if err := runPropose(context.Background(), o, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	patch, _ := os.ReadFile(filepath.Join(pd, report.ManifestDir("github.com/Opsmastery-Summit/tvt-lab")+".patch"))
+	patch, _ := os.ReadFile(filepath.Join(pd, report.ManifestDir("github.com/opsmastery/tvt-lab")+".patch"))
 	for _, want := range []string{`+    name    = "tvt-dormant"`, `+      "X-Scope-OrgID" = "tvt-dormant",`, `+      action        = "drop"`, `+      action        = "keep"`} {
 		if !strings.Contains(string(patch), want) {
 			t.Errorf("patch lacks %q\n%s\n%s", want, patch, out.String())
@@ -288,7 +288,7 @@ func TestProposeSkipsReadDrops(t *testing.T) {
 	os.WriteFile(rj, b, 0o644)
 	var out strings.Builder
 	o := proposeOptions{DB: db, Config: filepath.Join(dirs[st.Name], "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: filepath.Join(dir, "p"),
-		Checkouts: checkoutFlag{"github.com/Opsmastery-Summit/tvt-lab": filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}
+		Checkouts: checkoutFlag{"github.com/opsmastery/tvt-lab": filepath.Join(dirs[st.Name], "checkout")}, Validate: "off"}
 	if err := runPropose(context.Background(), o, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}

@@ -38,11 +38,11 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/Opsmastery-Summit/tvt/internal/version"
+	"github.com/opsmastery/tvt/internal/version"
 )
 
 // Scope is the instrumentation scope of every tracer and meter.
-const Scope = "github.com/Opsmastery-Summit/tvt"
+const Scope = "github.com/opsmastery/tvt"
 
 // MaxAttr caps a string attribute's length in characters.
 const MaxAttr = 512

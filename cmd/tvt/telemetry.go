@@ -9,8 +9,8 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/Opsmastery-Summit/tvt/internal/telemetry"
-	"github.com/Opsmastery-Summit/tvt/pkg/scan"
+	"github.com/opsmastery/tvt/internal/telemetry"
+	"github.com/opsmastery/tvt/pkg/scan"
 )
 
 // tracedScan runs one scan inside the tvt.scan span and records the run's

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // Sprint 2 item 17: a MetricsQL query the PromQL parser rejects, on a

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // Expected is what should be true after a recommendation merges (S9 item

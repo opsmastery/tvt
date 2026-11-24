@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/internal/safe"
+	"github.com/opsmastery/tvt/internal/safe"
 )
 
 // Branch is a change to push as a branch: Patch (git apply format,

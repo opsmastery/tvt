@@ -9,7 +9,7 @@ postmortems:
 runbooks:
   fetch: false
   mirrors:
-    - url_prefix: https://github.com/Opsmastery-Summit/tvt-lab/blob/main/
+    - url_prefix: https://github.com/opsmastery/tvt-lab/blob/main/
       path: .
 # The lab's agents container (the sweep and finance agents) at its address
 # in this snapshot (the Prometheus query log records only an IP), so the
@@ -39,14 +39,14 @@ ownership:
 pipelines:
   - name: prometheus-scrape
     kind: prometheus
-    repo: github.com/Opsmastery-Summit/tvt-lab
+    repo: github.com/opsmastery/tvt-lab
     branch: main
     checkout: checkout   # tvt-lab's pipeline files at the capture (S7 item 9)
     files: [prometheus/scrape/lab.yml]
     handles: ['{job=~"prometheus|loki|grafana|alertmanager"}']
   - name: alloy-apps
     kind: alloy
-    repo: github.com/Opsmastery-Summit/tvt-lab
+    repo: github.com/opsmastery/tvt-lab
     branch: main
     checkout: checkout   # tvt-lab's pipeline files at the capture (S7 item 9)
     files: [alloy/config.alloy]
@@ -54,7 +54,7 @@ pipelines:
     cold: loki.echo.cold   # tvt-lab #35: the cold tier for Alloy stream reroutes
   - name: fluentbit-shop-debug
     kind: fluentbit
-    repo: github.com/Opsmastery-Summit/tvt-lab
+    repo: github.com/opsmastery/tvt-lab
     branch: main
     checkout: checkout   # tvt-lab's pipeline files at the capture (S7 item 9)
     files: [fluent-bit/fluent-bit.yaml]
@@ -62,7 +62,7 @@ pipelines:
     cold: cold   # tvt-lab #35: the file output aliased cold, match tvt.cold.*
   - name: otelcol-agent
     kind: otelcol
-    repo: github.com/Opsmastery-Summit/tvt-lab
+    repo: github.com/opsmastery/tvt-lab
     branch: main
     checkout: checkout   # tvt-lab's pipeline files at the capture (S7 item 9)
     files: [otelcol/config.yaml]

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/config"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/config"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 func write(t *testing.T, dir, name, body string) string {

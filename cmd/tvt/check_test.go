@@ -13,14 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/check"
-	"github.com/Opsmastery-Summit/tvt/pkg/config"
-	"github.com/Opsmastery-Summit/tvt/pkg/propose"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/check"
+	"github.com/opsmastery/tvt/pkg/config"
+	"github.com/opsmastery/tvt/pkg/propose"
+	"github.com/opsmastery/tvt/pkg/report"
 	"go.yaml.in/yaml/v3"
 )
 
-const labRepo = "github.com/Opsmastery-Summit/tvt-lab"
+const labRepo = "github.com/opsmastery/tvt-lab"
 
 // labManifest is tvt-lab's manifest from the writers-2 benchmark state
 // (the newest capture), with pipeline defs from its tvt-lab.yaml. That

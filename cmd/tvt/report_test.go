@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
-	"github.com/Opsmastery-Summit/tvt/pkg/score"
+	"github.com/opsmastery/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/score"
 )
 
 // TestReportLab: the JSON report of a lab scan recommends only candidates,
@@ -200,7 +200,7 @@ postmortems:
 runbooks:
   fetch: false
   mirrors:
-    - url_prefix: https://github.com/Opsmastery-Summit/tvt-lab/blob/main/
+    - url_prefix: https://github.com/opsmastery/tvt-lab/blob/main/
       path: %q
 ownership:
   owners:

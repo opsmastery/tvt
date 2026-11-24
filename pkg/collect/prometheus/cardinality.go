@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // tsdbStatus is the subset of /api/v1/status/tsdb that tvt uses.

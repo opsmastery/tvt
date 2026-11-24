@@ -18,13 +18,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/config"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
-	"github.com/Opsmastery-Summit/tvt/pkg/propose"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
-	"github.com/Opsmastery-Summit/tvt/pkg/validate"
-	"github.com/Opsmastery-Summit/tvt/pkg/vcs"
+	"github.com/opsmastery/tvt/pkg/config"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/parse"
+	"github.com/opsmastery/tvt/pkg/propose"
+	"github.com/opsmastery/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/validate"
+	"github.com/opsmastery/tvt/pkg/vcs"
 	"github.com/prometheus/common/model"
 )
 

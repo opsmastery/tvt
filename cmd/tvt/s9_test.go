@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/check"
-	"github.com/Opsmastery-Summit/tvt/pkg/config"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/check"
+	"github.com/opsmastery/tvt/pkg/config"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // TestS9DoneWhenOffline is S9's done-when on the writers-2 benchmark, with
@@ -44,7 +44,7 @@ func TestS9DoneWhenOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	checkout := filepath.Join(dir, "checkout")
 
 	// 1. tvt propose: the patch carries .tvt/proposal.json.

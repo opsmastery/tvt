@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
+	"github.com/opsmastery/tvt/pkg/parse"
 )
 
 // CardinalitySource reports active series per metric and per label.

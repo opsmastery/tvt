@@ -4,7 +4,7 @@ import (
 	"net/url"
 
 	"fmt"
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 	"io"
 	"net/http"
 	"strings"

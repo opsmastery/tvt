@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/pkg/report"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -45,7 +45,7 @@ func TestProtectionManifest(t *testing.T) {
 			t.Fatalf("report: %v", err)
 		}
 		t.Log(strings.SplitN(out.String(), "\n", 2)[0])
-		path := filepath.Join(dir, report.ManifestDir("github.com/Opsmastery-Summit/tvt-lab"), ".tvt", "protect.json")
+		path := filepath.Join(dir, report.ManifestDir("github.com/opsmastery/tvt-lab"), ".tvt", "protect.json")
 		b, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("manifest: %v", err)
@@ -60,7 +60,7 @@ func TestProtectionManifest(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m.Version != report.ManifestVersion || m.Repo != "github.com/Opsmastery-Summit/tvt-lab" {
+	if m.Version != report.ManifestVersion || m.Repo != "github.com/opsmastery/tvt-lab" {
 		t.Errorf("version %d repo %q", m.Version, m.Repo)
 	}
 	if want := []string{"alloy-apps", "fluentbit-shop-debug", "otelcol-agent", "prometheus-scrape"}; !slices.Equal(m.Pipelines, want) {
@@ -178,7 +178,7 @@ func TestRecords(t *testing.T) {
 	if err := runReport(context.Background(), o, &out); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(filepath.Join(dir, report.ManifestDir("github.com/Opsmastery-Summit/tvt-lab"), ".tvt", "protect.json"))
+	b, err := os.ReadFile(filepath.Join(dir, report.ManifestDir("github.com/opsmastery/tvt-lab"), ".tvt", "protect.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

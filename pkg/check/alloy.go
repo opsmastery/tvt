@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
 	"github.com/grafana/alloy/syntax/ast"
 	"github.com/grafana/alloy/syntax/parser"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // alloyEffects reads an Alloy pipeline: prometheus.relabel rules (as

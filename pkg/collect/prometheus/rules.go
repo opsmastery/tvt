@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 type rulesData struct {

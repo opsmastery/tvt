@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/validate"
+	"github.com/opsmastery/tvt/pkg/validate"
 )
 
 func TestPseudonymiseStatements(t *testing.T) {

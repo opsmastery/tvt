@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 // rulesPath is Grafana's ruler config API for Grafana-managed rules. Unlike

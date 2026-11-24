@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/telemetry"
-	"github.com/Opsmastery-Summit/tvt/internal/version"
+	"github.com/opsmastery/tvt/internal/telemetry"
+	"github.com/opsmastery/tvt/internal/version"
 )
 
 const (

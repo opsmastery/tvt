@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/httpx"
+	"github.com/opsmastery/tvt/internal/httpx"
 )
 
 // TestScanFailsOnUnavailableBackend: a backend that keeps failing fails

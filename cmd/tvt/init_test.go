@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/config"
+	"github.com/opsmastery/tvt/pkg/config"
 )
 
 // initServer answers the given GET paths with a status and body; anything

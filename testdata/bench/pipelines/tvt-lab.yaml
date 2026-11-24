@@ -9,7 +9,7 @@ postmortems:
 runbooks:
   fetch: false
   mirrors:
-    - url_prefix: https://github.com/Opsmastery-Summit/tvt-lab/blob/main/
+    - url_prefix: https://github.com/opsmastery/tvt-lab/blob/main/
       path: .
 # The lab's agents container (the sweep and finance agents) at its address
 # in this snapshot (the Prometheus query log records only an IP), so the
@@ -33,13 +33,13 @@ ownership:
 pipelines:
   - name: prometheus-scrape
     kind: prometheus
-    repo: github.com/Opsmastery-Summit/tvt-lab
+    repo: github.com/opsmastery/tvt-lab
     branch: main
     files: [prometheus/scrape/lab.yml]
     handles: ['{job=~"prometheus|loki|grafana|alertmanager"}']
   - name: alloy-apps
     kind: alloy
-    repo: github.com/Opsmastery-Summit/tvt-lab
+    repo: github.com/opsmastery/tvt-lab
     branch: main
     files: [alloy/config.alloy]
     handles: ['{job=~"shop|node"}', '{app="shop"}']

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/collect"
 )
 
 var _ collect.PatternSource = (*Client)(nil)

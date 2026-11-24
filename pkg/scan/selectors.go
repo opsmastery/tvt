@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/parse"
+	"github.com/opsmastery/tvt/pkg/parse"
 )
 
 // MaxSelectorLookups caps how many label-only selectors a scan resolves

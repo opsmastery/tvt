@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/propose"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/propose"
 )
 
 // TestHoldUnfollowableAll: a collector rule tvt can't follow (All) holds

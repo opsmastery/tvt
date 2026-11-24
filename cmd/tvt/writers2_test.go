@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
-	"github.com/Opsmastery-Summit/tvt/pkg/scan"
+	"github.com/opsmastery/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/scan"
 )
 
 // TestWriters2 scores the writer seeds of tvt-lab #35 and #36 on the
@@ -99,7 +99,7 @@ func TestWriters2(t *testing.T) {
 	os.WriteFile(rj, b, 0o644)
 	out := t.TempDir()
 	var log strings.Builder
-	const repo = "github.com/Opsmastery-Summit/tvt-lab"
+	const repo = "github.com/opsmastery/tvt-lab"
 	o := proposeOptions{DB: db, Config: filepath.Join(dir, "tvt-lab.yaml"), Report: rj, Output: "patch", Dir: out,
 		Checkouts: checkoutFlag{repo: filepath.Join(dir, "checkout")}, Validate: "off"}
 	if err := runPropose(context.Background(), o, &log); err != nil {

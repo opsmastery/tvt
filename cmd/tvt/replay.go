@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect/prometheus"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
-	"github.com/Opsmastery-Summit/tvt/pkg/propose"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/collect/prometheus"
+	"github.com/opsmastery/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/propose"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // replayTolerance is how far a value may move without a note (1%).

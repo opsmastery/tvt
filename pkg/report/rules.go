@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // Rule is one rule's cost and findings (S6 item 1, version 6). Report

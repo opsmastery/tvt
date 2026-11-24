@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/internal/testutil"
+	"github.com/opsmastery/tvt/internal/testutil"
 )
 
 // The lab's own /metrics: 45d retention, a 20GB size cap, ~0.62 bytes per

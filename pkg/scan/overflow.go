@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 // Overflow series (S6 item 5): an OpenTelemetry SDK or Collector past its

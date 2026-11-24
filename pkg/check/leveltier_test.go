@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/propose"
-	"github.com/Opsmastery-Summit/tvt/pkg/report"
+	"github.com/opsmastery/tvt/pkg/propose"
+	"github.com/opsmastery/tvt/pkg/report"
 )
 
 // TestLevelTier: check's guard for level tiers (S10 item 3). The tier

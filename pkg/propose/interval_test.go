@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/validate"
+	"github.com/opsmastery/tvt/pkg/validate"
 )
 
 func TestPrometheusIntervals(t *testing.T) {

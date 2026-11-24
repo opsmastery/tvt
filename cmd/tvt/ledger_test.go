@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/config"
+	"github.com/opsmastery/tvt/pkg/config"
 )
 
 // TestReadMerges: a pipeline checkout holding a committed

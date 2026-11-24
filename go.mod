@@ -1,4 +1,4 @@
-module github.com/Opsmastery-Summit/tvt
+module github.com/opsmastery/tvt
 
 go 1.27.3
 

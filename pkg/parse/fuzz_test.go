@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/parse/internal/corpus"
+	"github.com/opsmastery/tvt/pkg/parse/internal/corpus"
 )
 
 // FuzzLogQL: never panics; a query that doesn't parse still references

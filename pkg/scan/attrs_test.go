@@ -3,9 +3,9 @@ package scan
 import (
 	"testing"
 
-	"github.com/Opsmastery-Summit/tvt/pkg/collect"
-	"github.com/Opsmastery-Summit/tvt/pkg/cost"
-	"github.com/Opsmastery-Summit/tvt/pkg/graph"
+	"github.com/opsmastery/tvt/pkg/collect"
+	"github.com/opsmastery/tvt/pkg/cost"
+	"github.com/opsmastery/tvt/pkg/graph"
 )
 
 func TestStreamAttrs(t *testing.T) {

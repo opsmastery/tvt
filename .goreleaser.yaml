@@ -13,9 +13,9 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
       - -s -w
-      - -X github.com/Opsmastery-Summit/tvt/internal/version.Version={{.Version}}
-      - -X github.com/Opsmastery-Summit/tvt/internal/version.Commit={{.ShortCommit}}
-      - -X github.com/Opsmastery-Summit/tvt/internal/version.Date={{.CommitDate}}
+      - -X github.com/opsmastery/tvt/internal/version.Version={{.Version}}
+      - -X github.com/opsmastery/tvt/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/opsmastery/tvt/internal/version.Date={{.CommitDate}}
 
 archives:
   - formats: [tar.gz]
@@ -32,7 +32,7 @@ checksum:
 # Sigstore bundle: cosign v3 (cosign-installer v4) signs only in the bundle
 # format. Verify with:
 #   cosign verify-blob --bundle checksums.txt.sigstore.json \
-#     --certificate-identity-regexp 'https://github.com/Opsmastery-Summit/tvt/' \
+#     --certificate-identity-regexp 'https://github.com/opsmastery/tvt/' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
 # Releases up to v0.1.0-rc1 have checksums.txt.sig and .pem instead.
 signs:
