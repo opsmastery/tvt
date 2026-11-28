@@ -25,7 +25,7 @@ Download a release, verify its cosign signature, and put `tvt` on your PATH: [do
 | `tvt propose` | Config changes as a patch per pipeline repo, or a draft PR | [propose.md](docs/propose.md) |
 | `tvt check` | The CI gate: refuses a change that breaks an alert, SLO, viewed dashboard or record | [check.md](docs/check.md) |
 | `tvt confirm` | Records an owner's confirm, dismiss or keep on the PR | [confirm.md](docs/confirm.md) |
-| `tvt version` | The version, commit and build date | |
+| `tvt version` | The version, commit and build date | [version.md](docs/version.md) |
 
 ```sh
 tvt init --grafana https://grafana.example.com --prom https://prometheus.example.com --loki https://loki.example.com

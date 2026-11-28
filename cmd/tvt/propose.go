@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -69,6 +70,49 @@ func (c checkoutFlag) Set(v string) error {
 	}
 	c[repo] = path
 	return nil
+}
+
+// checkCheckouts refuses a --checkout whose repo no pipeline in tvt.yaml
+// names. tvt matches repos exactly, so a typo or an old org name would
+// otherwise skip every recommendation as "no --checkout" and still exit 0
+// with no patch (rc3's lab check, Nov 27: the lab's tvt.yaml kept the old
+// org name after the rename).
+func checkCheckouts(cfg *config.Config, checkouts checkoutFlag) error {
+	repos := map[string]bool{}
+	for _, p := range cfg.Pipelines {
+		if p.Repo != "" {
+			repos[p.Repo] = true
+		}
+	}
+	var bad []string
+	for repo := range checkouts {
+		if !repos[repo] {
+			bad = append(bad, repo)
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	slices.Sort(bad)
+	known := slices.Sorted(maps.Keys(repos))
+	var hints []string
+	for _, b := range bad {
+		for _, k := range known {
+			if strings.EqualFold(b, k) {
+				hints = append(hints, fmt.Sprintf("%s differs from tvt.yaml's %s only in case", b, k))
+			}
+		}
+	}
+	msg := fmt.Sprintf("--checkout names %s, which no pipeline in tvt.yaml uses", strings.Join(bad, ", "))
+	if len(known) == 0 {
+		msg += " (tvt.yaml has no pipeline repos)"
+	} else {
+		msg += " (its pipelines name " + strings.Join(known, ", ") + ")"
+	}
+	if len(hints) > 0 {
+		msg += "; " + strings.Join(hints, "; ")
+	}
+	return errors.New(msg)
 }
 
 func cmdPropose(args []string, stdout, stderr io.Writer) int {
@@ -140,6 +184,9 @@ func runPropose(ctx context.Context, o proposeOptions, out io.Writer) error {
 	}
 	cfg, err := config.Load(o.Config)
 	if err != nil {
+		return err
+	}
+	if err := checkCheckouts(cfg, o.Checkouts); err != nil {
 		return err
 	}
 	in, _, err := readLatest(ctx, o.DB)

@@ -4,7 +4,7 @@ tvt is one static binary for Linux, macOS and Windows (amd64 and arm64). Downloa
 
 ## 1. Download
 
-Pick the archive for your machine from the [releases page](https://github.com/opsmastery/tvt/releases), or use `gh` (it works while the repository is private, with your own GitHub login):
+Pick the archive for your machine from the [releases page](https://github.com/opsmastery/tvt/releases), or use `gh`:
 
 ```sh
 VERSION=0.1.0-rc1          # the tag without its leading v

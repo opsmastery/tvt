@@ -956,3 +956,34 @@ func TestProposeIntervals(t *testing.T) {
 		t.Errorf("node limit %+v", l)
 	}
 }
+
+// TestProposeUnknownCheckout: a --checkout whose repo no pipeline names is
+// refused, with the repos tvt.yaml does name and a case hint, instead of
+// skipping everything and writing no patch (rc3's lab check, Nov 27).
+func TestProposeUnknownCheckout(t *testing.T) {
+	bm, dirs := loadBenchmark(t)
+	var st benchState
+	for _, s := range bm.States {
+		if s.Name == "writers" {
+			st = s
+		}
+	}
+	if st.Name == "" {
+		t.Fatal("no writers state in benchmark.yaml")
+	}
+	db := benchDB(t, st, dirs[st.Name])
+	cfg := filepath.Join(dirs[st.Name], "tvt-lab.yaml")
+	checkout := filepath.Join(dirs[st.Name], "checkout")
+	o := proposeOptions{DB: db, Config: cfg, Output: "patch", Dir: t.TempDir(),
+		Checkouts: checkoutFlag{"github.com/OpsMastery/tvt-lab": checkout}, Validate: "off"}
+	var out strings.Builder
+	err := runPropose(context.Background(), o, &out)
+	if err == nil {
+		t.Fatalf("propose accepted a --checkout no pipeline names:\n%s", out.String())
+	}
+	for _, want := range []string{"github.com/OpsMastery/tvt-lab", "github.com/opsmastery/tvt-lab", "only in case"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q doesn't mention %q", err, want)
+		}
+	}
+}
