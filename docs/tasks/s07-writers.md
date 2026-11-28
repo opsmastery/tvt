@@ -1,6 +1,6 @@
 # S7: writers
 
-**Status:** In progress (PRs #93–#122). Every item's code is merged; item 2's spans moved to S8 item 13. Open: the "done when" on the live lab, which needs tvt-lab seeds (cold outputs, a clean `labeldrop` label, the S7 pipelines in the live `tvt.yaml`) and a run with `GITHUB_TOKEN`.
+**Status:** Done Nov 18 (PRs #93–#134): the done-when passed on the live lab (M7). Item 2's spans moved to S8 item 13.
 
 **Done when:** `propose` opens a draft PR against the lab pipelines repo for each writer kind.
 

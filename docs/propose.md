@@ -15,7 +15,7 @@ git -C ../observability apply ../tvt/proposals/github.com_acme_observability.pat
 |---|---|
 | `--db` | The scan database (default `tvt.db`). |
 | `--config` | `tvt.yaml`, required: its `pipelines:` say where each drop goes. |
-| `--checkout repo=path` | A pipeline repo's local checkout, with the repo named as in `tvt.yaml`. Repeat per repo. A pipeline with no checkout is skipped. |
+| `--checkout repo=path` | A pipeline repo's local checkout, with the repo named as in `tvt.yaml`. Repeat per repo. A pipeline with no checkout is skipped. A repo no pipeline names (a typo, an old org name; the match is exact) stops tvt before it writes anything, and the error lists the repos `tvt.yaml` does name. |
 | `--report` | The reviewed report JSON. It must be of the database's latest scan; without it, tvt builds the report from the database (all recommendations, no `--top` cut). |
 | `--output` | `patch` (default), or `pr`: the patches, then for each repo a branch `tvt/propose-scan-N` (N: the scan) pushed from its `--checkout` and a draft pull request (see Pull requests below). |
 | `--github-api` | The GitHub API root for `--output pr` (default `https://api.github.com`; GitHub Enterprise: `https://HOST/api/v3`). |

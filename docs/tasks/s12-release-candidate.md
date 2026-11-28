@@ -1,6 +1,6 @@
 # S12: release candidate
 
-**Status:** Done (Nov 21), except two clean-machine checks that need Jason (below). `v0.1.0-rc1` is tagged and released. Items 1 to 6 are done:
+**Status:** Done (Nov 21) for rc1, except two clean-machine checks that need Jason. `v0.1.0-rc2` followed on Nov 23. `v0.1.0-rc3` comes next from main, because the org rename changed the module path and the signing identity; the two checks run on rc3, and v0.1.0 is tagged on the same commit. Items 1 to 6 are done:
 
 - **Item 1 (#170).** Reproducible builds: `-trimpath`, and the commit's time in `mod_timestamp`, `version.Date` and archive mtimes. CI's `reproducible` job builds every target twice from two checkout paths and diffs the hashes. Dependabot runs weekly for Go modules and actions. The release checklist is `docs/release.md`. Cosign signing, govulncheck and gitleaks were already in place.
 - **Item 2 (#170).** `SECURITY.md` and `docs/install.md`.
@@ -11,9 +11,7 @@
 
 Sprint 2 item 10's `tvt init` is #176. Item 8 (more Grafana evidence) is still open.
 
-Two Dependabot PRs wait:
-- #173 bumps `prometheus/common` to v0.74.0, which raises the `go` directive to 1.27.3, against ADR 0004's Go 1.26 floor.
-- #172 moves the actions to new majors, including cosign-installer v4. The release path isn't exercised in PR CI, so it waits until after the tag.
+The two Dependabot PRs that waited at rc1 landed before rc2: #181 raised the Go minimum to 1.27 for `prometheus/common` v0.74, and #182 took #172's action bumps, with a release dry run on every PR that touches the release path.
 
 **The rc1 release (Nov 21), checked by docs/install.md and docs/release.md:**
 
@@ -25,6 +23,19 @@ Two Dependabot PRs wait:
 Still open, for Jason:
 - A **fresh macOS user**: creating an account is a system change.
 - **Opening the HTML report in a browser** on both machines: the pages were written and are in `~/rc1-verify` on the Mac mini (`report-mac.html`, `report-linux.html`), but nobody has looked at them yet.
+
+**rc2 (Nov 23).** Tagged before the org rename. The release test plan passed on the lab and the Grafana Cloud test stack, except R3 and R4 (the clean-machine installs). The org rename then rewrote main's history, so rc2's commit is not an ancestor of main.
+
+**Since rc2, on main:** the module path is `github.com/opsmastery/tvt` and the cosign identity names `opsmastery/tvt` (#208), docs cleanup (#209), CODEOWNERS (#210), and a bound on the diff's LCS table from code scanning (#211). The repo is public, so `go install` needs no `GOPRIVATE`.
+
+**rc3 checks before the tag (Nov 27, main at 03b5f3a):**
+
+- main is green on every job, and R1's release dry run passed on #208, the last PR to touch the release path.
+- `make bench` passes; the baseline hasn't changed since rc2.
+- R8: every flag in each command's `-h` is on its page. `version` had no page; `docs/version.md` adds it.
+- R4 of the checklist, `lab-pr.sh patch` on the Mac mini with a main build (03b5f3a): the scan and report ran clean, every evidence gap was already acknowledged (32), and nothing new. The patch step wrote nothing at first, and still said it had: tvt-lab's `tvt.yaml` kept the old org in its four `repo:` lines, so the script's `--checkout github.com/opsmastery/tvt-lab` matched no pipeline and all 1,252 recommendations were skipped as "no --checkout", with exit 0. Fixed on both sides: tvt-lab #55 renames the repos, and `tvt propose` now refuses a `--checkout` no pipeline names, listing the repos `tvt.yaml` does name (with a hint when only the case differs). Rerun with the old name mapped: 1,164 drops written, all four configs valid in their own validators (Prometheus v3.5.0, Alloy v1.10.0, Fluent Bit 5.2.0, Collector contrib 0.165.0), and `tvt check --skip-confirmation` passes the patch. Without the flag, check refuses all 1,161 drops, each as `unconfirmed_drop`, as it should with no owner confirms recorded.
+
+**Still open:** tag rc3; R2 (archives, checksums and Sigstore bundle), R6 (rebuild one binary, same SHA-256), R7 (`go install ...@latest` without `GOPRIVATE`); R3, a fresh macOS user, and R4, a fresh Ubuntu VM (Jason); then v0.1.0 on the same commit, with the machines and results recorded here.
 
 **Done when:** `v0.1.0-rc1` is tagged, and the install guide works on a clean machine.
 
